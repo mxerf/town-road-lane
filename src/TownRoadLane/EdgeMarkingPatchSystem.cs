@@ -9,38 +9,35 @@ using Unity.Entities;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Makes ordinary city roads (3 m car lanes) get the curb-side edge marking line,
-    /// the same way highway roads do.
+    /// Makes ordinary city roads (3 m car lanes) get the curb-side edge marking line, the same way highway roads do.
     ///
-    /// In CS2 the "this marking line attaches to those lane prefabs" relation is declared
-    /// on the marking prefab itself via its <c>SecondaryLane</c> component (m_LeftLanes / m_RightLanes).
-    /// The highway edge line ('EU Highway Edge Line' / 'NA Highway Edge Line') lists only the
-    /// 'Highway Drive Lane *' prefabs, so the city drive lane 'Car Drive Lane 3' never gets it.
-    /// We simply append 'Car Drive Lane 3' (and a couple of its variants) to those edge-line
-    /// prefabs' m_LeftLanes — mirroring exactly what is already there for 'Highway Drive Lane 3'
-    /// (which, notably, uses the very same 'Car Lane 3 Mesh', so the line geometry already fits a 3 m lane).
+    /// In CS2 the "this marking line attaches to those lane prefabs" relation is declared on the marking prefab via
+    /// its <c>SecondaryLane</c> component (m_LeftLanes / m_RightLanes). The vanilla highway edge line
+    /// ('EU Highway Edge Line' / 'NA Highway Edge Line') lists only the 'Highway Drive Lane *' prefabs, so the city
+    /// drive lane 'Car Drive Lane 3' never gets it.
     ///
-    /// SecondaryLaneSystem then renders the edge line along the curb and handles parking pockets,
-    /// sidewalk insets, intersections and merges by itself — no extra work needed.
+    /// We do NOT modify the vanilla edge-line prefab — re-baking it (which is what makes the change take effect on
+    /// existing roads) would also disturb every road using 'Highway Drive Lane *', and some unusual Road Builder
+    /// roads (e.g. a highway-based RB road with angled parking) crash SecondaryLaneSystem when re-laid-out. Instead
+    /// we CLONE the vanilla edge line into our own prefab whose only host is 'Car Drive Lane 3', then re-bake the
+    /// clone — that only touches roads using 'Car Drive Lane 3' (ordinary city Small/Medium roads), not highways.
+    /// The clone reuses the same 'Car Lane 3 Mesh', so the line geometry already fits a 3 m lane; SecondaryLaneSystem
+    /// then renders it along the curb and handles parking pockets / sidewalk insets / intersections by itself.
     /// </summary>
     public partial class EdgeMarkingPatchSystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;
 
-        // Marking prefabs that draw the curb-side edge line (one per region theme; the game picks via ThemeObject).
-        private static readonly string[] kEdgeLinePrefabNames = { "EU Highway Edge Line", "NA Highway Edge Line" };
-
-        // City drive-lane prefabs that should now also get the edge line, with the requirement flags to use.
-        // Mirrors the existing 'Highway Drive Lane 3' entries on the edge-line prefabs:
-        //   - one plain entry requiring Safe
-        //   - one entry requiring Merge + SafeMaster (so it continues correctly through merges)
-        // Only the plain 'Car Drive Lane 3' for now — the '- Tram' / 'Public Transport Lane 3' variants were also
-        // hosted, but Road Builder roads can build on those with configs that crash SecondaryLaneSystem when the
-        // edge line is laid out; narrowing to the common case (ordinary city Small/Medium roads use 'Car Drive Lane 3').
-        private static readonly string[] kCityLaneNames =
+        // Vanilla curb-side edge-line prefabs (one per region theme; the game picks via ThemeObject). We clone these.
+        private static readonly (string vanilla, string clone)[] kEdgeLines =
         {
-            "Car Drive Lane 3",
+            ("EU Highway Edge Line", "TownRoadLane EU City Edge Line"),
+            ("NA Highway Edge Line", "TownRoadLane NA City Edge Line"),
         };
+
+        // City drive-lane prefab(s) our cloned edge line hosts. Only the plain 'Car Drive Lane 3' — the '- Tram' /
+        // 'Public Transport Lane 3' variants are intentionally excluded (kept the blast radius small).
+        private const string kCityLaneName = "Car Drive Lane 3";
 
         private PrefabSystem m_PrefabSystem;
         private EntityQuery m_LanePrefabQuery;
@@ -80,95 +77,56 @@ namespace TownRoadLane
 
         private void Patch()
         {
-            // Resolve all the NetLanePrefab instances we need, by name, from the loaded prefab set.
+            // Resolve the vanilla edge-line prefabs and the city drive lane, by name.
+            NetLanePrefab cityLane = null;
             var byName = new Dictionary<string, NetLanePrefab>();
-            var wanted = new HashSet<string>(kEdgeLinePrefabNames);
-            foreach (var n in kCityLaneNames) wanted.Add(n);
+            var wanted = new HashSet<string> { kCityLaneName };
+            foreach (var (v, _) in kEdgeLines) wanted.Add(v);
 
             var entities = m_LanePrefabQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < entities.Length; i++)
             {
                 if (!m_PrefabSystem.TryGetPrefab<NetLanePrefab>(entities[i], out var lane) || lane == null) continue;
-                if (wanted.Contains(lane.name) && !byName.ContainsKey(lane.name))
-                    byName[lane.name] = lane;
+                if (wanted.Contains(lane.name) && !byName.ContainsKey(lane.name)) byName[lane.name] = lane;
             }
             entities.Dispose();
 
-            // Build the list of (city lane prefab, flags) entries to add.
-            var cityLanes = new List<NetLanePrefab>();
-            foreach (var n in kCityLaneNames)
+            if (!byName.TryGetValue(kCityLaneName, out cityLane) || cityLane == null)
             {
-                if (byName.TryGetValue(n, out var p) && p != null) cityLanes.Add(p);
-                else log.Warn($"city lane prefab '{n}' not found — skipping it");
-            }
-            if (cityLanes.Count == 0)
-            {
-                log.Warn("no city lane prefabs resolved; nothing to do");
+                log.Warn($"city lane prefab '{kCityLaneName}' not found — nothing to do");
                 return;
             }
 
-            int patched = 0;
-            foreach (var edgeName in kEdgeLinePrefabNames)
+            int made = 0;
+            foreach (var (vanillaName, cloneName) in kEdgeLines)
             {
-                if (!byName.TryGetValue(edgeName, out var edgePrefab) || edgePrefab == null)
+                if (!byName.TryGetValue(vanillaName, out var vanilla) || vanilla == null)
                 {
-                    log.Warn($"edge-line prefab '{edgeName}' not found — skipping");
+                    log.Warn($"edge-line prefab '{vanillaName}' not found — skipping");
                     continue;
                 }
-                if (!edgePrefab.TryGet<SecondaryLane>(out var sec))
+                if (!vanilla.TryGet<SecondaryLane>(out _))
                 {
-                    log.Warn($"'{edgeName}' has no SecondaryLane component — skipping");
+                    log.Warn($"'{vanillaName}' has no SecondaryLane component — skipping");
                     continue;
                 }
 
-                int added = AppendCityLanes(sec, cityLanes, edgeName);
-                if (added > 0)
+                var clone = m_PrefabSystem.DuplicatePrefab(vanilla, cloneName); // Clone + Remove<ObsoleteIdentifiers> + AddPrefab
+                if (!clone.TryGet<SecondaryLane>(out var sec))
                 {
-                    m_PrefabSystem.UpdatePrefab(edgePrefab);
-                    patched++;
-                    log.Info($"patched '{edgeName}': added {added} m_LeftLanes entries, queued UpdatePrefab");
+                    log.Warn($"clone '{cloneName}' lost its SecondaryLane component — skipping");
+                    continue;
                 }
+                // Our clone hosts ONLY the city drive lane (one plain {RequireSafe} entry), nothing else.
+                sec.m_LeftLanes = new[] { new SecondaryLaneInfo { m_Lane = cityLane, m_RequireSafe = true } };
+                sec.m_RightLanes = Array.Empty<SecondaryLaneInfo>();
+                sec.m_CrossingLanes = Array.Empty<SecondaryLaneInfo2>();
+                m_PrefabSystem.UpdatePrefab(clone); // re-bake → adds our clone to 'Car Drive Lane 3's SecondaryNetLane buffer
+                made++;
+                log.Info($"EdgeMarkingPatchSystem: created '{cloneName}' from '{vanillaName}', hosting '{kCityLaneName}'");
             }
 
-            log.Info($"EdgeMarkingPatchSystem: done, {patched} edge-line prefab(s) patched");
-        }
-
-        /// <summary>
-        /// Appends, for each city lane prefab, the single { RequireSafe } SecondaryLaneInfo entry — the basic one
-        /// 'Highway Drive Lane 3' uses on this edge line. (We used to also add { RequireMerge, RequireSafeMaster },
-        /// mirroring the highway one, but that pulled the edge line onto merge-point geometry of unusual roads which
-        /// could destabilise SecondaryLaneSystem; the plain Safe entry covers the common case.) Skips entries that
-        /// already exist. Returns the number of entries actually added.
-        /// </summary>
-        private int AppendCityLanes(SecondaryLane sec, List<NetLanePrefab> cityLanes, string edgeName)
-        {
-            var existing = sec.m_LeftLanes ?? Array.Empty<SecondaryLaneInfo>();
-
-            var toAdd = new List<SecondaryLaneInfo>();
-            foreach (var lane in cityLanes)
-            {
-                if (!HasEntry(existing, lane, safe: true, merge: false, safeMaster: false))
-                    toAdd.Add(new SecondaryLaneInfo { m_Lane = lane, m_RequireSafe = true });
-            }
-            if (toAdd.Count == 0) return 0;
-
-            var merged = new SecondaryLaneInfo[existing.Length + toAdd.Count];
-            Array.Copy(existing, merged, existing.Length);
-            for (int i = 0; i < toAdd.Count; i++) merged[existing.Length + i] = toAdd[i];
-            sec.m_LeftLanes = merged;
-            return toAdd.Count;
-        }
-
-        private static bool HasEntry(SecondaryLaneInfo[] arr, NetLanePrefab lane, bool safe, bool merge, bool safeMaster)
-        {
-            for (int i = 0; i < arr.Length; i++)
-            {
-                var e = arr[i];
-                if (e == null || e.m_Lane != lane) continue;
-                if (e.m_RequireSafe == safe && e.m_RequireMerge == merge && e.m_RequireSafeMaster == safeMaster)
-                    return true;
-            }
-            return false;
+            log.Info($"EdgeMarkingPatchSystem: done, {made} city edge-line prefab(s) created");
         }
     }
 }
