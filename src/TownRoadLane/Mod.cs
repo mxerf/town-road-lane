@@ -35,8 +35,15 @@ namespace TownRoadLane
             // Feature: markings along parallel street-parking zones.
             updateSystem.UpdateAt<ParkingMarkingPatchSystem>(SystemUpdatePhase.PrefabUpdate);
 
+            // Feature: per-segment "Lane Markings" road upgrade — creates the toolbar entry / upgrade prefab.
+            updateSystem.UpdateAt<MarkingUpgradePrefabSystem>(SystemUpdatePhase.PrefabUpdate);
+
             // Hot-reapply of the parking line style (triggered by the settings button). Idle until requested.
             updateSystem.UpdateAt<MarkingReapplySystem>(SystemUpdatePhase.Modification1);
+
+            // Per-segment "Lane Markings" upgrade — removes our markings on edges that carry the upgrade bit.
+            // Runs after ModificationBarrier4B has played back, so the sub-lanes SecondaryLaneSystem just created exist.
+            updateSystem.UpdateAt<MarkingSuppressSystem>(SystemUpdatePhase.Modification5);
         }
 
         public void OnDispose()
