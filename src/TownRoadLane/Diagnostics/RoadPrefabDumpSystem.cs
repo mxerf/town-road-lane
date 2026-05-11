@@ -84,6 +84,7 @@ namespace TownRoadLane.Diagnostics
 
             DumpLaneGeometryPrefabs();
             DumpParkingLanes();
+            DumpNetUpgrades();
             log.Info("=== RoadPrefabDumpSystem: done ===");
         }
 
@@ -161,6 +162,114 @@ namespace TownRoadLane.Diagnostics
                 }
                 log.Info(sb.ToString());
             }
+        }
+
+        /// <summary>
+        /// Dumps every NetUpgrade prefab (paint-only road decoration upgrades like grass / trees / lighting /
+        /// quay / sound barrier): its concrete prefab class, full ComponentBase list, the ECS component types on
+        /// the prefab entity (= the archetype), its PlaceableNetData (set/unset upgrade flags, placement flags),
+        /// its UIObject (group / priority / icon), and NetData flag masks. This is the template data we need to
+        /// build our own "Lane Markings" toolbar upgrade by cloning a suitable vanilla one.
+        /// </summary>
+        private void DumpNetUpgrades()
+        {
+            // Net upgrade prefabs are NetPrefab/RoadPrefab instances carrying a NetUpgrade component; once
+            // NetInitializeSystem has run they have PlaceableNetData. Scan everything with PlaceableNetData.
+            var q = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<PlaceableNetData>());
+            var entities = q.ToEntityArray(Unity.Collections.Allocator.Temp);
+            log.Info($"=== NetUpgrade prefabs: scanning {entities.Length} prefab entities with PlaceableNetData ===");
+            var sb = new StringBuilder();
+            int found = 0;
+            for (int i = 0; i < entities.Length; i++)
+            {
+                if (!m_PrefabSystem.TryGetPrefab<PrefabBase>(entities[i], out var prefab) || prefab == null) continue;
+                if (!prefab.TryGet<NetUpgrade>(out var upg)) continue;
+                found++;
+
+                sb.Clear();
+                sb.AppendLine();
+                sb.Append("NETUPGRADE '").Append(prefab.name).Append("'  class=").Append(prefab.GetType().Name)
+                  .Append("  standalone=").Append(upg.m_Standalone)
+                  .Append(" underground=").Append(upg.m_Underground)
+                  .Append("  setState=[").Append(Join(upg.m_SetState)).Append("]")
+                  .Append(" unsetState=[").Append(Join(upg.m_UnsetState)).Append("]");
+                sb.AppendLine();
+
+                // ComponentBase list on the prefab.
+                DumpComponents(sb, prefab, "  ");
+
+                // ECS component types on the prefab entity (= the archetype the prefab was given).
+                sb.Append("  archetype: ");
+                using (var types = EntityManager.GetComponentTypes(entities[i], Unity.Collections.Allocator.Temp))
+                {
+                    for (int t = 0; t < types.Length; t++) { if (t > 0) sb.Append(", "); sb.Append(types[t].GetManagedType()?.Name ?? types[t].ToString()); }
+                }
+                sb.AppendLine();
+
+                // PlaceableNetData.
+                var pnd = EntityManager.GetComponentData<PlaceableNetData>(entities[i]);
+                sb.Append("  PlaceableNetData: placementFlags=").Append(pnd.m_PlacementFlags)
+                  .Append("  setUpgradeFlags={G=").Append(pnd.m_SetUpgradeFlags.m_General)
+                  .Append(", L=").Append(pnd.m_SetUpgradeFlags.m_Left)
+                  .Append(", R=").Append(pnd.m_SetUpgradeFlags.m_Right).Append("}")
+                  .Append("  unsetUpgradeFlags={G=").Append(pnd.m_UnsetUpgradeFlags.m_General)
+                  .Append(", L=").Append(pnd.m_UnsetUpgradeFlags.m_Left)
+                  .Append(", R=").Append(pnd.m_UnsetUpgradeFlags.m_Right).Append("}");
+                sb.AppendLine();
+
+                // NetData flag masks (which composition bits this prefab "owns").
+                if (EntityManager.HasComponent<NetData>(entities[i]))
+                {
+                    var nd = EntityManager.GetComponentData<NetData>(entities[i]);
+                    sb.Append("  NetData: requiredLayers=").Append(nd.m_RequiredLayers)
+                      .Append("  generalFlagMask=").Append(nd.m_GeneralFlagMask)
+                      .Append("  sideFlagMask=").Append(nd.m_SideFlagMask);
+                    sb.AppendLine();
+                }
+
+                // UIObject (toolbar group / icon / priority).
+                if (prefab.TryGet<UIObject>(out var ui))
+                {
+                    sb.Append("  UIObject: group=").Append(ui.m_Group != null ? ui.m_Group.name : "<null>")
+                      .Append(" (").Append(ui.m_Group != null ? ui.m_Group.GetType().Name : "?").Append(")")
+                      .Append("  priority=").Append(ui.m_Priority)
+                      .Append("  icon=").Append(ui.m_Icon ?? "<null>")
+                      .Append("  isDebug=").Append(ui.m_IsDebugObject);
+                    sb.AppendLine();
+                }
+                else
+                {
+                    sb.Append("  UIObject: <none>").AppendLine();
+                }
+
+                AppendSource(sb, prefab);
+                log.Info(sb.ToString());
+            }
+            entities.Dispose();
+            log.Info($"=== NetUpgrade prefabs: {found} found ===");
+
+            // Also list all UI groups/categories that exist, so we can pick where to put our upgrade.
+            DumpUIGroups();
+        }
+
+        private void DumpUIGroups()
+        {
+            // Scan all prefabs for UIGroupPrefab subclasses (categories / menus).
+            var allPrefabs = GetEntityQuery(ComponentType.ReadOnly<PrefabData>());
+            var ents = allPrefabs.ToEntityArray(Unity.Collections.Allocator.Temp);
+            log.Info("=== UI groups / categories (for placing the upgrade toolbar entry) ===");
+            var sb = new StringBuilder();
+            for (int i = 0; i < ents.Length; i++)
+            {
+                if (!m_PrefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var p) || p == null) continue;
+                if (p is not UIGroupPrefab) continue;
+                sb.Clear();
+                sb.Append("UIGROUP '").Append(p.name).Append("'  class=").Append(p.GetType().Name);
+                if (p is UIAssetCategoryPrefab cat)
+                    sb.Append("  menu=").Append(cat.m_Menu != null ? cat.m_Menu.name : "<null>");
+                log.Info(sb.ToString());
+            }
+            ents.Dispose();
         }
 
         private void CollectParkingLaneNames(PrefabBase netGeom, HashSet<string> outNames, HashSet<NetSectionPrefab> visited)
