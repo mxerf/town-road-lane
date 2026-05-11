@@ -104,6 +104,18 @@ namespace TownRoadLane
                     if ((data.m_Flags.m_General & MarkingFlags.MarkingsOff) == 0) continue; // not a "markings off" composition
                     if (!m_Processed.Add(comp)) continue;                                   // already rewritten
 
+                    // Identify the road prefab this composition belongs to.
+                    Entity roadPrefab = EntityManager.HasComponent<PrefabRef>(comp) ? EntityManager.GetComponentData<PrefabRef>(comp).m_Prefab : Entity.Null;
+                    string roadName = "<?>"; bool roadIsRuntime = true;
+                    if (roadPrefab != Entity.Null && m_PrefabSystem.TryGetPrefab<PrefabBase>(roadPrefab, out var rp) && rp != null)
+                    { roadName = rp.name; roadIsRuntime = rp.asset == null; }
+                    log.Info($"[diag] markings-off composition for road '{roadName}' (runtime={roadIsRuntime}, flags G={data.m_Flags.m_General})");
+
+                    // Only substitute on vanilla/asset-backed roads. Roads generated at runtime by other mods
+                    // (Road Builder, etc.) may set the same high composition bit for their own purposes — substituting
+                    // their lanes would feed SecondaryLaneSystem an incompatible config and crash. Skip them.
+                    if (roadIsRuntime) { log.Info($"[diag] skipping substitution on runtime road '{roadName}'"); continue; }
+
                     var lanes = EntityManager.GetBuffer<NetCompositionLane>(comp);
                     int n = 0;
                     for (int j = 0; j < lanes.Length; j++)
