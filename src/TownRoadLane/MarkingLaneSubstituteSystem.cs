@@ -20,9 +20,13 @@ namespace TownRoadLane
     /// used only by such edges. Right after <see cref="NetCompositionSystem"/> bakes that composition's
     /// <c>NetCompositionLane</c> list (which contains the original city drive-lane prefabs) and before
     /// <see cref="Game.Net.LaneSystem"/> instantiates lanes from it, we rewrite the list: each original drive-lane
-    /// prefab → the matching "no-marking" clone (see <see cref="MarkingUpgradePrefabSystem"/>). The clone has an empty
-    /// <c>SecondaryNetLane</c> buffer, so SecondaryLaneSystem draws nothing next to it. Everything else about the
-    /// composition (pieces, widths, the lanes themselves) is unchanged, so nothing dangles — no crash.
+    /// prefab → the matching "no-marking" clone (see <see cref="MarkingUpgradePrefabSystem"/>).
+    ///
+    /// The clone is created with an empty <c>SecondaryNetLane</c> buffer (nothing references it). On our first run
+    /// we copy each original drive lane's <c>SecondaryNetLane</c> buffer into its clone, dropping only the entries
+    /// that point at OUR marking prefabs (the highway edge line + our parking line/end clones) — so the clone keeps
+    /// the vanilla center/divider/lane-separator markings and loses just ours. Everything else about the composition
+    /// (pieces, widths, the lanes themselves) is unchanged, so nothing dangles — no crash.
     ///
     /// Runs in <see cref="SystemUpdatePhase.Modification4"/>, after <see cref="NetCompositionSystem"/> and before
     /// <see cref="Game.Net.LaneSystem"/>. A composition entity is built once and cached, so each gets rewritten once
@@ -32,13 +36,17 @@ namespace TownRoadLane
     {
         private static readonly ILog log = Mod.log;
 
+        private PrefabSystem m_PrefabSystem;
         private EntityQuery m_CompositionQuery;
+        private EntityQuery m_LanePrefabQuery;
         private NativeParallelHashSet<Entity> m_Processed;
         private bool m_DisabledAnnounced;
+        private bool m_CloneBuffersFiltered;
 
         protected override void OnCreate()
         {
             base.OnCreate();
+            m_PrefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             m_Processed = new NativeParallelHashSet<Entity>(64, Allocator.Persistent);
             m_CompositionQuery = GetEntityQuery(new EntityQueryDesc
             {
@@ -46,6 +54,7 @@ namespace TownRoadLane
                 Any = new[] { ComponentType.ReadOnly<Created>(), ComponentType.ReadOnly<Updated>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>() },
             });
+            m_LanePrefabQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
             RequireForUpdate(m_CompositionQuery);
         }
 
@@ -83,6 +92,9 @@ namespace TownRoadLane
                 }
                 if (safeMap.Count == 0) return;
 
+                // Give each clone the vanilla part of its original's SecondaryNetLane buffer (once, when ready).
+                EnsureCloneBuffersFiltered(safeMap);
+
                 var comps = m_CompositionQuery.ToEntityArray(Allocator.Temp);
                 int rewrittenComps = 0, rewrittenLanes = 0;
                 for (int i = 0; i < comps.Length; i++)
@@ -112,6 +124,54 @@ namespace TownRoadLane
             {
                 log.Error(e, "MarkingLaneSubstituteSystem failed");
             }
+        }
+
+        /// <summary>
+        /// One-time: for each original drive lane that has a no-marking clone, copy its (now fully baked, including
+        /// our edge-line addition) <c>SecondaryNetLane</c> buffer into the clone, dropping the entries whose
+        /// <c>m_Lane</c> is one of our marking prefabs. After this the clone hosts all the vanilla markings the drive
+        /// lane normally has, minus ours.
+        /// </summary>
+        private void EnsureCloneBuffersFiltered(Dictionary<Entity, Entity> origToClone)
+        {
+            if (m_CloneBuffersFiltered) return;
+
+            // Resolve our marking prefab entities by name (the highway edge line if we extended it onto city roads,
+            // plus our parking line/end clones if parking markings are on).
+            var ourNames = new HashSet<string>();
+            if (Mod.Settings == null || Mod.Settings.EdgeLineEnabled)
+            { ourNames.Add("EU Highway Edge Line"); ourNames.Add("NA Highway Edge Line"); }
+            if (Mod.Settings == null || Mod.Settings.ParkingMarkingsEnabled)
+                foreach (var n in ParkingMarkingPatchSystem.CreatedPrefabNames) ourNames.Add(n);
+
+            var ourEntities = new HashSet<Entity>();
+            var ents = m_LanePrefabQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < ents.Length; i++)
+            {
+                if (!m_PrefabSystem.TryGetPrefab<NetLanePrefab>(ents[i], out var lane) || lane == null) continue;
+                if (ourNames.Contains(lane.name)) ourEntities.Add(ents[i]);
+            }
+            ents.Dispose();
+
+            int copiedTotal = 0, droppedTotal = 0, doneClones = 0;
+            foreach (var kv in origToClone)
+            {
+                var orig = kv.Key; var clone = kv.Value;
+                if (!EntityManager.HasBuffer<SecondaryNetLane>(orig) || !EntityManager.HasBuffer<SecondaryNetLane>(clone))
+                { log.Warn($"MarkingLaneSubstituteSystem: orig {orig.Index} or clone {clone.Index} has no SecondaryNetLane buffer — clone hosts nothing"); continue; }
+                var src = EntityManager.GetBuffer<SecondaryNetLane>(orig, isReadOnly: true);
+                var dst = EntityManager.GetBuffer<SecondaryNetLane>(clone);
+                dst.Clear();
+                int kept = 0, dropped = 0;
+                for (int i = 0; i < src.Length; i++)
+                {
+                    if (ourEntities.Contains(src[i].m_Lane)) { dropped++; continue; }
+                    dst.Add(src[i]); kept++;
+                }
+                copiedTotal += kept; droppedTotal += dropped; doneClones++;
+            }
+            m_CloneBuffersFiltered = true;
+            log.Info($"MarkingLaneSubstituteSystem: filtered SecondaryNetLane buffers of {doneClones} clone(s) — kept {copiedTotal} vanilla marking ref(s), dropped {droppedTotal} of ours");
         }
     }
 }
