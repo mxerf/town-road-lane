@@ -80,19 +80,24 @@ namespace TownRoadLane
 
         private void TryCreateClone()
         {
-            // Find the vanilla 'RoadZones' FencePrefab and the 'RoadsServices' UI category in one pass over all prefabs.
+            // Find the vanilla 'RoadZones' FencePrefab and the 'RoadsServices' UI category. Log all name matches
+            // (a UI-manager mod could have added duplicates) so we know exactly what we picked.
             FencePrefab template = null;
             UIAssetCategoryPrefab roadsServices = null;
+            int templateMatches = 0, categoryMatches = 0;
             var all = GetEntityQuery(ComponentType.ReadOnly<PrefabData>()).ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < all.Length && (template == null || roadsServices == null); i++)
+            for (int i = 0; i < all.Length; i++)
             {
                 if (!m_PrefabSystem.TryGetPrefab<PrefabBase>(all[i], out var p) || p == null) continue;
-                if (template == null && p is FencePrefab f && f.name == kTemplateName) template = f;
-                if (roadsServices == null && p is UIAssetCategoryPrefab cat && cat.name == kCategoryName) roadsServices = cat;
+                if (p.name == kTemplateName && p is FencePrefab f) { templateMatches++; if (template == null) template = f; }
+                else if (p.name == kTemplateName) log.Info($"[diag] '{kTemplateName}' name match but type={p.GetType().Name} (not FencePrefab)");
+                if (p.name == kCategoryName && p is UIAssetCategoryPrefab cat) { categoryMatches++; if (roadsServices == null) roadsServices = cat; }
+                else if (p.name == kCategoryName) log.Info($"[diag] '{kCategoryName}' name match but type={p.GetType().Name} (not UIAssetCategoryPrefab)");
             }
             all.Dispose();
 
             if (template == null) return; // prefabs not loaded yet — try again next update
+            log.Info($"[diag] template '{kTemplateName}' FencePrefab matches={templateMatches}; category '{kCategoryName}' UIAssetCategoryPrefab matches={categoryMatches}");
             if (roadsServices == null) log.Warn($"UI category '{kCategoryName}' not found — the toolbar entry may not appear");
 
             // Clone manually so we can set m_Group BEFORE the entity is created (DuplicatePrefab's JSON clone does
@@ -112,20 +117,24 @@ namespace TownRoadLane
 
             // Our own toolbar identity. Re-attach the RoadsServices group (the clone lost it), set our icon/priority.
             // Keep the inherited Unlockable so it inherits RoadZones' early/free unlock.
-            if (clone.TryGet<UIObject>(out var ui))
+            var uiViaTryGet = clone.TryGet<UIObject>(out var ui);
+            log.Info($"[diag] clone.TryGet<UIObject> = {uiViaTryGet}; clone.components = [{string.Join(", ", System.Linq.Enumerable.Select(clone.components, c => c?.GetType().Name))}]");
+            if (uiViaTryGet)
             {
+                log.Info($"[diag] before assign: ui.m_Group = {(ui.m_Group != null ? ui.m_Group.name + "(" + ui.m_Group.GetType().Name + ")" : "<null>")}");
                 if (roadsServices != null) ui.m_Group = roadsServices;
                 ui.m_Icon = kIcon;
                 ui.m_Priority = kPriority;
                 ui.m_IsDebugObject = false;
+                log.Info($"[diag] after assign:  ui.m_Group = {(ui.m_Group != null ? ui.m_Group.name : "<null>")}  icon={ui.m_Icon}  priority={ui.m_Priority}");
             }
             else log.Warn($"clone '{kCloneName}' unexpectedly has no UIObject component");
 
-            m_PrefabSystem.AddPrefab(clone);
+            bool added = m_PrefabSystem.AddPrefab(clone);
             m_Clone = clone;
             m_CloneAdded = true;
 
-            log.Info($"MarkingUpgradePrefabSystem: cloned '{kTemplateName}' → '{kCloneName}' (group='{(roadsServices != null ? roadsServices.name : "<null>")}'), awaiting prefab init");
+            log.Info($"MarkingUpgradePrefabSystem: cloned '{kTemplateName}' → '{kCloneName}' (group='{(roadsServices != null ? roadsServices.name : "<null>")}', AddPrefab={added}), awaiting prefab init");
         }
 
         private void TryFinalize()
