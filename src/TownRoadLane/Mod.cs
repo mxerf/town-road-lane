@@ -37,6 +37,10 @@ namespace TownRoadLane
 
             // Hot-reapply of the parking line style (triggered by the settings button). Idle until requested.
             updateSystem.UpdateAt<MarkingReapplySystem>(SystemUpdatePhase.Modification1);
+
+            // Diagnostics: log which road edges (and roads) are rebuilding each frame, so a crash in LaneSystem /
+            // SecondaryLaneSystem playback is preceded by a line naming the road that broke it.
+            updateSystem.UpdateAt<EdgeRebuildDiagSystem>(SystemUpdatePhase.Modification4);
         }
 
         public void OnDispose()

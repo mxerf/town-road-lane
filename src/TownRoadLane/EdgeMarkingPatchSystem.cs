@@ -134,9 +134,11 @@ namespace TownRoadLane
         }
 
         /// <summary>
-        /// Appends, for each city lane prefab, the two SecondaryLaneInfo entries used by 'Highway Drive Lane 3'
-        /// on this edge line: { RequireSafe } and { RequireMerge, RequireSafeMaster }. Skips entries that already exist.
-        /// Returns the number of entries actually added.
+        /// Appends, for each city lane prefab, the single { RequireSafe } SecondaryLaneInfo entry — the basic one
+        /// 'Highway Drive Lane 3' uses on this edge line. (We used to also add { RequireMerge, RequireSafeMaster },
+        /// mirroring the highway one, but that pulled the edge line onto merge-point geometry of unusual roads which
+        /// could destabilise SecondaryLaneSystem; the plain Safe entry covers the common case.) Skips entries that
+        /// already exist. Returns the number of entries actually added.
         /// </summary>
         private int AppendCityLanes(SecondaryLane sec, List<NetLanePrefab> cityLanes, string edgeName)
         {
@@ -147,8 +149,6 @@ namespace TownRoadLane
             {
                 if (!HasEntry(existing, lane, safe: true, merge: false, safeMaster: false))
                     toAdd.Add(new SecondaryLaneInfo { m_Lane = lane, m_RequireSafe = true });
-                if (!HasEntry(existing, lane, safe: false, merge: true, safeMaster: true))
-                    toAdd.Add(new SecondaryLaneInfo { m_Lane = lane, m_RequireMerge = true, m_RequireSafeMaster = true });
             }
             if (toAdd.Count == 0) return 0;
 
