@@ -104,17 +104,14 @@ namespace TownRoadLane
                     if ((data.m_Flags.m_General & MarkingFlags.MarkingsOff) == 0) continue; // not a "markings off" composition
                     if (!m_Processed.Add(comp)) continue;                                   // already rewritten
 
-                    // Identify the road prefab this composition belongs to.
-                    Entity roadPrefab = EntityManager.HasComponent<PrefabRef>(comp) ? EntityManager.GetComponentData<PrefabRef>(comp).m_Prefab : Entity.Null;
-                    string roadName = "<?>"; bool roadIsRuntime = true;
-                    if (roadPrefab != Entity.Null && m_PrefabSystem.TryGetPrefab<PrefabBase>(roadPrefab, out var rp) && rp != null)
-                    { roadName = rp.name; roadIsRuntime = rp.asset == null; }
-                    log.Info($"[diag] markings-off composition for road '{roadName}' (runtime={roadIsRuntime}, flags G={data.m_Flags.m_General})");
-
-                    // Only substitute on vanilla/asset-backed roads. Roads generated at runtime by other mods
-                    // (Road Builder, etc.) may set the same high composition bit for their own purposes — substituting
-                    // their lanes would feed SecondaryLaneSystem an incompatible config and crash. Skip them.
-                    if (roadIsRuntime) { log.Info($"[diag] skipping substitution on runtime road '{roadName}'"); continue; }
+                    // Identify the road prefab this composition belongs to (diagnostics only — every vanilla road in
+                    // CS2 also reports asset==null, so we can't use that to tell vanilla from Road Builder; we rely on
+                    // the lane-prefab match below instead: RB roads use their own cloned lane prefabs, so safeMap won't
+                    // contain them and nothing gets substituted on them).
+                    string roadName = "<?>";
+                    if (EntityManager.HasComponent<PrefabRef>(comp)
+                        && m_PrefabSystem.TryGetPrefab<PrefabBase>(EntityManager.GetComponentData<PrefabRef>(comp).m_Prefab, out var rp) && rp != null)
+                        roadName = rp.name;
 
                     var lanes = EntityManager.GetBuffer<NetCompositionLane>(comp);
                     int n = 0;
@@ -127,6 +124,7 @@ namespace TownRoadLane
                         n++;
                     }
                     if (n > 0) { rewrittenComps++; rewrittenLanes += n; }
+                    log.Info($"[diag] markings-off composition for road '{roadName}' (flags G={data.m_Flags.m_General}): substituted {n} of {lanes.Length} lane(s)");
                 }
                 comps.Dispose();
                 if (rewrittenComps > 0)
