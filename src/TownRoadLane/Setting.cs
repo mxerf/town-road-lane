@@ -7,14 +7,13 @@ using System.Collections.Generic;
 namespace TownRoadLane
 {
     [FileLocation(nameof(TownRoadLane))]
-    [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup, kUpgradeGroup)]
-    [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup, kUpgradeGroup)]
+    [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup)]
+    [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup)]
     public class Setting : ModSetting
     {
         public const string kSection = "Main";
         public const string kEdgeGroup = "EdgeLine";
         public const string kParkingGroup = "ParkingMarkings";
-        public const string kUpgradeGroup = "PerSegment";
 
         public Setting(IMod mod) : base(mod) { }
 
@@ -50,11 +49,6 @@ namespace TownRoadLane
 
         public bool IsParkingDisabled() => !ParkingMarkingsEnabled;
 
-        // --- Per-segment "Lane Markings" road upgrade (toolbar) ---
-
-        [SettingsUISection(kSection, kUpgradeGroup)]
-        public bool SegmentToggleEnabled { get; set; } = true;
-
         // Changing any of these only takes effect on the next game start (the marking prefabs are built once,
         // during prefab initialization).
 
@@ -64,7 +58,6 @@ namespace TownRoadLane
             ParkingMarkingsEnabled = true;
             ParkingLineStyle = ParkingLineStyleEnum.WhiteDashedDense;
             ParkingEndStyle = ParkingEndStyleEnum.WhiteSolid;
-            SegmentToggleEnabled = true;
         }
 
         /// <summary>Resolves the chosen longitudinal-line style to a render-prefab name (vanilla or G87).</summary>
@@ -140,7 +133,6 @@ namespace TownRoadLane
 
                 { m_Setting.GetOptionGroupLocaleID(Setting.kEdgeGroup), "Curb-side edge line" },
                 { m_Setting.GetOptionGroupLocaleID(Setting.kParkingGroup), "Parallel parking markings" },
-                { m_Setting.GetOptionGroupLocaleID(Setting.kUpgradeGroup), "Per-segment toggle" },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EdgeLineEnabled)), "Edge line on city roads" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.EdgeLineEnabled)),
@@ -161,10 +153,6 @@ namespace TownRoadLane
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ReapplyMarkings)), "Reapply markings now" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ReapplyMarkings)),
                     "Applies the chosen parking line / end-tick style to roads already built in the current city, without restarting. On a large city this causes a brief freeze while the network rebuilds." },
-
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.SegmentToggleEnabled)), "\"Lane Markings\" road upgrade" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.SegmentToggleEnabled)),
-                    "Adds a \"Lane Markings\" upgrade to the road toolbar's upgrade row (next to Lighting / Trees / …). Paint it on a segment to remove this mod's markings there — handy for small courtyard / alley roads where markings look out of place. Takes effect on the next game start." },
 
                 { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashedDense), "White dashed (dense)" },
                 { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashed), "White dashed" },

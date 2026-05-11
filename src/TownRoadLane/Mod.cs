@@ -35,24 +35,8 @@ namespace TownRoadLane
             // Feature: markings along parallel street-parking zones.
             updateSystem.UpdateAt<ParkingMarkingPatchSystem>(SystemUpdatePhase.PrefabUpdate);
 
-            // Feature: per-segment "Lane Markings" road upgrade — creates the toolbar entry / upgrade prefab and the
-            // no-marking lane clones.
-            updateSystem.UpdateAt<MarkingUpgradePrefabSystem>(SystemUpdatePhase.PrefabUpdate);
-
-            // OR our MarkingsOff bit into every road prefab's NetData.m_GeneralFlagMask (vanilla AND runtime-generated
-            // like Road Builder roads), so the upgrade tool considers the upgrade applicable to them.
-            updateSystem.UpdateAt<MarkingFlagMaskExpanderSystem>(SystemUpdatePhase.PrefabUpdate);
-
             // Hot-reapply of the parking line style (triggered by the settings button). Idle until requested.
             updateSystem.UpdateAt<MarkingReapplySystem>(SystemUpdatePhase.Modification1);
-
-            // Per-segment "Lane Markings" upgrade — for compositions carrying the MarkingsOff bit, swap the city
-            // drive-lane prefabs in the composition's lane list for our no-marking clones, so SecondaryLaneSystem
-            // never draws markings on those edges. Must run after NetCompositionSystem (the lane list is baked) and
-            // before LaneSystem (which instantiates the lanes from it) — both in Modification4.
-            updateSystem.UpdateAt<MarkingLaneSubstituteSystem>(SystemUpdatePhase.Modification4);
-            updateSystem.UpdateAfter<MarkingLaneSubstituteSystem, Game.Prefabs.NetCompositionSystem>(SystemUpdatePhase.Modification4);
-            updateSystem.UpdateBefore<MarkingLaneSubstituteSystem, Game.Net.LaneSystem>(SystemUpdatePhase.Modification4);
         }
 
         public void OnDispose()
