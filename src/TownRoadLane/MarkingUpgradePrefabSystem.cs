@@ -44,6 +44,7 @@ namespace TownRoadLane
         private EntityQuery m_RoadPrefabQuery;
 
         private PrefabBase m_Clone;
+        private UIAssetCategoryPrefab m_Category;
         private bool m_CloneAdded;
         private bool m_Done;
 
@@ -132,6 +133,7 @@ namespace TownRoadLane
 
             bool added = m_PrefabSystem.AddPrefab(clone);
             m_Clone = clone;
+            m_Category = roadsServices;
             m_CloneAdded = true;
 
             log.Info($"MarkingUpgradePrefabSystem: cloned '{kTemplateName}' → '{kCloneName}' (group='{(roadsServices != null ? roadsServices.name : "<null>")}', AddPrefab={added}), awaiting prefab init");
@@ -165,6 +167,30 @@ namespace TownRoadLane
                 patchedRoads++;
             }
             roads.Dispose();
+
+            // 3. Make sure the toolbar entry is registered. The automatic UIObject.LateInitialize chain did NOT
+            //    populate UIObjectData.m_Group for our clone (observed: group=Null, category buffer untouched), so
+            //    do what UIObject.LateInitialize would have done, ourselves: add the clone to the RoadsServices
+            //    category's element buffer and write its UIObjectData. Guard against double-adding.
+            if (m_Category != null && m_PrefabSystem.TryGetEntity(m_Category, out var categoryEntity))
+            {
+                bool alreadyListed = false;
+                if (EntityManager.HasBuffer<UIGroupElement>(categoryEntity))
+                {
+                    var buf = EntityManager.GetBuffer<UIGroupElement>(categoryEntity, isReadOnly: true);
+                    for (int i = 0; i < buf.Length; i++) if (buf[i].m_Prefab == cloneEntity) { alreadyListed = true; break; }
+                }
+                if (!alreadyListed)
+                {
+                    m_Category.AddElement(EntityManager, cloneEntity); // appends UIGroupElement + UnlockRequirement on the category
+                    log.Info($"MarkingUpgradePrefabSystem: manually registered '{kCloneName}' in category '{m_Category.name}'");
+                }
+                if (EntityManager.HasComponent<UIObjectData>(cloneEntity))
+                {
+                    EntityManager.SetComponentData(cloneEntity, new UIObjectData { m_Group = categoryEntity, m_Priority = kPriority });
+                }
+            }
+            else log.Warn($"MarkingUpgradePrefabSystem: no RoadsServices category to register '{kCloneName}' into — toolbar entry will be missing");
 
             m_Done = true;
             Enabled = false;
