@@ -68,6 +68,21 @@ namespace TownRoadLane
                 var map = MarkingUpgradePrefabSystem.NoMarkingLaneByOriginal;
                 if (map.Count == 0) return; // clones not ready yet (or feature off)
 
+                // Only substitute clones whose lane archetype has actually been baked by the prefab-init pipeline —
+                // otherwise LaneSystem would CreateEntity with an invalid archetype and crash on command-buffer
+                // playback. (Validate once; if a clone isn't ready we just don't use it — markings stay, no crash.)
+                var safeMap = new Dictionary<Entity, Entity>(map.Count);
+                foreach (var kv in map)
+                {
+                    if (!EntityManager.HasComponent<NetLaneArchetypeData>(kv.Value))
+                    { log.Warn($"MarkingLaneSubstituteSystem: clone entity {kv.Value.Index} has no NetLaneArchetypeData — not substituting it"); continue; }
+                    var arch = EntityManager.GetComponentData<NetLaneArchetypeData>(kv.Value);
+                    if (!arch.m_EdgeLaneArchetype.Valid || !arch.m_EdgeMasterArchetype.Valid || !arch.m_EdgeSlaveArchetype.Valid)
+                    { log.Warn($"MarkingLaneSubstituteSystem: clone entity {kv.Value.Index} has unbaked lane archetype — not substituting it"); continue; }
+                    safeMap[kv.Key] = kv.Value;
+                }
+                if (safeMap.Count == 0) return;
+
                 var comps = m_CompositionQuery.ToEntityArray(Allocator.Temp);
                 int rewrittenComps = 0, rewrittenLanes = 0;
                 for (int i = 0; i < comps.Length; i++)
@@ -81,7 +96,7 @@ namespace TownRoadLane
                     int n = 0;
                     for (int j = 0; j < lanes.Length; j++)
                     {
-                        if (!map.TryGetValue(lanes[j].m_Lane, out var clone)) continue;
+                        if (!safeMap.TryGetValue(lanes[j].m_Lane, out var clone)) continue;
                         var e = lanes[j];
                         e.m_Lane = clone;
                         lanes[j] = e;
