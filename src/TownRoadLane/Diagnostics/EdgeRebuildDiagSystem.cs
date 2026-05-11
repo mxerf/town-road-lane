@@ -9,6 +9,7 @@ using Unity.Collections;
 using Unity.Entities;
 using Edge = Game.Net.Edge;
 using EdgeGeometry = Game.Net.EdgeGeometry;
+using SubLane = Game.Net.SubLane;
 
 namespace TownRoadLane.Diagnostics
 {
@@ -75,11 +76,35 @@ namespace TownRoadLane.Diagnostics
                             if (m_PrefabSystem.TryGetPrefab<PrefabBase>(pe, out var p) && p != null) name = p.name;
                         }
                         log.Info($"[diag-rebuild]   edge#{edges[i].Index} road='{name}'");
+
+                        // For non-vanilla-looking roads (Road Builder generated: name like "r<guid>-<steamid>"),
+                        // dump the lane prefabs in the edge's SubLane buffer — tells us whether it uses the vanilla
+                        // 'Car Drive Lane 3' (which our edge line now hosts) or RB's own cloned lane prefabs.
+                        bool looksRb = name.Length > 20 && (name[0] == 'r' || name[0] == 'R') && name.IndexOf('-') > 0 && CountChar(name, '-') >= 4;
+                        if (looksRb && EntityManager.HasBuffer<SubLane>(edges[i]))
+                        {
+                            var sub = EntityManager.GetBuffer<SubLane>(edges[i], isReadOnly: true);
+                            var lsb = new System.Text.StringBuilder($"[diag-rebuild]     edge#{edges[i].Index} sub-lanes ({sub.Length}):");
+                            for (int j = 0; j < sub.Length; j++)
+                            {
+                                var le = sub[j].m_SubLane;
+                                var ln = "<?>";
+                                if (EntityManager.HasComponent<PrefabRef>(le))
+                                {
+                                    var lp = EntityManager.GetComponentData<PrefabRef>(le).m_Prefab;
+                                    if (m_PrefabSystem.TryGetPrefab<PrefabBase>(lp, out var lpf) && lpf != null) ln = lpf.name;
+                                }
+                                lsb.Append(' ').Append(ln).Append(';');
+                            }
+                            log.Info(lsb.ToString());
+                        }
                     }
                 }
                 edges.Dispose();
             }
             catch (Exception e) { log.Warn($"[diag-rebuild] failed: {e.Message}"); }
         }
+
+        private static int CountChar(string s, char c) { int n = 0; foreach (var ch in s) if (ch == c) n++; return n; }
     }
 }

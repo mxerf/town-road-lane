@@ -34,12 +34,12 @@ namespace TownRoadLane
         // Mirrors the existing 'Highway Drive Lane 3' entries on the edge-line prefabs:
         //   - one plain entry requiring Safe
         //   - one entry requiring Merge + SafeMaster (so it continues correctly through merges)
+        // Only the plain 'Car Drive Lane 3' for now — the '- Tram' / 'Public Transport Lane 3' variants were also
+        // hosted, but Road Builder roads can build on those with configs that crash SecondaryLaneSystem when the
+        // edge line is laid out; narrowing to the common case (ordinary city Small/Medium roads use 'Car Drive Lane 3').
         private static readonly string[] kCityLaneNames =
         {
             "Car Drive Lane 3",
-            "Car Drive Lane 3 - Tram",
-            "Public Transport Lane 3",
-            "Public Transport Lane 3 - Tram",
         };
 
         private PrefabSystem m_PrefabSystem;
