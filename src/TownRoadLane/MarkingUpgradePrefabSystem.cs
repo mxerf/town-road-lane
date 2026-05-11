@@ -34,6 +34,7 @@ namespace TownRoadLane
         private static readonly ILog log = Mod.log;
 
         private const string kTemplateName = "RoadZones";          // vanilla FencePrefab, pure flag-toggle upgrade
+        private const string kCategoryName = "RoadsServices";      // the Roads → Services upgrade-tools category
         private const string kCloneName    = "TownRoadLane Lane Markings";
         private const string kIcon         = "Media/Game/Icons/Crosswalk.svg"; // placeholder until we ship our own
         private const int    kPriority     = 75;                   // sits between Trees (80) and Grass (70)
@@ -79,24 +80,28 @@ namespace TownRoadLane
 
         private void TryCreateClone()
         {
-            // Find the vanilla 'RoadZones' FencePrefab.
+            // Find the vanilla 'RoadZones' FencePrefab and the 'RoadsServices' UI category in one pass over all prefabs.
             FencePrefab template = null;
-            var entities = m_NetPrefabQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < entities.Length; i++)
+            UIAssetCategoryPrefab roadsServices = null;
+            var all = GetEntityQuery(ComponentType.ReadOnly<PrefabData>()).ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < all.Length && (template == null || roadsServices == null); i++)
             {
-                if (m_PrefabSystem.TryGetPrefab<FencePrefab>(entities[i], out var f) && f != null && f.name == kTemplateName)
-                { template = f; break; }
+                if (!m_PrefabSystem.TryGetPrefab<PrefabBase>(all[i], out var p) || p == null) continue;
+                if (template == null && p is FencePrefab f && f.name == kTemplateName) template = f;
+                if (roadsServices == null && p is UIAssetCategoryPrefab cat && cat.name == kCategoryName) roadsServices = cat;
             }
-            entities.Dispose();
+            all.Dispose();
 
             if (template == null) return; // prefabs not loaded yet — try again next update
+            if (roadsServices == null) log.Warn($"UI category '{kCategoryName}' not found — the toolbar entry may not appear");
 
-            // Already added in a previous session-of-this-system run? (paranoia — m_CloneAdded covers it normally)
-            m_Clone = m_PrefabSystem.DuplicatePrefab(template, kCloneName);
-            m_CloneAdded = true;
+            // Clone manually so we can set m_Group BEFORE the entity is created (DuplicatePrefab's JSON clone does
+            // not carry over UIObject.m_Group — it came out null, which is why the toolbar entry didn't appear).
+            var clone = (FencePrefab)template.Clone(kCloneName);
+            clone.Remove<ObsoleteIdentifiers>();
 
             // Make it a pure marker upgrade: no zoning toggle, paint-only, not underground.
-            if (m_Clone.TryGet<NetUpgrade>(out var upg))
+            if (clone.TryGet<NetUpgrade>(out var upg))
             {
                 upg.m_SetState = Array.Empty<NetPieceRequirements>();
                 upg.m_UnsetState = Array.Empty<NetPieceRequirements>();
@@ -105,16 +110,22 @@ namespace TownRoadLane
             }
             else log.Warn($"clone '{kCloneName}' unexpectedly has no NetUpgrade component");
 
-            // Our own toolbar identity (keep the group it inherited: RoadsServices, and keep its Unlockable so it
-            // inherits RoadZones' early/free unlock — removing it caused the toolbar entry not to appear).
-            if (m_Clone.TryGet<UIObject>(out var ui))
+            // Our own toolbar identity. Re-attach the RoadsServices group (the clone lost it), set our icon/priority.
+            // Keep the inherited Unlockable so it inherits RoadZones' early/free unlock.
+            if (clone.TryGet<UIObject>(out var ui))
             {
+                if (roadsServices != null) ui.m_Group = roadsServices;
                 ui.m_Icon = kIcon;
                 ui.m_Priority = kPriority;
                 ui.m_IsDebugObject = false;
             }
+            else log.Warn($"clone '{kCloneName}' unexpectedly has no UIObject component");
 
-            log.Info($"MarkingUpgradePrefabSystem: cloned '{kTemplateName}' → '{kCloneName}', awaiting prefab init");
+            m_PrefabSystem.AddPrefab(clone);
+            m_Clone = clone;
+            m_CloneAdded = true;
+
+            log.Info($"MarkingUpgradePrefabSystem: cloned '{kTemplateName}' → '{kCloneName}' (group='{(roadsServices != null ? roadsServices.name : "<null>")}'), awaiting prefab init");
         }
 
         private void TryFinalize()
