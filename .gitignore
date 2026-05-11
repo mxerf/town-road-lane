@@ -1,0 +1,16 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+Library/
+
+# Decompiled game assemblies (local reference only, ~41M, do not commit)
+decomp/
+
+# IDE
+.vs/
+.idea/
+*.user
+
+# Logs / dumps
+*.log
+NOTES_local.md
