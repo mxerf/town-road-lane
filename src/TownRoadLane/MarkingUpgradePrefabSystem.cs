@@ -190,6 +190,8 @@ namespace TownRoadLane
                 }
                 var cloneName = CloneLaneName(origName);
                 var laneClone = m_PrefabSystem.DuplicatePrefab(orig, cloneName); // Clone + Remove<ObsoleteIdentifiers> + AddPrefab
+                m_PrefabSystem.UpdatePrefab(laneClone); // force a (re-)bake so NetLaneArchetypeData gets its archetypes — without
+                                                        // this the clone is added but its lane archetype stays default/invalid
                 m_LaneClones.Add((origName, laneClone));
                 log.Info($"MarkingUpgradePrefabSystem: created no-marking lane clone '{cloneName}' from '{origName}'");
             }
