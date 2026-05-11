@@ -105,17 +105,14 @@ namespace TownRoadLane
             }
             else log.Warn($"clone '{kCloneName}' unexpectedly has no NetUpgrade component");
 
-            // Our own toolbar identity (keep the group it inherited: RoadsServices).
+            // Our own toolbar identity (keep the group it inherited: RoadsServices, and keep its Unlockable so it
+            // inherits RoadZones' early/free unlock — removing it caused the toolbar entry not to appear).
             if (m_Clone.TryGet<UIObject>(out var ui))
             {
                 ui.m_Icon = kIcon;
                 ui.m_Priority = kPriority;
                 ui.m_IsDebugObject = false;
             }
-
-            // Drop any unlock requirement so it's always available.
-            m_Clone.Remove<Unlockable>();
-            m_Clone.Remove<UnlockOnBuild>();
 
             log.Info($"MarkingUpgradePrefabSystem: cloned '{kTemplateName}' → '{kCloneName}', awaiting prefab init");
         }
@@ -152,6 +149,54 @@ namespace TownRoadLane
             m_Done = true;
             Enabled = false;
             log.Info($"MarkingUpgradePrefabSystem: finalized — injected MarkingsOff bit into '{kCloneName}' PlaceableNetData and {patchedRoads} road prefab flag mask(s)");
+
+            DumpToolbarDiagnostics(cloneEntity);
+        }
+
+        /// <summary>One-off diagnostics: did the clone get registered in the toolbar category, and with what data?</summary>
+        private void DumpToolbarDiagnostics(Entity cloneEntity)
+        {
+            try
+            {
+                var em = EntityManager;
+                bool hasUIObjData = em.HasComponent<UIObjectData>(cloneEntity);
+                bool hasLocked = em.HasComponent<Game.Prefabs.Locked>(cloneEntity);
+                bool hasUnlockReq = em.HasBuffer<Game.Prefabs.UnlockRequirement>(cloneEntity);
+                Entity groupEntity = Entity.Null;
+                if (hasUIObjData) groupEntity = em.GetComponentData<UIObjectData>(cloneEntity).m_Group;
+                log.Info($"[diag] clone '{kCloneName}': UIObjectData={hasUIObjData} (group={(groupEntity != Entity.Null ? Describe(groupEntity) : "Null")})  Locked={hasLocked}  UnlockRequirement-buffer={hasUnlockReq}");
+
+                // The ComponentBase list still on the prefab (after our Remove<Unlockable>).
+                if (m_Clone?.components != null)
+                {
+                    var sb = new System.Text.StringBuilder("[diag] clone components:");
+                    foreach (var c in m_Clone.components) { sb.Append(' ').Append(c?.GetType().Name); }
+                    log.Info(sb.ToString());
+                }
+
+                // Is the clone listed in the RoadsServices category's element buffer?
+                if (groupEntity != Entity.Null && em.HasBuffer<UIGroupElement>(groupEntity))
+                {
+                    var buf = em.GetBuffer<UIGroupElement>(groupEntity, isReadOnly: true);
+                    bool found = false;
+                    for (int i = 0; i < buf.Length; i++) if (buf[i].m_Prefab == cloneEntity) { found = true; break; }
+                    log.Info($"[diag] '{Describe(groupEntity)}' element buffer has {buf.Length} entries; contains our clone = {found}");
+                }
+                else log.Info("[diag] group entity has no UIGroupElement buffer (or group is Null) — UIObject.LateInitialize likely didn't run for the clone");
+
+                // What ECS components does the clone entity carry now?
+                using var types = em.GetComponentTypes(cloneEntity, Allocator.Temp);
+                var sb2 = new System.Text.StringBuilder("[diag] clone archetype:");
+                for (int i = 0; i < types.Length; i++) { sb2.Append(' ').Append(types[i].GetManagedType()?.Name ?? types[i].ToString()); }
+                log.Info(sb2.ToString());
+            }
+            catch (Exception e) { log.Warn($"[diag] toolbar diagnostics failed: {e.Message}"); }
+        }
+
+        private string Describe(Entity e)
+        {
+            if (m_PrefabSystem.TryGetPrefab<PrefabBase>(e, out var p) && p != null) return $"{p.name}({p.GetType().Name})#{e.Index}";
+            return $"entity#{e.Index}";
         }
     }
 }
