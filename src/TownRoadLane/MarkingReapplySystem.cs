@@ -3,6 +3,7 @@ using Colossal.Logging;
 using Game;
 using Game.Common;
 using Game.Net;
+using Game.Prefabs;
 using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
@@ -11,15 +12,20 @@ namespace TownRoadLane
 {
     /// <summary>
     /// Handles the "Reapply markings" button: re-runs <see cref="ParkingMarkingPatchSystem.ApplyOrUpdate"/> so the
-    /// parking-marking prefabs pick up the currently-selected style, then marks every road edge <c>Updated</c> so
-    /// the net pipeline (GeometrySystem → NetCompositionSystem → LaneSystem → SecondaryLaneSystem → rendering)
-    /// rebuilds and the new line meshes show up on existing roads. On a big city this is a brief freeze, so it is
-    /// only ever triggered explicitly by the button — never automatically.
+    /// parking-marking prefabs pick up the currently-selected style, then marks road edges <c>Updated</c> so the net
+    /// pipeline (GeometrySystem → NetCompositionSystem → LaneSystem → SecondaryLaneSystem → rendering) rebuilds and
+    /// the new line meshes show up on existing roads. Only ever triggered explicitly by the button.
+    ///
+    /// IMPORTANT: it skips edges of Road Builder–generated roads (prefab name like <c>r&lt;guid&gt;-&lt;steamid&gt;</c>).
+    /// Forcing those to re-build their lanes can crash SecondaryLaneSystem (some RB road configs — e.g. a highway-based
+    /// RB road with angled parking — don't survive re-layout). RB roads will pick up the new style on the next game
+    /// load instead, like the styles always do.
     /// </summary>
     public partial class MarkingReapplySystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;
 
+        private PrefabSystem m_PrefabSystem;
         private EntityQuery m_RoadEdgeQuery;
         private bool m_Requested;
 
@@ -35,12 +41,12 @@ namespace TownRoadLane
         protected override void OnCreate()
         {
             base.OnCreate();
-            // Road edges: have EdgeGeometry (so GeometrySystem will reprocess them on Updated) and are roads (RoadData
-            // is on the prefab, Edge on the instance; we just take everything with EdgeGeometry — bridges/quays too,
-            // harmless). Exclude things already mid-edit.
+            m_PrefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            // Road edges: have EdgeGeometry + Edge + a PrefabRef (so we can read the road prefab). Exclude things
+            // already mid-edit / deleted.
             m_RoadEdgeQuery = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[] { ComponentType.ReadOnly<EdgeGeometry>(), ComponentType.ReadOnly<Edge>() },
+                All = new[] { ComponentType.ReadOnly<EdgeGeometry>(), ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<PrefabRef>() },
                 None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
             });
             Enabled = false; // idle until the button asks
@@ -64,15 +70,34 @@ namespace TownRoadLane
                 if (parkSys != null) parkSys.ApplyOrUpdate();
                 else log.Warn("ParkingMarkingPatchSystem not found — prefabs not refreshed");
 
-                int n = m_RoadEdgeQuery.CalculateEntityCount();
-                if (n > 0)
+                var edges = m_RoadEdgeQuery.ToEntityArray(Allocator.Temp);
+                int marked = 0, skippedRb = 0;
+                for (int i = 0; i < edges.Length; i++)
                 {
-                    EntityManager.AddComponent<Updated>(m_RoadEdgeQuery);
-                    log.Info($"reapply: refreshed parking-marking prefabs and marked {n} road edge(s) for rebuild");
+                    var name = "<?>";
+                    if (EntityManager.HasComponent<PrefabRef>(edges[i]))
+                    {
+                        var pe = EntityManager.GetComponentData<PrefabRef>(edges[i]).m_Prefab;
+                        if (m_PrefabSystem.TryGetPrefab<PrefabBase>(pe, out var p) && p != null) name = p.name;
+                    }
+                    if (LooksLikeRoadBuilder(name)) { skippedRb++; continue; }
+                    EntityManager.AddComponent<Updated>(edges[i]);
+                    marked++;
                 }
-                else log.Info("reapply: prefabs refreshed; no road edges in the current scene to rebuild");
+                edges.Dispose();
+                log.Info($"reapply: refreshed parking-marking prefabs; marked {marked} road edge(s) for rebuild, skipped {skippedRb} Road-Builder edge(s)");
             }
             catch (Exception e) { log.Error(e, "MarkingReapplySystem failed"); }
+        }
+
+        /// <summary>Road Builder names its generated road prefabs like "r&lt;guid&gt;-&lt;steamid&gt;".</summary>
+        private static bool LooksLikeRoadBuilder(string name)
+        {
+            if (string.IsNullOrEmpty(name) || name.Length < 20) return false;
+            if (name[0] != 'r' && name[0] != 'R') return false;
+            int dashes = 0;
+            foreach (var c in name) if (c == '-') dashes++;
+            return dashes >= 4;
         }
     }
 }
