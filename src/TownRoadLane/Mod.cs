@@ -39,6 +39,10 @@ namespace TownRoadLane
             // no-marking lane clones.
             updateSystem.UpdateAt<MarkingUpgradePrefabSystem>(SystemUpdatePhase.PrefabUpdate);
 
+            // OR our MarkingsOff bit into every road prefab's NetData.m_GeneralFlagMask (vanilla AND runtime-generated
+            // like Road Builder roads), so the upgrade tool considers the upgrade applicable to them.
+            updateSystem.UpdateAt<MarkingFlagMaskExpanderSystem>(SystemUpdatePhase.PrefabUpdate);
+
             // Hot-reapply of the parking line style (triggered by the settings button). Idle until requested.
             updateSystem.UpdateAt<MarkingReapplySystem>(SystemUpdatePhase.Modification1);
 

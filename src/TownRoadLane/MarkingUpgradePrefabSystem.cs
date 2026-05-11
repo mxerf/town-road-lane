@@ -232,20 +232,9 @@ namespace TownRoadLane
             pnd.m_PlacementFlags |= Game.Net.PlacementFlags.IsUpgrade | Game.Net.PlacementFlags.UpgradeOnly;
             EntityManager.SetComponentData(cloneEntity, pnd);
 
-            // 2. Make the upgrade applicable to roads: widen every RoadPrefab's general flag mask by our bit.
-            int patchedRoads = 0;
-            var roads = m_RoadPrefabQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < roads.Length; i++)
-            {
-                var e = roads[i];
-                if (!EntityManager.HasComponent<NetData>(e)) continue;
-                var nd = EntityManager.GetComponentData<NetData>(e);
-                if ((nd.m_GeneralFlagMask & MarkingFlags.MarkingsOff) != 0) continue;
-                nd.m_GeneralFlagMask |= MarkingFlags.MarkingsOff;
-                EntityManager.SetComponentData(e, nd);
-                patchedRoads++;
-            }
-            roads.Dispose();
+            // (Widening every RoadPrefab's NetData.m_GeneralFlagMask by our bit so the upgrade tool considers it
+            // applicable is now handled by MarkingFlagMaskExpanderSystem, which keeps doing it for road prefabs that
+            // appear later — e.g. Road Builder generates roads at runtime, after this system has gone idle.)
 
             // 3. Make sure the toolbar entry is registered. The automatic UIObject.LateInitialize chain did NOT
             //    populate UIObjectData.m_Group for our clone (observed: group=Null, category buffer untouched), so
@@ -273,7 +262,7 @@ namespace TownRoadLane
 
             m_Done = true;
             Enabled = false;
-            log.Info($"MarkingUpgradePrefabSystem: finalized — injected MarkingsOff bit into '{kCloneName}' PlaceableNetData and {patchedRoads} road prefab flag mask(s)");
+            log.Info($"MarkingUpgradePrefabSystem: finalized — injected MarkingsOff bit into '{kCloneName}' PlaceableNetData (road flag masks handled by MarkingFlagMaskExpanderSystem)");
 
             DumpToolbarDiagnostics(cloneEntity);
         }
