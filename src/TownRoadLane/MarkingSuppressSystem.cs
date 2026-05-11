@@ -22,8 +22,10 @@ namespace TownRoadLane
     /// The engine's <see cref="SecondaryLaneSystem"/> draws our city-road markings purely from the lane prefab
     /// (e.g. 'Car Drive Lane 3'); it never looks at an edge's <see cref="Upgraded"/> flags, so we can't suppress
     /// markings through the composition. Instead we let it create the marking sub-lane entities as usual and then,
-    /// for any edge that carries our <see cref="MarkingFlags.MarkingsOff"/> bit, delete the marking sub-lanes that
-    /// belong to <em>our</em> marking prefabs (the highway edge line + our parking line / end prefabs). The vanilla
+    /// for any edge that carries our <see cref="MarkingFlags.MarkingsOff"/> bit, remove the marking sub-lanes that
+    /// belong to <em>our</em> marking prefabs (the highway edge line + our parking line / end prefabs): we tag the
+    /// sub-lane <c>Deleted</c> AND drop it from the edge's <c>SubLane</c> buffer in the same step — leaving a
+    /// dangling buffer reference to a <c>Deleted</c> entity is what crashed the renderer the first time. The vanilla
     /// markings on actual highways and the intersection crosswalk markings are left alone because either their
     /// prefab is not in our managed set or the edge does not carry our bit.
     ///
@@ -99,18 +101,22 @@ namespace TownRoadLane
                 {
                     var edge = edges[i];
                     var upgraded = EntityManager.GetComponentData<Upgraded>(edge);
-                    if (!MarkingFlags.HasMarkingsOff(upgraded.m_Flags)) continue;
+                    if (!MarkingFlags.HasMarkingsOff(upgraded.m_Flags)) continue; // only "markings off" edges
 
-                    var subLanes = EntityManager.GetBuffer<SubLane>(edge, isReadOnly: true);
+                    // Mutable buffer: drop our marking sub-lanes from it (and Delete the entities) so nothing is
+                    // left pointing at a Deleted entity. Walk back-to-front because we remove in place.
+                    var subLanes = EntityManager.GetBuffer<SubLane>(edge);
                     bool any = false;
-                    for (int j = 0; j < subLanes.Length; j++)
+                    for (int j = subLanes.Length - 1; j >= 0; j--)
                     {
                         var lane = subLanes[j].m_SubLane;
                         if (!EntityManager.HasComponent<SecondaryLane>(lane)) continue;       // only marking lanes
                         if (!EntityManager.HasComponent<PrefabRef>(lane)) continue;
                         var prefab = EntityManager.GetComponentData<PrefabRef>(lane).m_Prefab;
                         if (!m_ManagedMarkingPrefabs.Contains(prefab)) continue;              // only ours
-                        ecb.AddComponent<Deleted>(lane);
+                        subLanes.RemoveAt(j);
+                        ecb.AddComponent<Deleted>(lane); // Deleted alone removes it from the render batches; do NOT
+                                                         // tag the edge Updated — that would loop with SecondaryLaneSystem
                         removed++; any = true;
                     }
                     if (any) edgesHit++;
