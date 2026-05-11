@@ -28,6 +28,7 @@ namespace TownRoadLane
         private static readonly ILog log = Mod.log;
 
         private EntityQuery m_FreshRoadPrefabs;
+        private bool m_InitialPassDone;
 
         protected override void OnCreate()
         {
@@ -49,6 +50,14 @@ namespace TownRoadLane
         {
             if (Mod.Settings != null && !Mod.Settings.SegmentToggleEnabled) return; // feature off → don't widen anyone
 
+            // Initial pass only: OR our bit into every road prefab present at the first load wave (vanilla + any RB
+            // roads already loaded from save). DO NOT widen the mask of road prefabs that appear later, e.g. ones RB
+            // generates during play — doing so was observed to crash SecondaryLaneSystem playback on the next net
+            // update (the road's pipeline doesn't like having an unknown high composition bit appear out of nowhere
+            // mid-session). This means: RB roads loaded with the save get the upgrade tool; RB roads created in play
+            // do not, until next reload. Acceptable trade-off until we understand the crash.
+            if (m_InitialPassDone) { Enabled = false; return; }
+
             try
             {
                 var ents = m_FreshRoadPrefabs.ToEntityArray(Allocator.Temp);
@@ -63,11 +72,15 @@ namespace TownRoadLane
                 }
                 ents.Dispose();
                 if (patched > 0)
-                    log.Info($"MarkingFlagMaskExpanderSystem: OR-ed MarkingsOff into {patched} new road prefab(s) (incl. runtime-generated)");
+                    log.Info($"MarkingFlagMaskExpanderSystem: OR-ed MarkingsOff into {patched} road prefab(s) on initial pass");
+                m_InitialPassDone = true;
+                Enabled = false;
             }
             catch (Exception e)
             {
                 log.Error(e, "MarkingFlagMaskExpanderSystem failed");
+                m_InitialPassDone = true;
+                Enabled = false;
             }
         }
     }
