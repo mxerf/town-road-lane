@@ -42,8 +42,10 @@ namespace TownRoadLane
             updateSystem.UpdateAt<MarkingReapplySystem>(SystemUpdatePhase.Modification1);
 
             // Per-segment "Lane Markings" upgrade — removes our markings on edges that carry the upgrade bit.
-            // Runs after ModificationBarrier4B has played back, so the sub-lanes SecondaryLaneSystem just created exist.
-            updateSystem.UpdateAt<MarkingSuppressSystem>(SystemUpdatePhase.Modification5);
+            // In Modification5 (so ModificationBarrier4B has already played back and the sub-lanes SecondaryLaneSystem
+            // created in Modification4B exist), but BEFORE Game.Net.SearchSystem — otherwise the spatial tree picks
+            // up a sub-lane we then Delete in the same frame, and the renderer/raycast crashes following the stale ref.
+            updateSystem.UpdateBefore<MarkingSuppressSystem, Game.Net.SearchSystem>(SystemUpdatePhase.Modification5);
         }
 
         public void OnDispose()
