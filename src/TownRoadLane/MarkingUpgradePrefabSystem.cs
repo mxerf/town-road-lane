@@ -11,9 +11,10 @@ namespace TownRoadLane
     /// <summary>
     /// Creates the per-segment "Lane Markings" road upgrade that appears in the road toolbar's upgrade row
     /// (alongside Lighting / Trees / Grass / Sound Barrier / …). Painting it onto a road segment sets our
-    /// <see cref="MarkingFlags.MarkingsOff"/> bit on that edge; <see cref="MarkingSuppressSystem"/> then removes
-    /// the city-road markings on it. (Yes, the toolbar entry is "remove markings" — courtyard/alley roads where
-    /// the markings hurt visual consistency.)
+    /// <see cref="MarkingFlags.MarkingsOff"/> bit on that edge; <see cref="MarkingLaneSubstituteSystem"/> then makes
+    /// that edge use no-marking lane prefabs (the clones this system creates) so the engine never draws this mod's
+    /// markings there. (Yes, the toolbar entry is "remove markings" — courtyard/alley roads where the markings hurt
+    /// visual consistency.)
     ///
     /// How it's built: we clone the vanilla <c>'RoadZones'</c> upgrade — it is a <see cref="FencePrefab"/> whose
     /// only purpose is to flip a single composition bit (it carries no visible geometry), which is exactly the
@@ -26,8 +27,14 @@ namespace TownRoadLane
     ///   • OR the same bit into every <see cref="RoadPrefab"/>'s <c>NetData.m_GeneralFlagMask</c> so the upgrade
     ///     tool considers the upgrade applicable to roads (it checks <c>targetRoad.m_GeneralFlagMask &amp; upgradeFlags</c>).
     ///
+    /// It also creates "no-marking" clones of the city drive-lane prefabs (<c>Car Drive Lane 3</c> / <c>- Tram</c> /
+    /// <c>Public Transport Lane 3</c> / <c>- Tram</c>): a clone is byte-identical except nothing references it, so its
+    /// baked <c>SecondaryNetLane</c> buffer stays empty and <see cref="Game.Net.SecondaryLaneSystem"/> draws nothing
+    /// next to it. <see cref="MarkingLaneSubstituteSystem"/> swaps them into the lane list of any composition that
+    /// carries the MarkingsOff bit.
+    ///
     /// Runs in <see cref="SystemUpdatePhase.PrefabUpdate"/>. It's a tiny state machine: one update creates+registers
-    /// the clone, a later update (once init has run and <c>PlaceableNetData</c> exists) finalizes the flag patches.
+    /// the clones, a later update (once init has run and <c>PlaceableNetData</c> exists) finalizes the flag patches.
     /// </summary>
     public partial class MarkingUpgradePrefabSystem : GameSystemBase
     {
@@ -39,12 +46,27 @@ namespace TownRoadLane
         private const string kIcon         = "Media/Game/Icons/Crosswalk.svg"; // placeholder until we ship our own
         private const int    kPriority     = 75;                   // sits between Trees (80) and Grass (70)
 
+        // City drive-lane prefabs that get this mod's markings — and thus need a no-marking clone for the upgrade.
+        private static readonly string[] kCityLaneNames =
+            { "Car Drive Lane 3", "Car Drive Lane 3 - Tram", "Public Transport Lane 3", "Public Transport Lane 3 - Tram" };
+        private static string CloneLaneName(string original) => "TownRoadLane " + original + " (no markings)";
+
+        /// <summary>
+        /// Maps an original city drive-lane prefab ENTITY → its no-marking clone prefab ENTITY. Populated once the
+        /// clones are created and registered. Read by <see cref="MarkingLaneSubstituteSystem"/>. Empty until ready
+        /// (or if the per-segment feature is disabled).
+        /// </summary>
+        public static IReadOnlyDictionary<Entity, Entity> NoMarkingLaneByOriginal => s_NoMarkingLaneByOriginal;
+        private static readonly Dictionary<Entity, Entity> s_NoMarkingLaneByOriginal = new Dictionary<Entity, Entity>();
+
         private PrefabSystem m_PrefabSystem;
         private EntityQuery m_NetPrefabQuery; // anything with PrefabData + NetData (roads, fences, …) — used to find the template and to patch road masks
         private EntityQuery m_RoadPrefabQuery;
+        private EntityQuery m_LanePrefabQuery;
 
         private PrefabBase m_Clone;
         private UIAssetCategoryPrefab m_Category;
+        private readonly List<(string origName, PrefabBase clone)> m_LaneClones = new List<(string, PrefabBase)>(); // resolved to entities in TryFinalize
         private bool m_CloneAdded;
         private bool m_Done;
 
@@ -54,6 +76,7 @@ namespace TownRoadLane
             m_PrefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
             m_NetPrefabQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetData>());
             m_RoadPrefabQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<RoadData>());
+            m_LanePrefabQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
             RequireForUpdate(m_NetPrefabQuery);
         }
 
@@ -137,6 +160,39 @@ namespace TownRoadLane
             m_CloneAdded = true;
 
             log.Info($"MarkingUpgradePrefabSystem: cloned '{kTemplateName}' → '{kCloneName}' (group='{(roadsServices != null ? roadsServices.name : "<null>")}', AddPrefab={added}), awaiting prefab init");
+
+            CreateNoMarkingLaneClones();
+        }
+
+        /// <summary>
+        /// Clones each city drive-lane prefab under a new name. Because nothing references the clone, its baked
+        /// <c>SecondaryNetLane</c> buffer stays empty, so SecondaryLaneSystem won't draw any markings next to it.
+        /// The clones are byte-identical otherwise (same mesh, CarLane width/flags, archetype) — safe substitutes.
+        /// </summary>
+        private void CreateNoMarkingLaneClones()
+        {
+            var byName = new Dictionary<string, NetLanePrefab>();
+            var wanted = new HashSet<string>(kCityLaneNames);
+            var ents = m_LanePrefabQuery.ToEntityArray(Allocator.Temp);
+            for (int i = 0; i < ents.Length; i++)
+            {
+                if (!m_PrefabSystem.TryGetPrefab<NetLanePrefab>(ents[i], out var lane) || lane == null) continue;
+                if (wanted.Contains(lane.name) && !byName.ContainsKey(lane.name)) byName[lane.name] = lane;
+            }
+            ents.Dispose();
+
+            foreach (var origName in kCityLaneNames)
+            {
+                if (!byName.TryGetValue(origName, out var orig) || orig == null)
+                {
+                    log.Warn($"MarkingUpgradePrefabSystem: city lane prefab '{origName}' not found — no no-marking clone for it");
+                    continue;
+                }
+                var cloneName = CloneLaneName(origName);
+                var laneClone = m_PrefabSystem.DuplicatePrefab(orig, cloneName); // Clone + Remove<ObsoleteIdentifiers> + AddPrefab
+                m_LaneClones.Add((origName, laneClone));
+                log.Info($"MarkingUpgradePrefabSystem: created no-marking lane clone '{cloneName}' from '{origName}'");
+            }
         }
 
         private void TryFinalize()
@@ -144,6 +200,27 @@ namespace TownRoadLane
             if (m_Clone == null) { m_Done = true; Enabled = false; return; }
             if (!m_PrefabSystem.TryGetEntity(m_Clone, out var cloneEntity)) return;
             if (!EntityManager.HasComponent<PlaceableNetData>(cloneEntity)) return; // not baked yet
+
+            // Resolve the original→clone lane entity map for MarkingLaneSubstituteSystem.
+            if (m_LaneClones.Count > 0 && s_NoMarkingLaneByOriginal.Count == 0)
+            {
+                var origByName = new Dictionary<string, Entity>();
+                var ents = m_LanePrefabQuery.ToEntityArray(Allocator.Temp);
+                for (int i = 0; i < ents.Length; i++)
+                {
+                    if (!m_PrefabSystem.TryGetPrefab<NetLanePrefab>(ents[i], out var lane) || lane == null) continue;
+                    if (!origByName.ContainsKey(lane.name)) origByName[lane.name] = ents[i];
+                }
+                ents.Dispose();
+                foreach (var (origName, clonePrefab) in m_LaneClones)
+                {
+                    if (origByName.TryGetValue(origName, out var origEntity)
+                        && m_PrefabSystem.TryGetEntity(clonePrefab, out var cloneLaneEntity))
+                        s_NoMarkingLaneByOriginal[origEntity] = cloneLaneEntity;
+                    else log.Warn($"MarkingUpgradePrefabSystem: could not map '{origName}' → its no-marking clone");
+                }
+                log.Info($"MarkingUpgradePrefabSystem: mapped {s_NoMarkingLaneByOriginal.Count} drive-lane prefab(s) to no-marking clones");
+            }
 
             // 1. Inject our spare bit into the upgrade's set-flags so the tool actually writes it onto the edge.
             var pnd = EntityManager.GetComponentData<PlaceableNetData>(cloneEntity);
