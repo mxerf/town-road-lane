@@ -70,6 +70,10 @@ namespace TownRoadLane
             updateSystem.UpdateAt<MarkingNodeToolSystem>(SystemUpdatePhase.ToolUpdate);
             // Hotkey poller — flips activeTool when Ctrl+M fires. Cheap WasPerformedThisFrame check.
             updateSystem.UpdateAt<MarkingToolHotkeySystem>(SystemUpdatePhase.Modification1);
+            // Overlay renderer for connector dots, drag-line, and confirmed pairs. Gated on
+            // activeTool == MarkingNodeToolSystem; idle otherwise. Rendering phase is fine here
+            // (we read tool state, write to vanilla OverlayRenderSystem.Buffer).
+            updateSystem.UpdateAt<MarkingOverlaySystem>(SystemUpdatePhase.Rendering);
         }
 
         public void OnDispose()
