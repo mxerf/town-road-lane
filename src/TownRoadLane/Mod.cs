@@ -42,9 +42,13 @@ namespace TownRoadLane
             log.Info($"vanilla SecondaryLaneSystem disabled (was Enabled={vanilla.Enabled})");
 
             // Our replacement. Phase 0 is byte-for-byte equivalent to vanilla — success criterion is
-            // "city looks identical after enabling the mod". Same Modification4 phase as vanilla.
-            updateSystem.UpdateAt<CustomSecondaryLaneSystem>(SystemUpdatePhase.Modification4);
-            log.Info($"CustomSecondaryLaneSystem registered at Modification4");
+            // "city looks identical after enabling the mod". MUST run on Modification4B (not 4) — that's
+            // where AllowBarrier<ModificationBarrier4B> lives. Using Modification4 instead would put us
+            // outside the barrier's allowed window and SafeCommandBufferSystem.CreateCommandBuffer
+            // would throw "Trying to create EntityCommandBuffer when it's not allowed!".
+            // See decomp/Game/Game.Common/SystemOrder.cs:184.
+            updateSystem.UpdateAt<CustomSecondaryLaneSystem>(SystemUpdatePhase.Modification4B);
+            log.Info($"CustomSecondaryLaneSystem registered at Modification4B");
         }
 
         public void OnDispose()
