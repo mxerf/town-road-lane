@@ -106,9 +106,9 @@ namespace TownRoadLane
                 if (hide)
                 {
                     if (!EntityManager.HasComponent<MarkingOverride>(e))
-                        EntityManager.AddComponentData(e, new MarkingOverride { hideAll = true });
+                        EntityManager.AddComponentData(e, new MarkingOverride { hide = MarkingCategory.All });
                     else
-                        EntityManager.SetComponentData(e, new MarkingOverride { hideAll = true });
+                        EntityManager.SetComponentData(e, new MarkingOverride { hide = MarkingCategory.All });
                 }
                 else if (EntityManager.HasComponent<MarkingOverride>(e))
                 {

@@ -301,6 +301,19 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public ComponentLookup<MarkingOverride> m_MarkingOverrideData;
 
+		// === v2 phase 2a ===
+		// Marking we anchor on city 3 m drive lanes. Entity.Null means "not resolved yet" — the
+		// inject loop skips the corner in that case. m_CityDriveLane3 is what we compare each
+		// laneCorner's prefab against to decide whether to anchor.
+		[ReadOnly]
+		public Entity m_InjectEdgeLinePrefab;
+
+		[ReadOnly]
+		public Entity m_CityDriveLane3Prefab;
+
+		[ReadOnly]
+		public bool m_InjectEdgeLineEnabled;
+
 		[ReadOnly]
 		public Entity m_DefaultTheme;
 
@@ -377,7 +390,7 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 				// secondary lanes), then skip both generation loops by jumping straight to
 				// RemoveUnusedOldLanes — anything we don't recreate gets cleaned up, so toggling the
 				// override on a live road removes its markings on the next update.
-				bool skipGeneration = m_MarkingOverrideData.TryGetComponent(owner, out var __markingOverride) && __markingOverride.hideAll;
+				bool skipGeneration = m_MarkingOverrideData.TryGetComponent(owner, out var __markingOverride) && __markingOverride.HideAll;
 				if (skipGeneration) { goto skipMarkingGeneration; }
 				EdgeGeometry edgeGeometry = default(EdgeGeometry);
 				Line3 line = default(Line3);
@@ -864,6 +877,87 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 						curveData.m_Bezier = NetUtils.StraightCurve(crossingLane.m_StartPos, crossingLane.m_EndPos);
 						curveData.m_Length = MathUtils.Length(curveData.m_Bezier);
 						CreateSecondaryLane(chunkIndex, ref laneIndex, owner, crossingLane.m_Prefab, laneBuffer, curveData, crossingLane.m_StartTangent, crossingLane.m_EndTangent, 0f, crossingLane.m_Hidden, flag, ownerTemp);
+					}
+				}
+				// === v2 phase 2a inject: anchor our edge-line on the curb-side city 3 m drive lanes ===
+				// Anchor pattern mirrors vanilla's DuplicateSides path (line ~855) for the RightLimit
+				// case, and the leftLane-only path for LeftLimit.
+				//
+				// Key rules learned from diagnosing in-game flag layout (see CarLaneFlagsDumpSystem):
+				//   1. m_LaneCorners contains BOTH edge lanes (physical lanes on this edge) and node
+				//      sublanes (per-direction routing lanes added on intersection chunks). We must
+				//      filter to EdgeLane only — otherwise on an intersection chunk we'd anchor an
+				//      edge-line on every turn-routing sublane and stack 6+ lines on a single curb.
+				//   2. RightLimit/LeftLimit are relative to the LANE's direction (not the road's).
+				//      For a Forward lane on right-hand traffic, RightLimit = curb side, LeftLimit
+				//      = median side. For an Inverted (backward) lane it's mirrored: RightLimit is
+				//      still curb (but the road's LEFT curb because the lane runs backward).
+				//   3. One-way road = no Invert mix on the entity's edge car lanes → both RightLimit
+				//      AND LeftLimit are curb (no median exists). Two-way → only RightLimit.
+				//   4. Anchor side: RightLimit → call CreateSecondaryLane with the lane as rightLane
+				//      (vanilla offsets the curve to the right of the lane). LeftLimit → leftLane
+				//      (offsets left). Without this distinction the line falls on the inner side.
+				if (m_InjectEdgeLineEnabled && m_InjectEdgeLinePrefab != Entity.Null && m_CityDriveLane3Prefab != Entity.Null)
+				{
+					bool hideEdgeLineHere = m_MarkingOverrideData.TryGetComponent(owner, out var __ovrEdge) && __ovrEdge.Hides(MarkingCategory.EdgeLine);
+					if (!hideEdgeLineHere)
+					{
+						// Pre-pass: classify the entity's directionality by looking at EDGE car lanes only
+						// (so node-routing sublanes on an intersection chunk don't confuse the count).
+						bool sawForward = false;
+						bool sawBackward = false;
+						for (int npd = 0; npd < laneBuffer.m_LaneCorners.Length; npd++)
+						{
+							var __c = laneBuffer.m_LaneCorners[npd];
+							if (__c.m_Inverted) continue;
+							if (!m_EdgeLaneData.HasComponent(__c.m_Lane)) continue;
+							if (!m_CarLaneData.TryGetComponent(__c.m_Lane, out var __cl)) continue;
+							if ((__cl.m_Flags & CarLaneFlags.Invert) != 0) sawBackward = true;
+							else sawForward = true;
+						}
+						bool isOneWay = !(sawForward && sawBackward);
+						CarLaneFlags __acceptMask = isOneWay
+							? (CarLaneFlags.RightLimit | CarLaneFlags.LeftLimit)
+							: CarLaneFlags.RightLimit;
+
+						for (int njx = 0; njx < laneBuffer.m_LaneCorners.Length; njx++)
+						{
+							LaneCorner laneCorner = laneBuffer.m_LaneCorners[njx];
+							// Each primary lane contributes two LaneCorners (start side + end side).
+							// Hosting the line on the non-inverted half is enough.
+							if (laneCorner.m_Inverted) continue;
+							// Filter out node-routing sublanes; only physical edge lanes carry the curb.
+							if (!m_EdgeLaneData.HasComponent(laneCorner.m_Lane)) continue;
+							if (!m_PrefabRefData.TryGetComponent(laneCorner.m_Lane, out var __cornerPrefabRef)) continue;
+							if (__cornerPrefabRef.m_Prefab != m_CityDriveLane3Prefab) continue;
+							if (!m_CarLaneData.TryGetComponent(laneCorner.m_Lane, out var __cornerCarLane)) continue;
+							if ((__cornerCarLane.m_Flags & __acceptMask) == 0) continue;
+							// Anchor side selection by which limit flag this lane carries.
+							//
+							// RightLimit (verified working): same as vanilla DuplicateSides call ~855:
+							//   Entity.Null + laneCorner.m_Lane + invertRight=!m_Inverted → line on
+							//   the lane's right (curb-side for right-hand-traffic).
+							//
+							// LeftLimit (the bug we're fixing): we still anchor as rightLane (so the
+							// curve transform path inside vanilla matches), but we FLIP invertRight
+							// to put the line on the OPPOSITE side of the lane — i.e. on the lane's
+							// left, which is the curb on the median-free one-way side. Without the
+							// flip the line lands between LeftLimit and the next inner lane (user
+							// observation: 2-lane one-way shows СС on the gap instead of НС, and
+							// 3-lane shows НС ПП ПС instead of СП ПП ПС).
+							bool isLeftLimit = (__cornerCarLane.m_Flags & CarLaneFlags.LeftLimit) != 0;
+							bool __invertRight = isLeftLimit ? laneCorner.m_Inverted : !laneCorner.m_Inverted;
+							CreateSecondaryLane(
+								chunkIndex, ref laneIndex, owner,
+								Entity.Null, laneCorner.m_Lane, m_InjectEdgeLinePrefab,
+								lanes, laneBuffer,
+								0f, laneCorner.m_Width,
+								MathUtils.Left(float5), MathUtils.Left(float6),
+								laneCorner.m_Hidden, isNode,
+								invertLeft: false, invertRight: __invertRight,
+								mergeStart: false, mergeEnd: false, mergeLeft: false,
+								flag, ownerTemp);
+						}
 					}
 				}
 				skipMarkingGeneration:
@@ -1920,12 +2014,26 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 
 	private TypeHandle __TypeHandle;
 
+	// === v2 phase 2a: marking prefabs we ANCHOR onto city lanes ===
+	// Resolved lazily in OnUpdate (PrefabSystem isn't guaranteed populated at OnCreate time). A first
+	// successful resolve flips m_PrefabsResolved to true; entries that still can't be found stay
+	// Entity.Null and the job's inject simply skips them.
+	private PrefabSystem m_PrefabSystem;
+	private bool m_PrefabsResolved;
+	private Entity m_EdgeLinePrefabEU;     // 'EU Highway Edge Line'
+	private Entity m_EdgeLinePrefabNA;     // 'NA Highway Edge Line'
+	private Entity m_CityDriveLane3Prefab; // 'Car Drive Lane 3' (anchor for edge line)
+	// Theme detection: read once per OnUpdate so we know which region's marking prefab to host.
+	// Vanilla stores it on CityConfigurationSystem.defaultTheme; we expect either EU or NA. Anything
+	// else (e.g. a modded theme) falls back to EU.
+
 	[Preserve]
 	protected override void OnCreate()
 	{
 		base.OnCreate();
 		m_CityConfigurationSystem = base.World.GetOrCreateSystemManaged<CityConfigurationSystem>();
 		m_ModificationBarrier = base.World.GetOrCreateSystemManaged<ModificationBarrier4B>();
+		m_PrefabSystem = base.World.GetOrCreateSystemManaged<PrefabSystem>();
 		m_OwnerQuery = GetEntityQuery(new EntityQueryDesc
 		{
 			All = new ComponentType[1] { ComponentType.ReadOnly<SubLane>() },
@@ -1955,6 +2063,16 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		// `InternalCompilerInterface.Get*(ref __TypeHandle.X, ref CheckedStateRef)` per handle which
 		// does the same thing (Update + read); a single __AssignHandles call is equivalent.
 		__TypeHandle.__AssignHandles(ref base.CheckedStateRef);
+		// First-update resolve of the marking prefab entities we'll inject into the job. Cheap to
+		// retry (a single name lookup per prefab) but we still gate so the log line only prints
+		// on success.
+		if (!m_PrefabsResolved) TryResolveMarkingPrefabs();
+		// Pick which region's edge-line prefab to inject. CityConfigurationSystem.defaultTheme is an
+		// Entity referring to a theme prefab whose .name is "North American Theme", "European Theme",
+		// etc. We resolve the name once per OnUpdate (cheap) and substring-match — modded themes are
+		// rare and we just fall back to EU for unknown.
+		Entity edgeLinePrefab = PickByTheme(m_EdgeLinePrefabEU, m_EdgeLinePrefabNA);
+		bool edgeLineEnabled = Mod.Settings != null && Mod.Settings.EdgeLineEnabled;
 		JobHandle jobHandle = JobChunkExtensions.ScheduleParallel(new UpdateLanesJob
 		{
 			m_EntityType = __TypeHandle.__Unity_Entities_Entity_TypeHandle,
@@ -1994,6 +2112,9 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			m_PrefabSecondaryLanes = __TypeHandle.__Game_Prefabs_SecondaryNetLane_RO_BufferLookup,
 			m_LaneRequirements = __TypeHandle.__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup,
 			m_MarkingOverrideData = __TypeHandle.__TownRoadLane_MarkingOverride_RO_ComponentLookup,
+			m_InjectEdgeLinePrefab = edgeLinePrefab,
+			m_CityDriveLane3Prefab = m_CityDriveLane3Prefab,
+			m_InjectEdgeLineEnabled = edgeLineEnabled,
 			m_DefaultTheme = m_CityConfigurationSystem.defaultTheme,
 			m_LeftHandTraffic = m_CityConfigurationSystem.leftHandTraffic,
 			m_AppliedTypes = m_AppliedTypes,
@@ -2021,5 +2142,56 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 	[Preserve]
 	public CustomSecondaryLaneSystem()
 	{
+	}
+
+	// === v2 phase 2a managed helpers ===
+	// Kept here (rather than in a separate file) because they only exist to feed the burst-compiled
+	// job below — having them adjacent makes the inject path easier to follow.
+
+	/// <summary>
+	/// Resolve the marking + anchor prefab entities by name. Called lazily from <see cref="OnUpdate"/>
+	/// because the PrefabSystem may not be populated at <see cref="OnCreate"/> time. We don't strictly
+	/// need a per-frame lookup — a single successful resolve flips <see cref="m_PrefabsResolved"/> and
+	/// we skip from then on.
+	/// </summary>
+	private void TryResolveMarkingPrefabs()
+	{
+		// One pass over all NetLanePrefabs is cheaper than calling PrefabSystem.GetPrefab per name,
+		// but the prefab system actually exposes a name-keyed dictionary internally — we just don't
+		// have a public API. Use a query and substring-match the names we want.
+		var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
+		var ents = query.ToEntityArray(Unity.Collections.Allocator.Temp);
+		try
+		{
+			for (int i = 0; i < ents.Length; i++)
+			{
+				if (!m_PrefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var p) || p == null) continue;
+				var n = p.name;
+				if (n == "EU Highway Edge Line" && m_EdgeLinePrefabEU == Entity.Null) m_EdgeLinePrefabEU = ents[i];
+				else if (n == "NA Highway Edge Line" && m_EdgeLinePrefabNA == Entity.Null) m_EdgeLinePrefabNA = ents[i];
+				else if (n == "Car Drive Lane 3" && m_CityDriveLane3Prefab == Entity.Null) m_CityDriveLane3Prefab = ents[i];
+			}
+		}
+		finally { ents.Dispose(); }
+
+		// Done once both edge-line prefabs and the anchor lane are found.
+		if (m_EdgeLinePrefabEU != Entity.Null && m_EdgeLinePrefabNA != Entity.Null && m_CityDriveLane3Prefab != Entity.Null)
+		{
+			m_PrefabsResolved = true;
+			Mod.log.Info($"v2 prefab resolve: EdgeLineEU={m_EdgeLinePrefabEU.Index} EdgeLineNA={m_EdgeLinePrefabNA.Index} Lane3={m_CityDriveLane3Prefab.Index}");
+		}
+	}
+
+	/// <summary>Picks EU vs NA marking prefab by inspecting the city's default theme name.</summary>
+	private Entity PickByTheme(Entity euPrefab, Entity naPrefab)
+	{
+		var theme = m_CityConfigurationSystem.defaultTheme;
+		if (theme == Entity.Null) return euPrefab;
+		if (!m_PrefabSystem.TryGetPrefab<PrefabBase>(theme, out var themePrefab) || themePrefab == null) return euPrefab;
+		// Theme names in vanilla are 'European Theme' / 'North American Theme'. Substring covers both
+		// and any modded variants that follow the convention.
+		var n = themePrefab.name;
+		if (!string.IsNullOrEmpty(n) && (n.Contains("North American") || n.StartsWith("NA "))) return naPrefab;
+		return euPrefab;
 	}
 }
