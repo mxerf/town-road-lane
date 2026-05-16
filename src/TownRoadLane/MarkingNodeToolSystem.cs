@@ -51,6 +51,7 @@ namespace TownRoadLane
         private List<MarkingEndpoint> _endpoints = new List<MarkingEndpoint>();
         private int _sourceIdx = -1;
         private int _hoverIdx  = -1;
+        private int _lastLoggedHoverIdx = -2; // -2 = "never logged"; -1 = "no hover"
         private float3 _cursorWorldPos;
 
         public State ToolState => _state;
@@ -84,6 +85,7 @@ namespace TownRoadLane
             _endpoints.Clear();
             _sourceIdx = -1;
             _hoverIdx = -1;
+            _lastLoggedHoverIdx = -2;
         }
 
         public override void InitializeRaycast()
@@ -103,6 +105,21 @@ namespace TownRoadLane
             bool hitSomething = GetRaycastResult(out Entity hitEntity, out hit);
             _cursorWorldPos = hitSomething ? hit.m_HitPosition : float3.zero;
             _hoverIdx = (_state != State.Default && hitSomething) ? FindHoveredEndpoint(_cursorWorldPos) : -1;
+            // Polish: log hover transitions only (avoid per-frame spam). Useful for triage of
+            // "I'm hovering but the dot doesn't react" reports.
+            if (_hoverIdx != _lastLoggedHoverIdx)
+            {
+                if (_hoverIdx >= 0)
+                {
+                    var ep = _endpoints[_hoverIdx];
+                    log.Info($"tool: hover endpoint idx={_hoverIdx} edge=#{ep.edge.Index} lane={ep.laneIndex} isRight={ep.isRight}");
+                }
+                else if (_lastLoggedHoverIdx >= 0)
+                {
+                    log.Info($"tool: hover cleared (was idx={_lastLoggedHoverIdx})");
+                }
+                _lastLoggedHoverIdx = _hoverIdx;
+            }
 
             // Cancel (Esc / RMB-as-cancel): step back one state.
             if (cancelAction.WasPressedThisFrame())

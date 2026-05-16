@@ -64,7 +64,38 @@ namespace TownRoadLane
             int sourceIdx = _tool.SourceEndpointIndex;
             int hoverIdx  = _tool.HoveredEndpointIndex;
 
-            // 1. Dots for every endpoint of the selected node.
+            // 1. Confirmed pairs first — they sit underneath everything else, so dots and the
+            //    drag-line stay readable when there are several pairs at a busy node.
+            var node = _tool.SelectedNode;
+            if (node != Entity.Null && EntityManager.HasBuffer<MarkingPair>(node))
+            {
+                var pairs = EntityManager.GetBuffer<MarkingPair>(node, isReadOnly: true);
+                for (int p = 0; p < pairs.Length; p++)
+                {
+                    if (TryResolvePair(pairs[p], out float3 a, out float3 b))
+                    {
+                        // Straight-segment "curve" — Bezier with control points evenly spaced.
+                        var bezier = new Bezier4x3(a, math.lerp(a, b, 0.33f), math.lerp(a, b, 0.66f), b);
+                        buf.DrawCurve(kColPairCurve, bezier, kPairCurveWidth);
+                    }
+                }
+            }
+
+            // 2. Drag-line from source to cursor / hovered target (middle layer).
+            if (sourceIdx >= 0 && sourceIdx < endpoints.Count)
+            {
+                float3 from = endpoints[sourceIdx].position;
+                float3 to = (hoverIdx >= 0 && hoverIdx < endpoints.Count)
+                    ? endpoints[hoverIdx].position
+                    : _tool.CursorWorldPos;
+                if (math.lengthsq(to - from) > 0.01f)
+                {
+                    buf.DrawLine(kColDragLine, new Line3.Segment(from, to), kDragLineWidth);
+                }
+            }
+
+            // 3. Dots last so they're always on top. Source = white, hover = brightened, others
+            //    coloured by side (right = cyan, left = orange).
             for (int i = 0; i < endpoints.Count; i++)
             {
                 var ep = endpoints[i];
@@ -80,37 +111,6 @@ namespace TownRoadLane
                     direction: new float2(0f, 1f),
                     position: ep.position,
                     diameter: kDotDiameter);
-            }
-
-            // 2. If a source endpoint is selected, draw a drag-line from it to the cursor's
-            //    world position (or to the hovered endpoint if any). 4e maintains _cursorWorld.
-            if (sourceIdx >= 0 && sourceIdx < endpoints.Count)
-            {
-                float3 from = endpoints[sourceIdx].position;
-                float3 to = (hoverIdx >= 0 && hoverIdx < endpoints.Count)
-                    ? endpoints[hoverIdx].position
-                    : _tool.CursorWorldPos;
-                if (math.lengthsq(to - from) > 0.01f)
-                {
-                    buf.DrawLine(kColDragLine, new Line3.Segment(from, to), kDragLineWidth);
-                }
-            }
-
-            // 3. Confirmed pairs: read MarkingPair buffer on the selected node and draw a curve
-            //    between source and target attach points. Phase 4e populates this buffer.
-            var node = _tool.SelectedNode;
-            if (node != Entity.Null && EntityManager.HasBuffer<MarkingPair>(node))
-            {
-                var pairs = EntityManager.GetBuffer<MarkingPair>(node, isReadOnly: true);
-                for (int p = 0; p < pairs.Length; p++)
-                {
-                    if (TryResolvePair(pairs[p], out float3 a, out float3 b))
-                    {
-                        // Straight-segment "curve" — Bezier with control points evenly spaced.
-                        var bezier = new Bezier4x3(a, math.lerp(a, b, 0.33f), math.lerp(a, b, 0.66f), b);
-                        buf.DrawCurve(kColPairCurve, bezier, kPairCurveWidth);
-                    }
-                }
             }
 
             _overlayRenderSystem.AddBufferWriter(our);
