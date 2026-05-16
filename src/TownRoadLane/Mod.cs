@@ -49,6 +49,10 @@ namespace TownRoadLane
             // See decomp/Game/Game.Common/SystemOrder.cs:184.
             updateSystem.UpdateAt<CustomSecondaryLaneSystem>(SystemUpdatePhase.Modification4B);
             log.Info($"CustomSecondaryLaneSystem registered at Modification4B");
+
+            // Settings-button handler. Idle until the user clicks; touches EntityManager directly so
+            // Modification1 is fine (no SafeCommandBufferSystem dance needed).
+            updateSystem.UpdateAt<MarkingToggleSystem>(SystemUpdatePhase.Modification1);
         }
 
         public void OnDispose()

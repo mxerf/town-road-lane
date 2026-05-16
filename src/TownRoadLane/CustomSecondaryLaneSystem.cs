@@ -294,6 +294,13 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public BufferLookup<ObjectRequirementElement> m_LaneRequirements;
 
+		// === v2 phase 1 ===
+		// Per-edge / per-node user override. Read inside UpdateLanes — when an entity has
+		// MarkingOverride{hideAll=true}, generation is skipped but the old-lane removal pass
+		// still runs, so existing markings disappear.
+		[ReadOnly]
+		public ComponentLookup<MarkingOverride> m_MarkingOverrideData;
+
 		[ReadOnly]
 		public Entity m_DefaultTheme;
 
@@ -366,6 +373,12 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 					}
 				}
 				FillOldLaneBuffer(lanes, laneBuffer.m_OldLanes);
+				// v2 phase 1: per-entity opt-out. We let FillOldLaneBuffer run above (collects existing
+				// secondary lanes), then skip both generation loops by jumping straight to
+				// RemoveUnusedOldLanes — anything we don't recreate gets cleaned up, so toggling the
+				// override on a live road removes its markings on the next update.
+				bool skipGeneration = m_MarkingOverrideData.TryGetComponent(owner, out var __markingOverride) && __markingOverride.hideAll;
+				if (skipGeneration) { goto skipMarkingGeneration; }
 				EdgeGeometry edgeGeometry = default(EdgeGeometry);
 				Line3 line = default(Line3);
 				Line3 line2 = default(Line3);
@@ -853,6 +866,7 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 						CreateSecondaryLane(chunkIndex, ref laneIndex, owner, crossingLane.m_Prefab, laneBuffer, curveData, crossingLane.m_StartTangent, crossingLane.m_EndTangent, 0f, crossingLane.m_Hidden, flag, ownerTemp);
 					}
 				}
+				skipMarkingGeneration:
 				RemoveUnusedOldLanes(chunkIndex, lanes, laneBuffer.m_OldLanes);
 				laneBuffer.Clear();
 			}
@@ -1845,6 +1859,10 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public BufferLookup<ObjectRequirementElement> __Game_Prefabs_ObjectRequirementElement_RO_BufferLookup;
 
+		// v2 phase 1
+		[ReadOnly]
+		public ComponentLookup<MarkingOverride> __TownRoadLane_MarkingOverride_RO_ComponentLookup;
+
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public void __AssignHandles(ref SystemState state)
 		{
@@ -1884,6 +1902,7 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			__Game_Net_LaneOverlap_RO_BufferLookup = state.GetBufferLookup<LaneOverlap>(isReadOnly: true);
 			__Game_Prefabs_SecondaryNetLane_RO_BufferLookup = state.GetBufferLookup<SecondaryNetLane>(isReadOnly: true);
 			__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup = state.GetBufferLookup<ObjectRequirementElement>(isReadOnly: true);
+			__TownRoadLane_MarkingOverride_RO_ComponentLookup = state.GetComponentLookup<MarkingOverride>(isReadOnly: true);
 		}
 	}
 
@@ -1974,6 +1993,7 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			m_LaneOverlaps = __TypeHandle.__Game_Net_LaneOverlap_RO_BufferLookup,
 			m_PrefabSecondaryLanes = __TypeHandle.__Game_Prefabs_SecondaryNetLane_RO_BufferLookup,
 			m_LaneRequirements = __TypeHandle.__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup,
+			m_MarkingOverrideData = __TypeHandle.__TownRoadLane_MarkingOverride_RO_ComponentLookup,
 			m_DefaultTheme = m_CityConfigurationSystem.defaultTheme,
 			m_LeftHandTraffic = m_CityConfigurationSystem.leftHandTraffic,
 			m_AppliedTypes = m_AppliedTypes,
