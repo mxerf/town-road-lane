@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Colossal.Logging;
 using Game;
 using Game.Common;
@@ -37,9 +38,14 @@ namespace TownRoadLane
 
         private State _state;
         private Entity _selectedNode;
+        // Endpoints of the currently selected node, refreshed every time the user clicks a new
+        // node. Empty when nothing is selected. Phase 4d reads this list to draw connector dots;
+        // phase 4e uses it for hit-testing source/target picks.
+        private List<MarkingEndpoint> _endpoints = new List<MarkingEndpoint>();
 
         public State ToolState => _state;
         public Entity SelectedNode => _selectedNode;
+        public IReadOnlyList<MarkingEndpoint> Endpoints => _endpoints;
 
         public override PrefabBase GetPrefab() => null;
         public override bool TrySetPrefab(PrefabBase prefab) => false;
@@ -55,6 +61,7 @@ namespace TownRoadLane
             base.OnStartRunning();
             _state = State.Default;
             _selectedNode = Entity.Null;
+            _endpoints.Clear();
             log.Info("MarkingNodeToolSystem: activated");
         }
 
@@ -63,6 +70,7 @@ namespace TownRoadLane
             log.Info($"MarkingNodeToolSystem: deactivated (state was {_state}, selectedNode #{_selectedNode.Index})");
             _state = State.Default;
             _selectedNode = Entity.Null;
+            _endpoints.Clear();
             base.OnStopRunning();
         }
 
@@ -87,7 +95,8 @@ namespace TownRoadLane
                 return inputDeps;
             }
 
-            // Phase 4b: just log node click. Real selection logic lands in 4c+4e.
+            // Phase 4c: on node click, extract attach points. 4e wires the actual source / target
+            // selection state machine; for now we just refresh the endpoint list and log it.
             if (applyAction.WasPressedThisFrame())
             {
                 RaycastHit _hit;
@@ -96,7 +105,8 @@ namespace TownRoadLane
                     if (EntityManager.HasComponent<Node>(hitEntity))
                     {
                         _selectedNode = hitEntity;
-                        log.Info($"MarkingNodeToolSystem: clicked node #{hitEntity.Index} (state={_state})");
+                        _endpoints = MarkingEndpointExtractor.Extract(EntityManager, hitEntity);
+                        log.Info($"MarkingNodeToolSystem: selected node #{hitEntity.Index} — extracted {_endpoints.Count} endpoint(s)");
                     }
                     else
                     {
