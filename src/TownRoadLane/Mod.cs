@@ -63,6 +63,13 @@ namespace TownRoadLane
             // ApplyOrUpdate then mass-marks edges/nodes Updated. Modification1 is fine here (no
             // SafeCommandBufferSystem dance needed — we touch EntityManager directly).
             updateSystem.UpdateAt<MarkingToggleSystem>(SystemUpdatePhase.Modification1);
+
+            // Phase 4 tool: per-node marking customisation. ToolBaseSystem self-registers with
+            // ToolSystem.tools in its OnCreate; we just need to instantiate it. Update phase per
+            // vanilla tool convention (ToolBaseSystem.cs base wires its own ToolUpdate path).
+            updateSystem.UpdateAt<MarkingNodeToolSystem>(SystemUpdatePhase.ToolUpdate);
+            // Hotkey poller — flips activeTool when Ctrl+M fires. Cheap WasPerformedThisFrame check.
+            updateSystem.UpdateAt<MarkingToolHotkeySystem>(SystemUpdatePhase.Modification1);
         }
 
         public void OnDispose()

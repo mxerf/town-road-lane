@@ -1,5 +1,6 @@
 using Colossal;
 using Colossal.IO.AssetDatabase;
+using Game.Input;
 using Game.Modding;
 using Game.Settings;
 using System.Collections.Generic;
@@ -16,14 +17,20 @@ namespace TownRoadLane
     /// ApplyOrUpdate before mass-marking every road edge Updated so live roads pick up the change.
     /// </summary>
     [FileLocation(nameof(TownRoadLane))]
-    [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup, kReapplyGroup)]
-    [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup, kReapplyGroup)]
+    [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup, kReapplyGroup, kKeybindGroup)]
+    [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup, kReapplyGroup, kKeybindGroup)]
+    [SettingsUIKeyboardAction(ToggleMarkingTool, Usages.kDefaultUsage, Usages.kEditorUsage, Usages.kToolUsage)]
     public class Setting : ModSetting
     {
         public const string kSection = "Main";
         public const string kEdgeGroup = "EdgeLine";
         public const string kParkingGroup = "ParkingMarkings";
         public const string kReapplyGroup = "Reapply";
+        public const string kKeybindGroup = "Keybinds";
+
+        // Action name used by MarkingToolHotkeySystem to resolve the ProxyAction. Must match the
+        // attribute name on this class and the binding property below.
+        public const string ToggleMarkingTool = "ToggleMarkingTool";
 
         public Setting(IMod mod) : base(mod) { }
 
@@ -61,6 +68,12 @@ namespace TownRoadLane
                 MarkingToggleSystem.RequestReapply();
             }
         }
+
+        // --- Phase 4 tool keybind ---
+
+        [SettingsUISection(kSection, kKeybindGroup)]
+        [SettingsUIKeyboardBinding(BindingKeyboard.M, ToggleMarkingTool, ctrl: true)]
+        public ProxyBinding ToggleMarkingToolBinding { get; set; }
 
         public bool IsEdgeDisabled() => !EdgeLineEnabled;
         public bool IsParkingDisabled() => !ParkingMarkingsEnabled;
@@ -172,6 +185,7 @@ namespace TownRoadLane
                 { m_Setting.GetOptionGroupLocaleID(Setting.kEdgeGroup), "Curb-side edge line" },
                 { m_Setting.GetOptionGroupLocaleID(Setting.kParkingGroup), "Parallel parking markings" },
                 { m_Setting.GetOptionGroupLocaleID(Setting.kReapplyGroup), "Apply to existing roads" },
+                { m_Setting.GetOptionGroupLocaleID(Setting.kKeybindGroup), "Keybinds" },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EdgeLineEnabled)), "Edge line on city roads" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.EdgeLineEnabled)),
@@ -195,7 +209,11 @@ namespace TownRoadLane
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ReapplyMarkings)), "Reapply markings now" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ReapplyMarkings)),
-                    "Re-applies the chosen styles and rebuilds markings on every road already in the city. On a large city this causes a brief freeze. Road Builder roads are skipped to avoid known crash patterns." },
+                    "Re-applies the chosen styles and rebuilds markings on every road already in the city. On a large city this causes a brief freeze. Road Builder roads are skipped to avoid known crash patterns. WARNING: known crash 10-20s after triggering on some saves — if it happens, save & reload to apply the style." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ToggleMarkingToolBinding)), "Toggle marking tool" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleMarkingToolBinding)),
+                    "Activates or deactivates the per-node marking customisation tool. Click a node to override its markings; click again on the same node to remove the override." },
 
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid), "White solid" },
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolidThick), "White solid (thick)" },
