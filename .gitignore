@@ -6,6 +6,9 @@ Library/
 # Decompiled game assemblies (local reference only, ~41M, do not commit)
 decomp/
 
+# External mod sources cloned for reference (Traffic, RoadBuilder, ...)
+_refs/
+
 # IDE
 .vs/
 .idea/
@@ -14,3 +17,6 @@ decomp/
 # Logs / dumps
 *.log
 NOTES_local.md
+
+# Claude Code local settings (personal — global allowlist lives in settings.json)
+.claude/settings.local.json
