@@ -2,14 +2,22 @@
 
 	<PropertyGroup>
 		<Configurations>Debug;Release</Configurations>
-	
+
 		<!--The file where mod information which is required for publishing mod on PDX mods are stored-->
 		<PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>
 	</PropertyGroup>
-	
+
 	<!--Imports must be after PropertyGroup block-->
 	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.props" />
 	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.targets" />
+
+	<!-- Override the template's <LangVersion>9.0</LangVersion> from Mod.props (which is imported above
+	     and would otherwise win). Decompiled vanilla code uses C# 10 (file-scoped namespace) and
+	     C# 12 (primary constructors on structs). Runtime is still net48 / Mono — only the syntax
+	     surface is modern. -->
+	<PropertyGroup>
+		<LangVersion>latest</LangVersion>
+	</PropertyGroup>
 
 	<ItemGroup>
 		<Reference Include="Game">
