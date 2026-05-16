@@ -69,7 +69,18 @@ namespace TownRoadLane
             }
         }
 
-        // --- Phase 4 tool keybind ---
+        // --- Phase 4 tool: settings button (always works) + keybind (may conflict with other mods) ---
+
+        [SettingsUIButton]
+        [SettingsUISection(kSection, kKeybindGroup)]
+        public bool ActivateMarkingTool
+        {
+            set
+            {
+                Mod.log.Info("settings button: activate marking tool");
+                MarkingToolHotkeySystem.RequestToggle();
+            }
+        }
 
         [SettingsUISection(kSection, kKeybindGroup)]
         [SettingsUIKeyboardBinding(BindingKeyboard.M, ToggleMarkingTool, ctrl: true)]
@@ -211,9 +222,13 @@ namespace TownRoadLane
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ReapplyMarkings)),
                     "Re-applies the chosen styles and rebuilds markings on every road already in the city. On a large city this causes a brief freeze. Road Builder roads are skipped to avoid known crash patterns. WARNING: known crash 10-20s after triggering on some saves — if it happens, save & reload to apply the style." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ToggleMarkingToolBinding)), "Toggle marking tool" },
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ActivateMarkingTool)), "Activate marking tool" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ActivateMarkingTool)),
+                    "Toggles the per-node marking customisation tool. Same as the keyboard shortcut below, but always works (button cannot be intercepted by other mods)." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ToggleMarkingToolBinding)), "Toggle marking tool (hotkey)" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleMarkingToolBinding)),
-                    "Activates or deactivates the per-node marking customisation tool. Click a node to override its markings; click again on the same node to remove the override." },
+                    "Activates or deactivates the per-node marking customisation tool. Default Ctrl+M. If the hotkey doesn't work (other mod intercepts), use the button above instead." },
 
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid), "White solid" },
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolidThick), "White solid (thick)" },

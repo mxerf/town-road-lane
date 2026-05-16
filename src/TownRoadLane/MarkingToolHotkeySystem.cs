@@ -23,6 +23,16 @@ namespace TownRoadLane
         private DefaultToolSystem _defaultTool;
         private MarkingNodeToolSystem _markingTool;
         private ProxyAction _toggleAction;
+        private bool _pendingButtonToggle;
+
+        /// <summary>Called from the settings "Activate marking tool" button. Toggles the tool on
+        /// the next system update (we can't switch activeTool from a setter — wrong thread/phase).</summary>
+        public static void RequestToggle()
+        {
+            var sys = World.DefaultGameObjectInjectionWorld?.GetExistingSystemManaged<MarkingToolHotkeySystem>();
+            if (sys == null) { log.Warn("MarkingToolHotkeySystem not found — cannot toggle"); return; }
+            sys._pendingButtonToggle = true;
+        }
 
         protected override void OnCreate()
         {
@@ -59,17 +69,20 @@ namespace TownRoadLane
 
         protected override void OnUpdate()
         {
-            if (_toggleAction == null) return;
-            if (!_toggleAction.WasPerformedThisFrame()) return;
+            bool fromHotkey = _toggleAction != null && _toggleAction.WasPerformedThisFrame();
+            bool fromButton = _pendingButtonToggle;
+            if (fromButton) _pendingButtonToggle = false;
+            if (!fromHotkey && !fromButton) return;
 
+            string src = fromHotkey ? "hotkey" : "button";
             if (_toolSystem.activeTool == _markingTool)
             {
-                log.Info("hotkey: deactivating MarkingNodeToolSystem");
+                log.Info($"{src}: deactivating MarkingNodeToolSystem");
                 _toolSystem.activeTool = _defaultTool;
             }
             else
             {
-                log.Info("hotkey: activating MarkingNodeToolSystem");
+                log.Info($"{src}: activating MarkingNodeToolSystem");
                 _toolSystem.activeTool = _markingTool;
             }
         }

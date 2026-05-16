@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Colossal.Logging;
 using Game;
 using Game.Common;
+using Game.Input;
 using Game.Net;
 using Game.Prefabs;
 using Game.Tools;
@@ -53,6 +54,7 @@ namespace TownRoadLane
         private int _hoverIdx  = -1;
         private int _lastLoggedHoverIdx = -2; // -2 = "never logged"; -1 = "no hover"
         private float3 _cursorWorldPos;
+        private int _heartbeatCounter; // logs raycast outcome periodically when active
 
         public State ToolState => _state;
         public Entity SelectedNode => _selectedNode;
@@ -74,7 +76,16 @@ namespace TownRoadLane
         {
             base.OnStartRunning();
             ResetSelection();
-            log.Info("MarkingNodeToolSystem: activated");
+            // Base class OnStartRunning → SetActions → UpdateActions (virtual). Default impl is
+            // empty, which leaves applyAction.shouldBeEnabled = false (from ResetActions on last
+            // OnStopRunning). That made our clicks no-op. Enable them explicitly here — same
+            // pattern DefaultToolSystem.cs:735-743 uses (sans the internal DeferStateUpdating
+            // batch wrapper, which we can't reach from outside Game.dll — three separate sets
+            // are equally correct, just slightly less efficient).
+            applyAction.shouldBeEnabled = true;
+            secondaryApplyAction.shouldBeEnabled = true;
+            cancelAction.shouldBeEnabled = true;
+            log.Info($"MarkingNodeToolSystem: activated, actions enabled (apply={applyAction != null}, cancel={cancelAction != null})");
         }
 
         protected override void OnStopRunning()
@@ -111,6 +122,16 @@ namespace TownRoadLane
             bool hitSomething = GetRaycastResult(out Entity hitEntity, out hit);
             _cursorWorldPos = hitSomething ? hit.m_HitPosition : float3.zero;
             _hoverIdx = (_state != State.Default && hitSomething) ? FindHoveredEndpoint(_cursorWorldPos) : -1;
+
+            // Heartbeat every ~120 frames (~2 sec @60fps) — confirms tool is actually running and
+            // raycast is hitting things. Without this we can't tell "tool not ticking" apart from
+            // "tool ticking but raycast empty".
+            if ((++_heartbeatCounter % 120) == 0)
+            {
+                string ent = hitSomething ? $"#{hitEntity.Index}" : "<none>";
+                string hasNode = hitSomething && EntityManager.HasComponent<Node>(hitEntity) ? "YES" : "no";
+                log.Info($"tool heartbeat: state={_state}, raycast hit={ent} hasNode={hasNode}, cursor={_cursorWorldPos}");
+            }
             // Polish: log hover transitions only (avoid per-frame spam). Useful for triage of
             // "I'm hovering but the dot doesn't react" reports.
             if (_hoverIdx != _lastLoggedHoverIdx)
@@ -160,6 +181,11 @@ namespace TownRoadLane
             // Primary apply (LMB): state-machine transitions.
             if (applyAction.WasPressedThisFrame())
             {
+                // Phase 4 debug: log raycast outcome on every click so we can see whether Apply
+                // even fires and what raycast returns. "ничего не происходит" diagnostic — these
+                // logs distinguish (no Apply event) vs (Apply but no raycast) vs (Apply + hit
+                // but not Node).
+                log.Info($"tool: LMB fired — state={_state}, hitSomething={hitSomething}, hitEntity=#{(hitSomething ? hitEntity.Index : -1)}, hasNode={(hitSomething && EntityManager.HasComponent<Node>(hitEntity))}");
                 if (_state == State.Default)
                 {
                     if (hitSomething && EntityManager.HasComponent<Node>(hitEntity))

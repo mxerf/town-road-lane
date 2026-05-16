@@ -53,13 +53,33 @@ namespace TownRoadLane
         {
             if (_tool == null || _toolSystem.activeTool != _tool) return;
 
-            var endpoints = _tool.Endpoints;
-            if (endpoints == null || endpoints.Count == 0) return;
-
             var buf = _overlayRenderSystem.GetBuffer(out JobHandle deps);
+            JobHandle ourFallback = JobHandle.CombineDependencies(deps, Dependency);
+
+            var endpoints = _tool.Endpoints;
+            // Heartbeat: when the tool is active but no node is selected yet, draw a magenta ring
+            // at the cursor so the user can SEE the tool is live. Without this, "activated but no
+            // node clicked yet" is visually identical to "tool didn't activate at all".
+            if (endpoints == null || endpoints.Count == 0)
+            {
+                float3 cursor = _tool.CursorWorldPos;
+                if (math.lengthsq(cursor) > 0.01f)
+                {
+                    buf.DrawCircle(
+                        outlineColor: new Color(1f, 0.2f, 0.8f, 1f),
+                        fillColor: new Color(1f, 0.2f, 0.8f, 0.3f),
+                        outlineWidth: 0.2f,
+                        styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                        direction: new float2(0f, 1f),
+                        position: cursor,
+                        diameter: 3f);
+                }
+                _overlayRenderSystem.AddBufferWriter(ourFallback);
+                Dependency = ourFallback;
+                return;
+            }
             // We're not scheduling a job, but the buffer protocol still wants a writer handle.
-            // Combine our (no-op) dependency with the renderer's so it knows we're a writer.
-            JobHandle our = JobHandle.CombineDependencies(deps, Dependency);
+            JobHandle our = ourFallback;
 
             int sourceIdx = _tool.SourceEndpointIndex;
             int hoverIdx  = _tool.HoveredEndpointIndex;
