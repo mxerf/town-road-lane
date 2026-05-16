@@ -304,6 +304,16 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public ComponentLookup<MarkingOverride> m_MarkingOverrideData;
 
+		// === v2 phase 4 ===
+		// Per-node user-drawn marking pairs. When a node entity has a non-empty MarkingPair buffer,
+		// vanilla CreateSecondaryLane calls are skipped and only the user's pairs are emitted using
+		// m_UserPairMarkingPrefab (our edge-line clone). Empty/missing buffer → vanilla as today.
+		[ReadOnly]
+		public BufferLookup<MarkingPair> m_MarkingPairs;
+
+		[ReadOnly]
+		public Entity m_UserPairMarkingPrefab;
+
 		[ReadOnly]
 		public Entity m_DefaultTheme;
 
@@ -381,6 +391,14 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 				// RemoveUnusedOldLanes — anything we don't recreate gets cleaned up, so toggling the
 				// override on a live road removes its markings on the next update.
 				bool skipGeneration = m_MarkingOverrideData.TryGetComponent(owner, out var __markingOverride) && __markingOverride.HideAll;
+				// v2 phase 4: a node with a non-empty MarkingPair buffer fully overrides vanilla
+				// markings on that node. The pairs themselves are emitted in a separate pass after
+				// skipMarkingGeneration (added in phase 4e — phase 4a only wires the suppression).
+				// Edges are unaffected (pairs live only on nodes).
+				if (!skipGeneration && isNode && m_MarkingPairs.TryGetBuffer(owner, out var __pairs) && __pairs.Length > 0)
+				{
+					skipGeneration = true;
+				}
 				if (skipGeneration) { goto skipMarkingGeneration; }
 				EdgeGeometry edgeGeometry = default(EdgeGeometry);
 				Line3 line = default(Line3);
@@ -1884,6 +1902,10 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public ComponentLookup<MarkingOverride> __TownRoadLane_MarkingOverride_RO_ComponentLookup;
 
+		// v2 phase 4
+		[ReadOnly]
+		public BufferLookup<MarkingPair> __TownRoadLane_MarkingPair_RO_BufferLookup;
+
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public void __AssignHandles(ref SystemState state)
 		{
@@ -1924,6 +1946,7 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			__Game_Prefabs_SecondaryNetLane_RO_BufferLookup = state.GetBufferLookup<SecondaryNetLane>(isReadOnly: true);
 			__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup = state.GetBufferLookup<ObjectRequirementElement>(isReadOnly: true);
 			__TownRoadLane_MarkingOverride_RO_ComponentLookup = state.GetComponentLookup<MarkingOverride>(isReadOnly: true);
+			__TownRoadLane_MarkingPair_RO_BufferLookup = state.GetBufferLookup<MarkingPair>(isReadOnly: true);
 		}
 	}
 
@@ -1976,6 +1999,13 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		// `InternalCompilerInterface.Get*(ref __TypeHandle.X, ref CheckedStateRef)` per handle which
 		// does the same thing (Update + read); a single __AssignHandles call is equivalent.
 		__TypeHandle.__AssignHandles(ref base.CheckedStateRef);
+
+		// Resolve which edge-line clone to use for user-drawn marking pairs (phase 4). The clone Entities
+		// come from EdgeLineCloneSystem.ApplyOrUpdate, which runs once per session in PrefabUpdate. If
+		// they're Entity.Null (system hasn't run yet, or feature disabled), the per-node override path
+		// just skips emission — pairs will surface on the next frame after EdgeLineCloneSystem runs.
+		Entity userPairPrefab = PickUserPairPrefab();
+
 		JobHandle jobHandle = JobChunkExtensions.ScheduleParallel(new UpdateLanesJob
 		{
 			m_EntityType = __TypeHandle.__Unity_Entities_Entity_TypeHandle,
@@ -2015,6 +2045,8 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			m_PrefabSecondaryLanes = __TypeHandle.__Game_Prefabs_SecondaryNetLane_RO_BufferLookup,
 			m_LaneRequirements = __TypeHandle.__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup,
 			m_MarkingOverrideData = __TypeHandle.__TownRoadLane_MarkingOverride_RO_ComponentLookup,
+			m_MarkingPairs = __TypeHandle.__TownRoadLane_MarkingPair_RO_BufferLookup,
+			m_UserPairMarkingPrefab = userPairPrefab,
 			m_DefaultTheme = m_CityConfigurationSystem.defaultTheme,
 			m_LeftHandTraffic = m_CityConfigurationSystem.leftHandTraffic,
 			m_AppliedTypes = m_AppliedTypes,
@@ -2042,6 +2074,26 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 	[Preserve]
 	public CustomSecondaryLaneSystem()
 	{
+	}
+
+	// v2 phase 4: pick EU vs NA edge-line clone entity to use as the prefab for user-drawn marking
+	// pairs. We resolve through EdgeLineCloneSystem each frame (cheap — two property reads) so the
+	// entity stays fresh after K1 UpdatePrefab re-creations. Returns Entity.Null when
+	// EdgeLineCloneSystem hasn't applied yet (e.g. feature disabled at startup); the per-node
+	// override path skips emission in that case.
+	private Entity PickUserPairPrefab()
+	{
+		var sys = base.World.GetExistingSystemManaged<EdgeLineCloneSystem>();
+		if (sys == null) return Entity.Null;
+		var theme = m_CityConfigurationSystem.defaultTheme;
+		if (theme == Entity.Null) return sys.CloneEntityEU;
+		var prefabSys = base.World.GetExistingSystemManaged<PrefabSystem>();
+		if (prefabSys != null && prefabSys.TryGetPrefab<PrefabBase>(theme, out var themePrefab) && themePrefab != null)
+		{
+			var n = themePrefab.name;
+			if (!string.IsNullOrEmpty(n) && (n.Contains("North American") || n.StartsWith("NA "))) return sys.CloneEntityNA;
+		}
+		return sys.CloneEntityEU;
 	}
 
 }

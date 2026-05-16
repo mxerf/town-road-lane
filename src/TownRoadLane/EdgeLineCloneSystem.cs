@@ -64,6 +64,16 @@ namespace TownRoadLane
         private EntityQuery m_LanePrefabQuery;
         private bool m_Done;
 
+        // Resolved clone prefab entities, picked up by CustomSecondaryLaneSystem on its own resolve pass.
+        // We don't expose them — the consumer queries by name (same path it uses for any prefab).
+        private Entity m_CloneEntityEU;
+        private Entity m_CloneEntityNA;
+
+        /// <summary>Entity of the EU edge-line clone after ApplyOrUpdate. Entity.Null until the system runs.</summary>
+        public Entity CloneEntityEU => m_CloneEntityEU;
+        /// <summary>Entity of the NA edge-line clone after ApplyOrUpdate. Entity.Null until the system runs.</summary>
+        public Entity CloneEntityNA => m_CloneEntityNA;
+
         /// <summary>Names of the marking prefabs this system creates/updates — exposed for diagnostics.</summary>
         public static IEnumerable<string> CreatedPrefabNames { get { foreach (var r in kRecipes) yield return r.clone; } }
 
@@ -138,6 +148,12 @@ namespace TownRoadLane
 
                 int swapped = SwapMesh(cloneBase, mesh);
                 m_PrefabSystem.UpdatePrefab(cloneBase);
+                // Stash the clone entity for the phase-4 tool (CustomSecondaryLaneSystem reads this to
+                // know which prefab to emit user-drawn pairs with). K1: this entity will be replaced on
+                // the next UpdatePrefab; the consumer must re-query after each apply.
+                var cloneEntity = m_PrefabSystem.GetEntity(cloneBase);
+                if (cloneName.StartsWith("TownRoadLane EU")) m_CloneEntityEU = cloneEntity;
+                else m_CloneEntityNA = cloneEntity;
                 touched++;
                 log.Info($"applied '{cloneName}': hosts={cityLanes.Count}*2 mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
             }
