@@ -33,9 +33,28 @@ namespace TownRoadLane
             // Resolve the action once at OnCreate — the ProxyAction reference is stable across the
             // session and reflects rebinds the user makes through the mod's settings UI.
             if (Mod.Settings != null)
+            {
                 _toggleAction = Mod.Settings.GetAction(Setting.ToggleMarkingTool);
+                if (_toggleAction != null)
+                {
+                    _toggleAction.shouldBeEnabled = true;
+                    log.Info($"MarkingToolHotkeySystem: OnCreate — action '{Setting.ToggleMarkingTool}' resolved, enabled");
+                }
+                else
+                {
+                    log.Warn($"MarkingToolHotkeySystem: OnCreate — GetAction('{Setting.ToggleMarkingTool}') returned null");
+                }
+            }
             else
+            {
                 log.Warn("MarkingToolHotkeySystem: settings not initialised, hotkey will not work");
+            }
+        }
+
+        protected override void OnDestroy()
+        {
+            if (_toggleAction != null) _toggleAction.shouldBeEnabled = false;
+            base.OnDestroy();
         }
 
         protected override void OnUpdate()

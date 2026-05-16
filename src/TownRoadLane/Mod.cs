@@ -28,6 +28,10 @@ namespace TownRoadLane
                 log.Info($"Current mod asset at {asset.path}");
 
             Settings = new Setting(this);
+            // RegisterKeyBindings must run BEFORE GetAction() resolves anything. Without this call
+            // the ProxyAction for ToggleMarkingTool never fires (silent — no warn). Traffic's
+            // Mod.cs:56-57 does the same: RegisterKeyBindings before RegisterInOptionsUI.
+            Settings.RegisterKeyBindings();
             Settings.RegisterInOptionsUI();
             GameManager.instance.localizationManager.AddSource("en-US", new LocaleEN(Settings));
             AssetDatabase.global.LoadSettings(nameof(TownRoadLane), Settings, new Setting(this));

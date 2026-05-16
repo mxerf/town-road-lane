@@ -64,6 +64,12 @@ namespace TownRoadLane
         public override PrefabBase GetPrefab() => null;
         public override bool TrySetPrefab(PrefabBase prefab) => false;
 
+        protected override void OnCreate()
+        {
+            base.OnCreate();
+            log.Info($"MarkingNodeToolSystem: OnCreate — toolID='{toolID}' registered with ToolSystem.tools (count={m_ToolSystem.tools.Count})");
+        }
+
         protected override void OnStartRunning()
         {
             base.OnStartRunning();
