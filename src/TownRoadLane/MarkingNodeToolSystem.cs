@@ -139,7 +139,7 @@ namespace TownRoadLane
                 if (_hoverIdx >= 0)
                 {
                     var ep = _endpoints[_hoverIdx];
-                    log.Info($"tool: hover endpoint idx={_hoverIdx} edge=#{ep.edge.Index} lane={ep.laneIndex} isRight={ep.isRight}");
+                    log.Info($"tool: hover endpoint idx={_hoverIdx} edge=#{ep.edge.Index} gap={ep.gapIndex}");
                 }
                 else if (_lastLoggedHoverIdx >= 0)
                 {
@@ -170,13 +170,9 @@ namespace TownRoadLane
                 return inputDeps;
             }
 
-            // Secondary apply (RMB): delete pair whose source OR target is the hovered endpoint
-            // (only meaningful in NodeSelected).
-            if (secondaryApplyAction.WasPressedThisFrame() && _state == State.NodeSelected && _hoverIdx >= 0)
-            {
-                TryDeletePairAt(_endpoints[_hoverIdx]);
-                return inputDeps;
-            }
+            // Note: secondary apply (RMB) is no longer used for deletion — the create gesture is
+            // now a toggle (see SourceSelected branch below), matching Traffic's UX. RMB is left
+            // to vanilla cancelAction mapping where applicable.
 
             // Primary apply (LMB): state-machine transitions.
             if (applyAction.WasPressedThisFrame())
@@ -203,7 +199,7 @@ namespace TownRoadLane
                     {
                         _sourceIdx = _hoverIdx;
                         _state = State.SourceSelected;
-                        log.Info($"tool: source endpoint chosen — idx={_sourceIdx} edge=#{_endpoints[_sourceIdx].edge.Index} laneIdx={_endpoints[_sourceIdx].laneIndex} isRight={_endpoints[_sourceIdx].isRight}");
+                        log.Info($"tool: source endpoint chosen — idx={_sourceIdx} edge=#{_endpoints[_sourceIdx].edge.Index} gap={_endpoints[_sourceIdx].gapIndex}");
                     }
                     else if (hitSomething && EntityManager.HasComponent<Node>(hitEntity) && hitEntity != _selectedNode)
                     {
@@ -219,9 +215,10 @@ namespace TownRoadLane
                 {
                     if (_hoverIdx >= 0 && _hoverIdx != _sourceIdx)
                     {
-                        CommitPair(_endpoints[_sourceIdx], _endpoints[_hoverIdx]);
-                        // Stay in SourceSelected? Match Traffic UX: drop back to NodeSelected so the
-                        // user can pick a new source for the next pair.
+                        // Traffic-like toggle: if a pair already exists between source and target,
+                        // delete it. Otherwise create. Same gesture creates AND removes — no need
+                        // for a separate "delete mode" or RMB.
+                        TogglePair(_endpoints[_sourceIdx], _endpoints[_hoverIdx]);
                         _sourceIdx = -1;
                         _state = State.NodeSelected;
                     }
@@ -238,7 +235,9 @@ namespace TownRoadLane
         private void SelectNode(Entity node)
         {
             _selectedNode = node;
-            _endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
+            // Verbose extract — writes a per-edge / per-lane breakdown so we can debug missing
+            // endpoints without re-deploying. Cheap (only fires on node click).
+            _endpoints = MarkingEndpointExtractor.Extract(EntityManager, node, log: true);
             _sourceIdx = -1;
             _state = State.NodeSelected;
             int existingPairs = EntityManager.HasBuffer<MarkingPair>(node)
@@ -261,46 +260,42 @@ namespace TownRoadLane
             return best;
         }
 
-        private void CommitPair(MarkingEndpoint src, MarkingEndpoint dst)
+        /// <summary>Create-or-delete: if a pair with matching endpoints (order-insensitive) already
+        /// exists, remove it; otherwise append a new one. Matches Traffic-style toggle UX.</summary>
+        private void TogglePair(MarkingEndpoint src, MarkingEndpoint dst)
         {
             if (!EntityManager.HasBuffer<MarkingPair>(_selectedNode))
             {
                 EntityManager.AddBuffer<MarkingPair>(_selectedNode);
             }
             var buf = EntityManager.GetBuffer<MarkingPair>(_selectedNode);
-            buf.Add(new MarkingPair
-            {
-                sourceEdge = src.edge, sourceLaneIndex = src.laneIndex, sourceIsRight = src.isRight,
-                targetEdge = dst.edge, targetLaneIndex = dst.laneIndex, targetIsRight = dst.isRight,
-            });
-            // Mark the node Updated so CustomSecondaryLaneSystem reprocesses it on the next tick
-            // and the user sees the new state immediately (vanilla suppression kicks in).
-            if (!EntityManager.HasComponent<Updated>(_selectedNode))
-                EntityManager.AddComponent<Updated>(_selectedNode);
-            log.Info($"tool: committed pair #{buf.Length - 1} on node #{_selectedNode.Index} — "
-                + $"src(edge=#{src.edge.Index} lane={src.laneIndex} right={src.isRight}) → "
-                + $"dst(edge=#{dst.edge.Index} lane={dst.laneIndex} right={dst.isRight})");
-        }
 
-        private void TryDeletePairAt(MarkingEndpoint ep)
-        {
-            if (!EntityManager.HasBuffer<MarkingPair>(_selectedNode)) return;
-            var buf = EntityManager.GetBuffer<MarkingPair>(_selectedNode);
             for (int i = 0; i < buf.Length; i++)
             {
                 var p = buf[i];
-                bool matchSrc = p.sourceEdge == ep.edge && p.sourceLaneIndex == ep.laneIndex && p.sourceIsRight == ep.isRight;
-                bool matchDst = p.targetEdge == ep.edge && p.targetLaneIndex == ep.laneIndex && p.targetIsRight == ep.isRight;
-                if (matchSrc || matchDst)
+                bool sameDirection  = p.sourceEdge == src.edge && p.sourceGapIndex == src.gapIndex && p.targetEdge == dst.edge && p.targetGapIndex == dst.gapIndex;
+                bool swappedSides   = p.sourceEdge == dst.edge && p.sourceGapIndex == dst.gapIndex && p.targetEdge == src.edge && p.targetGapIndex == src.gapIndex;
+                if (sameDirection || swappedSides)
                 {
-                    log.Info($"tool: deleting pair #{i} on node #{_selectedNode.Index} (matched {(matchSrc ? "source" : "target")} side)");
+                    log.Info($"tool: toggled OFF pair #{i} on node #{_selectedNode.Index}");
                     buf.RemoveAt(i);
                     if (!EntityManager.HasComponent<Updated>(_selectedNode))
                         EntityManager.AddComponent<Updated>(_selectedNode);
                     return;
                 }
             }
-            log.Info($"tool: RMB at endpoint idx={_hoverIdx} but no pair found to delete");
+
+            buf.Add(new MarkingPair
+            {
+                sourceEdge = src.edge, sourceGapIndex = src.gapIndex,
+                targetEdge = dst.edge, targetGapIndex = dst.gapIndex,
+            });
+            if (!EntityManager.HasComponent<Updated>(_selectedNode))
+                EntityManager.AddComponent<Updated>(_selectedNode);
+            log.Info($"tool: toggled ON pair #{buf.Length - 1} on node #{_selectedNode.Index} — "
+                + $"src(edge=#{src.edge.Index} gap={src.gapIndex}) → "
+                + $"dst(edge=#{dst.edge.Index} gap={dst.gapIndex})");
         }
+
     }
 }

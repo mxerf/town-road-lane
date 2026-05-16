@@ -11,13 +11,15 @@ using UnityEngine;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Phase 4d: draws connector dots, drag line, and confirmed pairs while
-    /// <see cref="MarkingNodeToolSystem"/> is the active tool. Idle otherwise.
+    /// Phase 4d/4f overlay: draws gap-based connector dots, drag-curve to the hover/cursor,
+    /// and an outline-curve preview for every committed MarkingPair on the selected node.
+    /// Idle unless <see cref="MarkingNodeToolSystem"/> is the active tool.
+    /// All draws go through vanilla <see cref="OverlayRenderSystem"/>.
     ///
-    /// All draws go through vanilla <see cref="OverlayRenderSystem"/> — we get a Buffer per
-    /// frame, push primitives, and add a JobHandle so the renderer knows when we're done.
-    /// Endpoint count is small (~16 per node), so we draw directly on the main thread instead
-    /// of scheduling a burst job (Traffic's pattern). Pull this into a job if perf demands.
+    /// Curve shape (drag preview + committed pairs): control points are offset along each
+    /// endpoint's outward tangent by 1/3 of the chord length. This produces a smooth S/U
+    /// that always leaves the dot perpendicular to the edge (looks like a real marking line
+    /// flowing through the intersection), as opposed to the straight chord we had before.
     /// </summary>
     public partial class MarkingOverlaySystem : GameSystemBase
     {
@@ -27,19 +29,18 @@ namespace TownRoadLane
         private MarkingNodeToolSystem _tool;
         private OverlayRenderSystem _overlayRenderSystem;
 
-        // Visual tuning (meters / unity-alpha colours)
-        private const float kDotDiameter        = 1.4f;
-        private const float kDotOutlineWidth    = 0.15f;
-        private const float kDragLineWidth      = 0.35f;
+        private const float kDotDiameter        = 1.6f;
+        private const float kDotOutlineWidth    = 0.18f;
+        private const float kCurveWidth         = 0.35f;
         private const float kPairCurveWidth     = 0.30f;
 
-        // Phase 4d uses these. 4e wires source-selected highlight.
-        private static readonly Color kColRightDot    = new Color(0.30f, 0.85f, 1.00f, 0.95f); // cyan
-        private static readonly Color kColLeftDot     = new Color(1.00f, 0.65f, 0.20f, 0.95f); // orange
+        // Single-colour palette per the imho.JPG reference: orange dots, white when source/hover.
+        private static readonly Color kColDot         = new Color(1.00f, 0.55f, 0.10f, 0.95f);
         private static readonly Color kColOutline     = new Color(0.05f, 0.05f, 0.10f, 0.95f);
-        private static readonly Color kColSourceDot   = new Color(1.00f, 1.00f, 1.00f, 1.00f); // white, when selected
-        private static readonly Color kColPairCurve   = new Color(0.30f, 1.00f, 0.50f, 0.85f); // green
-        private static readonly Color kColDragLine    = new Color(1.00f, 1.00f, 1.00f, 0.85f);
+        private static readonly Color kColSourceDot   = new Color(1.00f, 1.00f, 1.00f, 1.00f);
+        private static readonly Color kColHoverDot    = new Color(1.00f, 0.85f, 0.50f, 1.00f);
+        private static readonly Color kColDragCurve   = new Color(1.00f, 1.00f, 1.00f, 0.85f);
+        private static readonly Color kColPairCurve   = new Color(0.30f, 1.00f, 0.50f, 0.85f);
 
         protected override void OnCreate()
         {
@@ -53,75 +54,58 @@ namespace TownRoadLane
         {
             if (_tool == null || _toolSystem.activeTool != _tool) return;
 
-            var buf = _overlayRenderSystem.GetBuffer(out JobHandle deps);
-            JobHandle ourFallback = JobHandle.CombineDependencies(deps, Dependency);
-
             var endpoints = _tool.Endpoints;
-            // Heartbeat: when the tool is active but no node is selected yet, draw a magenta ring
-            // at the cursor so the user can SEE the tool is live. Without this, "activated but no
-            // node clicked yet" is visually identical to "tool didn't activate at all".
-            if (endpoints == null || endpoints.Count == 0)
-            {
-                float3 cursor = _tool.CursorWorldPos;
-                if (math.lengthsq(cursor) > 0.01f)
-                {
-                    buf.DrawCircle(
-                        outlineColor: new Color(1f, 0.2f, 0.8f, 1f),
-                        fillColor: new Color(1f, 0.2f, 0.8f, 0.3f),
-                        outlineWidth: 0.2f,
-                        styleFlags: OverlayRenderSystem.StyleFlags.Projected,
-                        direction: new float2(0f, 1f),
-                        position: cursor,
-                        diameter: 3f);
-                }
-                _overlayRenderSystem.AddBufferWriter(ourFallback);
-                Dependency = ourFallback;
-                return;
-            }
-            // We're not scheduling a job, but the buffer protocol still wants a writer handle.
-            JobHandle our = ourFallback;
+            if (endpoints == null || endpoints.Count == 0) return;
+
+            var buf = _overlayRenderSystem.GetBuffer(out JobHandle deps);
+            JobHandle our = JobHandle.CombineDependencies(deps, Dependency);
 
             int sourceIdx = _tool.SourceEndpointIndex;
             int hoverIdx  = _tool.HoveredEndpointIndex;
 
-            // 1. Confirmed pairs first — they sit underneath everything else, so dots and the
-            //    drag-line stay readable when there are several pairs at a busy node.
+            // 1. Committed pairs (bottom layer). Drawn as smooth curves between the two endpoints,
+            //    using each endpoint's inward tangent so the curve leaves the dot perpendicular to
+            //    the road — matches imho.JPG sample.
             var node = _tool.SelectedNode;
             if (node != Entity.Null && EntityManager.HasBuffer<MarkingPair>(node))
             {
                 var pairs = EntityManager.GetBuffer<MarkingPair>(node, isReadOnly: true);
                 for (int p = 0; p < pairs.Length; p++)
                 {
-                    if (TryResolvePair(pairs[p], out float3 a, out float3 b))
+                    if (TryResolvePair(pairs[p], out float3 a, out float2 ta, out float3 b, out float2 tb))
                     {
-                        // Straight-segment "curve" — Bezier with control points evenly spaced.
-                        var bezier = new Bezier4x3(a, math.lerp(a, b, 0.33f), math.lerp(a, b, 0.66f), b);
+                        var bezier = BuildSmoothCurve(a, ta, b, tb);
                         buf.DrawCurve(kColPairCurve, bezier, kPairCurveWidth);
                     }
                 }
             }
 
-            // 2. Drag-line from source to cursor / hovered target (middle layer).
+            // 2. Drag preview from source to hovered target (or to free cursor when no hover).
             if (sourceIdx >= 0 && sourceIdx < endpoints.Count)
             {
-                float3 from = endpoints[sourceIdx].position;
-                float3 to = (hoverIdx >= 0 && hoverIdx < endpoints.Count)
-                    ? endpoints[hoverIdx].position
-                    : _tool.CursorWorldPos;
-                if (math.lengthsq(to - from) > 0.01f)
+                var src = endpoints[sourceIdx];
+                if (hoverIdx >= 0 && hoverIdx < endpoints.Count && hoverIdx != sourceIdx)
                 {
-                    buf.DrawLine(kColDragLine, new Line3.Segment(from, to), kDragLineWidth);
+                    var dst = endpoints[hoverIdx];
+                    var bezier = BuildSmoothCurve(src.position, src.tangent, dst.position, dst.tangent);
+                    buf.DrawCurve(kColDragCurve, bezier, kCurveWidth);
+                }
+                else
+                {
+                    // Free drag: straight line to cursor terrain hit.
+                    float3 to = _tool.CursorWorldPos;
+                    if (math.lengthsq(to - src.position) > 0.01f)
+                        buf.DrawLine(kColDragCurve, new Line3.Segment(src.position, to), kCurveWidth);
                 }
             }
 
-            // 3. Dots last so they're always on top. Source = white, hover = brightened, others
-            //    coloured by side (right = cyan, left = orange).
+            // 3. Dots on top. Source = white, hover = light orange, others = orange.
             for (int i = 0; i < endpoints.Count; i++)
             {
                 var ep = endpoints[i];
-                Color fill = ep.isRight ? kColRightDot : kColLeftDot;
-                if (i == sourceIdx)      fill = kColSourceDot;
-                else if (i == hoverIdx)  fill = Color.Lerp(fill, Color.white, 0.5f);
+                Color fill = kColDot;
+                if (i == sourceIdx)     fill = kColSourceDot;
+                else if (i == hoverIdx) fill = kColHoverDot;
 
                 buf.DrawCircle(
                     outlineColor: kColOutline,
@@ -138,54 +122,58 @@ namespace TownRoadLane
         }
 
         /// <summary>
-        /// Resolve a MarkingPair entry to its two world-space attach points. We re-derive them
-        /// the same way <see cref="MarkingEndpointExtractor"/> does — that keeps source and
-        /// rendering consistent without an extra cached struct.
+        /// Cubic Bezier whose control points are pushed along each endpoint's tangent by 1/3 of
+        /// the chord length. Tangent direction is taken to point INTO the node (away from the
+        /// endpoint's parent edge), so the curve leaves the dot smoothly even when the two
+        /// endpoints belong to roads facing different directions.
         /// </summary>
-        private bool TryResolvePair(MarkingPair pair, out float3 a, out float3 b)
+        private static Bezier4x3 BuildSmoothCurve(float3 a, float2 ta, float3 b, float2 tb)
         {
-            a = default; b = default;
-            if (!TryResolveEndpoint(pair.sourceEdge, pair.sourceLaneIndex, pair.sourceIsRight, out a)) return false;
-            if (!TryResolveEndpoint(pair.targetEdge, pair.targetLaneIndex, pair.targetIsRight, out b)) return false;
+            // tangent stored in MarkingEndpoint points OUTWARD from the node into the edge. The
+            // curve should leave the dot in the OPPOSITE direction (into the intersection), so
+            // we negate.
+            float chord = math.distance(a, b);
+            float pull = chord / 3f;
+            float3 ta3 = new float3(-ta.x, 0f, -ta.y);
+            float3 tb3 = new float3(-tb.x, 0f, -tb.y);
+            float3 ctrl1 = a + ta3 * pull;
+            float3 ctrl2 = b + tb3 * pull;
+            return new Bezier4x3(a, ctrl1, ctrl2, b);
+        }
+
+        /// <summary>
+        /// Resolve a MarkingPair entry to the two world-space attach points + tangents needed
+        /// for curve drawing. We re-derive them by running the same extractor logic in-place —
+        /// avoids caching a structure that would go stale on road edits.
+        /// </summary>
+        private bool TryResolvePair(MarkingPair pair, out float3 a, out float2 ta, out float3 b, out float2 tb)
+        {
+            a = default; ta = default; b = default; tb = default;
+            var node = _tool.SelectedNode;
+            if (node == Entity.Null) return false;
+            if (!TryResolveEndpoint(node, pair.sourceEdge, pair.sourceGapIndex, out a, out ta)) return false;
+            if (!TryResolveEndpoint(node, pair.targetEdge, pair.targetGapIndex, out b, out tb)) return false;
             return true;
         }
 
-        private bool TryResolveEndpoint(Entity edge, int laneIndex, bool isRight, out float3 pos)
+        private bool TryResolveEndpoint(Entity node, Entity edge, int gapIndex, out float3 pos, out float2 tan)
         {
-            pos = default;
-            if (!EntityManager.HasBuffer<Game.Net.SubLane>(edge)) return false;
-            var subs = EntityManager.GetBuffer<Game.Net.SubLane>(edge, isReadOnly: true);
-            if (laneIndex < 0 || laneIndex >= subs.Length) return false;
-            var lane = subs[laneIndex].m_SubLane;
-            if (!EntityManager.HasComponent<Game.Net.Curve>(lane)) return false;
-            if (!EntityManager.HasComponent<Game.Prefabs.PrefabRef>(lane)) return false;
-            var lanePrefab = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(lane).m_Prefab;
-            if (!EntityManager.HasComponent<Game.Prefabs.NetLaneData>(lanePrefab)) return false;
-
-            // Which end of the lane does our node sit on? Use EdgeLane.m_EdgeDelta + Edge parity,
-            // same as the extractor — we don't have the node here in fast-path though, so we
-            // accept whichever end matches; if both are valid (full-edge lane) we pick the start.
-            var curve = EntityManager.GetComponentData<Game.Net.Curve>(lane);
-            float2 width = EntityManager.GetComponentData<Game.Prefabs.NetLaneData>(lanePrefab).m_Width;
-
-            // Determine which end the user picked — we infer it by which end Curve is closer to
-            // the selected node's position. Slight overkill but robust to topology changes.
-            float3 nodePos = float3.zero;
-            var node = _tool.SelectedNode;
-            if (EntityManager.HasComponent<Game.Net.Node>(node))
-                nodePos = EntityManager.GetComponentData<Game.Net.Node>(node).m_Position;
-            bool atStart = math.lengthsq(curve.m_Bezier.a - nodePos) <= math.lengthsq(curve.m_Bezier.d - nodePos);
-
-            float3 endpoint = atStart ? curve.m_Bezier.a : curve.m_Bezier.d;
-            float2 tangent = atStart
-                ? math.normalizesafe(MathUtils.StartTangent(curve.m_Bezier).xz)
-                : math.normalizesafe(MathUtils.EndTangent(curve.m_Bezier).xz);
-
-            float2 off = isRight ? MathUtils.Right(tangent) : MathUtils.Left(tangent);
-            float halfWidth = (atStart ? width.x : (isRight ? width.y : width.x)) * 0.5f;
-            pos = endpoint;
-            pos.xz += off * halfWidth;
-            return true;
+            pos = default; tan = default;
+            var list = new System.Collections.Generic.List<MarkingEndpoint>(8);
+            // Extract only this edge's endpoints (avoids walking all ConnectedEdges of the node).
+            // We rely on the extractor's internal per-edge pass; the easiest way to reuse it is
+            // the public Extract(node) — small extra work but the lists are tiny.
+            var all = MarkingEndpointExtractor.Extract(EntityManager, node);
+            for (int i = 0; i < all.Count; i++)
+            {
+                if (all[i].edge == edge && all[i].gapIndex == gapIndex)
+                {
+                    pos = all[i].position;
+                    tan = all[i].tangent;
+                    return true;
+                }
+            }
+            return false;
         }
     }
 }

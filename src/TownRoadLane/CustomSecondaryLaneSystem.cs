@@ -279,6 +279,18 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public ComponentLookup<NetCompositionData> m_PrefabCompositionData;
 
+		// v2 phase 4: composition state per edge + composition lane buffer per prefab + per-edge
+		// EdgeGeometry component lookup. Needed by EmitUserPairs to project gap-based endpoints
+		// to world-space inside the Burst job.
+		[ReadOnly]
+		public ComponentLookup<Composition> m_CompositionData;
+
+		[ReadOnly]
+		public BufferLookup<NetCompositionLane> m_PrefabCompositionLanes;
+
+		[ReadOnly]
+		public ComponentLookup<EdgeGeometry> m_EdgeGeometryData;
+
 		[ReadOnly]
 		public ComponentLookup<ParkingLaneData> m_PrefabParkingLaneData;
 
@@ -392,13 +404,11 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 				// override on a live road removes its markings on the next update.
 				bool skipGeneration = m_MarkingOverrideData.TryGetComponent(owner, out var __markingOverride) && __markingOverride.HideAll;
 				// v2 phase 4: a node with a non-empty MarkingPair buffer fully overrides vanilla
-				// markings on that node. The pairs themselves are emitted in a separate pass after
-				// skipMarkingGeneration (added in phase 4e — phase 4a only wires the suppression).
-				// Edges are unaffected (pairs live only on nodes).
-				if (!skipGeneration && isNode && m_MarkingPairs.TryGetBuffer(owner, out var __pairs) && __pairs.Length > 0)
-				{
-					skipGeneration = true;
-				}
+				// markings on that node — vanilla generation is skipped, then a dedicated
+				// EmitUserPairs pass after skipMarkingGeneration creates marker sublanes for
+				// each pair using m_UserPairMarkingPrefab (our edge-line clone).
+				bool hasUserPairs = isNode && m_MarkingPairs.TryGetBuffer(owner, out var __pairs) && __pairs.Length > 0;
+				if (hasUserPairs) skipGeneration = true;
 				if (skipGeneration) { goto skipMarkingGeneration; }
 				EdgeGeometry edgeGeometry = default(EdgeGeometry);
 				Line3 line = default(Line3);
@@ -906,10 +916,185 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 				//      (vanilla offsets the curve to the right of the lane). LeftLimit → leftLane
 				//      (offsets left). Without this distinction the line falls on the inner side.
 				skipMarkingGeneration:
+				// Phase 4 step 2: when this node has MarkingPair entries, emit one marker sublane
+				// per pair using our edge-line clone prefab. The OldLanes lookup (populated by
+				// FillOldLaneBuffer above) is consulted via TryReuseOldLane to recycle existing
+				// sublanes on update — same idiom vanilla's CreateSecondaryLane uses at
+				// SecondaryLaneSystem.cs:1442.
+				if (hasUserPairs && m_UserPairMarkingPrefab != Entity.Null)
+				{
+					EmitUserPairs(chunkIndex, ref laneIndex, owner, ownerTemp, flag, laneBuffer);
+				}
 				RemoveUnusedOldLanes(chunkIndex, lanes, laneBuffer.m_OldLanes);
 				laneBuffer.Clear();
 			}
 			laneBuffer.Dispose();
+		}
+
+		/// <summary>
+		/// v2 phase 4 step 2: emit one secondary-lane sublane per <see cref="MarkingPair"/> on the
+		/// node. Each pair becomes a smooth Bezier connecting the two endpoint world positions
+		/// (derived in-place from <see cref="Composition.m_Edge"/>'s NetCompositionLane buffer,
+		/// matching <see cref="TownRoadLane.MarkingEndpointExtractor"/>'s formula), parented to
+		/// the node entity as Owner. The marker prefab is <see cref="m_UserPairMarkingPrefab"/>.
+		/// </summary>
+		private void EmitUserPairs(int chunkIndex, ref int laneIndex, Entity ownerNode, Temp ownerTemp, bool isTemp, LaneBuffer laneBuffer)
+		{
+			var pairs = m_MarkingPairs[ownerNode];
+			for (int p = 0; p < pairs.Length; p++)
+			{
+				var pair = pairs[p];
+				if (!TryResolveEndpoint(ownerNode, pair.sourceEdge, pair.sourceGapIndex, out float3 srcPos, out float2 srcTan)) continue;
+				if (!TryResolveEndpoint(ownerNode, pair.targetEdge, pair.targetGapIndex, out float3 dstPos, out float2 dstTan)) continue;
+
+				// Tangents point INTO their respective edges (away from the node). For the connector
+				// curve to leave each dot heading into the intersection we negate, just like the
+				// overlay does — that keeps the visible Bezier and the actual marking aligned.
+				float chord = math.distance(srcPos, dstPos);
+				float pull = chord / 3f;
+				float3 srcTan3 = new float3(-srcTan.x, 0f, -srcTan.y);
+				float3 dstTan3 = new float3(-dstTan.x, 0f, -dstTan.y);
+				Bezier4x3 bez = new Bezier4x3(srcPos, srcPos + srcTan3 * pull, dstPos + dstTan3 * pull, dstPos);
+
+				Curve curveData = new Curve { m_Bezier = bez, m_Length = MathUtils.Length(bez) };
+
+				EmitMarkerSublane(chunkIndex, ref laneIndex, ownerNode, m_UserPairMarkingPrefab, curveData, ownerTemp, isTemp, laneBuffer);
+			}
+		}
+
+		/// <summary>
+		/// Resolve a (edge, gapIndex) pair to its world-space position + into-edge tangent — same
+		/// formula <see cref="TownRoadLane.MarkingEndpointExtractor"/> uses on the managed side,
+		/// rewritten here against ECS lookups so it runs inside the Burst job.
+		/// </summary>
+		private bool TryResolveEndpoint(Entity node, Entity edgeEntity, int gapIndex, out float3 pos, out float2 tangent)
+		{
+			pos = default; tangent = default;
+			if (!m_EdgeData.HasComponent(edgeEntity)) return false;
+			var edge = m_EdgeData[edgeEntity];
+			bool nodeIsStart = edge.m_Start == node;
+			bool nodeIsEnd   = edge.m_End == node;
+			if (!nodeIsStart && !nodeIsEnd) return false;
+
+			// Lookups: composition (per-edge ECS state), prefab composition entity (carries
+			// NetCompositionLane buffer).
+			// (m_CompositionData / m_PrefabCompositionLanes are wired in OnUpdate — see below.)
+			if (!m_CompositionData.HasComponent(edgeEntity)) return false;
+			var composition = m_CompositionData[edgeEntity];
+			Entity compPrefab = composition.m_Edge;
+			if (compPrefab == Entity.Null) return false;
+			if (!m_PrefabCompositionLanes.HasBuffer(compPrefab)) return false;
+			if (!m_PrefabCompositionData.HasComponent(compPrefab)) return false;
+			var compLanes = m_PrefabCompositionLanes[compPrefab];
+			var compData = m_PrefabCompositionData[compPrefab];
+			float halfWidth = compData.m_Width * 0.5f;
+
+			// Walk composition lanes, keep Road carriageway entries, dedupe by lateral X.
+			// NativeArray Allocator.Temp is the Burst-safe equivalent of stackalloc — the array
+			// is freed when the job's outer scope exits. Lane counts are tiny (<= ~10) so the
+			// allocation is cheap.
+			const int kMaxLanes = 16;
+			var xs = new NativeArray<float>(kMaxLanes, Allocator.Temp);
+			var hws = new NativeArray<float>(kMaxLanes, Allocator.Temp);
+			int nLanes = 0;
+			for (int i = 0; i < compLanes.Length && nLanes < kMaxLanes; i++)
+			{
+				var cl = compLanes[i];
+				if ((cl.m_Flags & LaneFlags.Road) == 0) continue;
+				if ((cl.m_Flags & (LaneFlags.Secondary | LaneFlags.Utility | LaneFlags.Master)) != 0) continue;
+				float x = cl.m_Position.x;
+				float laneHW = 0f;
+				if (m_PrefabLaneData.HasComponent(cl.m_Lane))
+					laneHW = m_PrefabLaneData[cl.m_Lane].m_Width * 0.5f;
+				int found = -1;
+				for (int j = 0; j < nLanes; j++) { if (xs[j] == x) { found = j; break; } }
+				if (found >= 0) hws[found] = math.max(hws[found], laneHW);
+				else { xs[nLanes] = x; hws[nLanes] = laneHW; nLanes++; }
+			}
+			if (nLanes == 0) { xs.Dispose(); hws.Dispose(); return false; }
+
+			// Sort by lateral X ascending (insertion sort — n is tiny).
+			for (int i = 1; i < nLanes; i++)
+			{
+				float kx = xs[i], kh = hws[i];
+				int j = i - 1;
+				while (j >= 0 && xs[j] > kx) { xs[j + 1] = xs[j]; hws[j + 1] = hws[j]; j--; }
+				xs[j + 1] = kx; hws[j + 1] = kh;
+			}
+
+			// gap 0 = left kerb, gap nLanes = right kerb, gap i in between = midpoint of two lanes.
+			float lateralX;
+			if (gapIndex <= 0) lateralX = xs[0] - hws[0];
+			else if (gapIndex >= nLanes) lateralX = xs[nLanes - 1] + hws[nLanes - 1];
+			else lateralX = (xs[gapIndex - 1] + xs[gapIndex]) * 0.5f;
+			xs.Dispose(); hws.Dispose();
+
+			// EdgeGeometry cap chord — same calculation MarkingEndpointExtractor uses.
+			if (!m_EdgeGeometryData.HasComponent(edgeEntity)) return false;
+			var geom = m_EdgeGeometryData[edgeEntity];
+			float3 leftAtNode, rightAtNode, tangentSrc;
+			if (nodeIsStart)
+			{
+				leftAtNode = geom.m_Start.m_Left.a;
+				rightAtNode = geom.m_Start.m_Right.a;
+				tangentSrc = geom.m_Start.m_Right.b - geom.m_Start.m_Right.a;
+			}
+			else
+			{
+				leftAtNode = geom.m_End.m_Left.d;
+				rightAtNode = geom.m_End.m_Right.d;
+				tangentSrc = geom.m_End.m_Right.c - geom.m_End.m_Right.d;
+			}
+			tangent = math.normalizesafe(tangentSrc.xz);
+
+			float t = math.saturate((lateralX + halfWidth) / math.max(0.001f, halfWidth * 2f));
+			pos = math.lerp(leftAtNode, rightAtNode, t);
+			return true;
+		}
+
+		/// <summary>
+		/// Minimal CreateSecondaryLane: builds a marker sublane entity with the components
+		/// vanilla's CreateSecondaryLane sets at SecondaryLaneSystem.cs:1468-1486. Skips the
+		/// hanging-lane + temp-edit branches — phase 4 commits are permanent edits, not
+		/// previews. Recycles an OldLanes entry if one exists for this (lane,prefab) key.
+		/// </summary>
+		private void EmitMarkerSublane(int chunkIndex, ref int laneIndex, Entity ownerNode, Entity prefab, Curve curveData, Temp ownerTemp, bool isTemp, LaneBuffer laneBuffer)
+		{
+			PrefabRef component = new PrefabRef(prefab);
+			Owner componentOwner = new Owner { m_Owner = ownerNode };
+			Elevation componentElevation = default(Elevation);
+			Lane lane = new Lane
+			{
+				m_StartNode  = new PathNode(new PathNode(ownerNode, (ushort)laneIndex++), secondaryNode: true),
+				m_MiddleNode = new PathNode(new PathNode(ownerNode, (ushort)laneIndex++), secondaryNode: true),
+				m_EndNode    = new PathNode(new PathNode(ownerNode, (ushort)laneIndex++), secondaryNode: true),
+			};
+			LaneKey key = new LaneKey(lane, prefab);
+
+			if (laneBuffer.m_OldLanes.TryGetValue(key, out var oldEntity))
+			{
+				laneBuffer.m_OldLanes.Remove(key);
+				m_CommandBuffer.SetComponent(chunkIndex, oldEntity, curveData);
+				m_CommandBuffer.RemoveComponent<Deleted>(chunkIndex, oldEntity);
+				m_CommandBuffer.AddComponent(chunkIndex, oldEntity, default(Updated));
+				return;
+			}
+
+			if (!m_PrefabLaneArchetypeData.HasComponent(prefab)) return;
+			var archetypeData = m_PrefabLaneArchetypeData[prefab];
+			Entity e = m_CommandBuffer.CreateEntity(chunkIndex, archetypeData.m_LaneArchetype);
+			m_CommandBuffer.SetComponent(chunkIndex, e, component);
+			m_CommandBuffer.SetComponent(chunkIndex, e, lane);
+			m_CommandBuffer.SetComponent(chunkIndex, e, curveData);
+			m_CommandBuffer.AddComponent(chunkIndex, e, componentOwner);
+			m_CommandBuffer.AddComponent(chunkIndex, e, componentElevation);
+			// Diagnostic: explicitly tag Created + Updated so downstream systems (lane validation,
+			// CullingInfo init, rendering setup) treat this entity as freshly-spawned. Vanilla
+			// CreateSecondaryLane relies on the archetype carrying these from bake; if our archetype
+			// strips them on CreateEntity, entities get garbage-collected on the next pass. We've
+			// seen the disappearance pattern in the dump (8 → 6 → 4 → 0 over a few seconds).
+			m_CommandBuffer.AddComponent(chunkIndex, e, default(Created));
+			m_CommandBuffer.AddComponent(chunkIndex, e, default(Updated));
 		}
 
 		private void FitToParkingLane(Entity lane, Curve curve, PrefabRef prefabRef, float2 sideOffset, out Bounds1 curveBounds, out ulong blockedMask, out int slotCount, out float slotAngle, out bool2 skipStartEnd)
@@ -1906,6 +2091,15 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public BufferLookup<MarkingPair> __TownRoadLane_MarkingPair_RO_BufferLookup;
 
+		[ReadOnly]
+		public ComponentLookup<Composition> __Game_Net_Composition_RO_ComponentLookup;
+
+		[ReadOnly]
+		public BufferLookup<NetCompositionLane> __Game_Prefabs_NetCompositionLane_RO_BufferLookup;
+
+		[ReadOnly]
+		public ComponentLookup<EdgeGeometry> __Game_Net_EdgeGeometry_RO_ComponentLookup;
+
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public void __AssignHandles(ref SystemState state)
 		{
@@ -1947,6 +2141,9 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup = state.GetBufferLookup<ObjectRequirementElement>(isReadOnly: true);
 			__TownRoadLane_MarkingOverride_RO_ComponentLookup = state.GetComponentLookup<MarkingOverride>(isReadOnly: true);
 			__TownRoadLane_MarkingPair_RO_BufferLookup = state.GetBufferLookup<MarkingPair>(isReadOnly: true);
+			__Game_Net_Composition_RO_ComponentLookup = state.GetComponentLookup<Composition>(isReadOnly: true);
+			__Game_Prefabs_NetCompositionLane_RO_BufferLookup = state.GetBufferLookup<NetCompositionLane>(isReadOnly: true);
+			__Game_Net_EdgeGeometry_RO_ComponentLookup = state.GetComponentLookup<EdgeGeometry>(isReadOnly: true);
 		}
 	}
 
@@ -2046,6 +2243,9 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			m_LaneRequirements = __TypeHandle.__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup,
 			m_MarkingOverrideData = __TypeHandle.__TownRoadLane_MarkingOverride_RO_ComponentLookup,
 			m_MarkingPairs = __TypeHandle.__TownRoadLane_MarkingPair_RO_BufferLookup,
+			m_CompositionData = __TypeHandle.__Game_Net_Composition_RO_ComponentLookup,
+			m_PrefabCompositionLanes = __TypeHandle.__Game_Prefabs_NetCompositionLane_RO_BufferLookup,
+			m_EdgeGeometryData = __TypeHandle.__Game_Net_EdgeGeometry_RO_ComponentLookup,
 			m_UserPairMarkingPrefab = userPairPrefab,
 			m_DefaultTheme = m_CityConfigurationSystem.defaultTheme,
 			m_LeftHandTraffic = m_CityConfigurationSystem.leftHandTraffic,

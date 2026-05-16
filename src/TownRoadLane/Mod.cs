@@ -78,6 +78,10 @@ namespace TownRoadLane
             // activeTool == MarkingNodeToolSystem; idle otherwise. Rendering phase is fine here
             // (we read tool state, write to vanilla OverlayRenderSystem.Buffer).
             updateSystem.UpdateAt<MarkingOverlaySystem>(SystemUpdatePhase.Rendering);
+
+            // Phase 4 step 2 diagnostic — counts our cloned-prefab sublanes every 60 frames.
+            // Remove once emission is verified working.
+            updateSystem.UpdateAt<UserPairEmissionDumpSystem>(SystemUpdatePhase.GameSimulation);
         }
 
         public void OnDispose()
