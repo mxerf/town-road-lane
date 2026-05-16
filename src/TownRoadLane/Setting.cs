@@ -28,6 +28,9 @@ namespace TownRoadLane
         [SettingsUISection(kSection, kFeatureGroup)]
         public bool EdgeLineEnabled { get; set; } = true;
 
+        [SettingsUISection(kSection, kFeatureGroup)]
+        public bool ParkingLineEnabled { get; set; } = true;
+
         // --- Dev/debug toggle (kept from phase 1; will be replaced by the tool eventually) ---
 
         [SettingsUIButton]
@@ -44,6 +47,7 @@ namespace TownRoadLane
         public override void SetDefaults()
         {
             EdgeLineEnabled = true;
+            ParkingLineEnabled = true;
         }
     }
 
@@ -64,6 +68,10 @@ namespace TownRoadLane
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EdgeLineEnabled)), "Edge line on city roads" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.EdgeLineEnabled)),
                     "Adds the curb-side edge line to ordinary city roads (3 m car lanes), the way highway roads have it. Takes effect when the next road update flows through (place / move a piece nearby, or use the toggle button below)." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingLineEnabled)), "Parking line on parallel parking" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingLineEnabled)),
+                    "Draws a longitudinal line between the parallel street-parking zone and the adjacent traffic lane (vanilla Car Bay Line, the marking used by Asymmetric Avenue)." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ToggleAllMarkings)), "Toggle all markings (dev)" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleAllMarkings)),

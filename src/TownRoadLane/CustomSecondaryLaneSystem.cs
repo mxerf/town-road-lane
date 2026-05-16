@@ -2174,7 +2174,8 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		}
 		finally { ents.Dispose(); }
 
-		// Done once both edge-line prefabs and the anchor lane are found.
+		// Done once every prefab we need is found. New entries here MUST be added to this gate too —
+		// otherwise the resolve loop runs every frame.
 		if (m_EdgeLinePrefabEU != Entity.Null && m_EdgeLinePrefabNA != Entity.Null && m_CityDriveLane3Prefab != Entity.Null)
 		{
 			m_PrefabsResolved = true;
