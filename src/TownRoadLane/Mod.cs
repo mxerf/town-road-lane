@@ -37,6 +37,13 @@ namespace TownRoadLane
             // ParkingPairDumpSystem is kept in the tree for phase 4 endpoint-extraction debugging.
             // Re-register when needed: updateSystem.UpdateAt<ParkingPairDumpSystem>(SystemUpdatePhase.GameSimulation);
 
+            // Layer 1: clone vanilla marking prefabs (one-shot per session, self-disables after first run).
+            // Both must live in PrefabUpdate so PrefabSystem.UpdatePrefab fires NetInitializeSystem on the
+            // same frame and the SecondaryNetLane buffers are baked before road geometry processes them.
+            // See K2 / K4 in IMPLEMENTATION_PLAN.md.
+            updateSystem.UpdateAt<EdgeLineCloneSystem>(SystemUpdatePhase.PrefabUpdate);
+            updateSystem.UpdateAt<ParkingLineCloneSystem>(SystemUpdatePhase.PrefabUpdate);
+
             // Disable vanilla markings generator. Cars still drive normally — LaneSystem (primary lanes)
             // is untouched; only the secondary marking pass is replaced.
             var vanilla = updateSystem.World.GetOrCreateSystemManaged<SecondaryLaneSystem>();
@@ -52,8 +59,9 @@ namespace TownRoadLane
             updateSystem.UpdateAt<CustomSecondaryLaneSystem>(SystemUpdatePhase.Modification4B);
             log.Info($"CustomSecondaryLaneSystem registered at Modification4B");
 
-            // Settings-button handler. Idle until the user clicks; touches EntityManager directly so
-            // Modification1 is fine (no SafeCommandBufferSystem dance needed).
+            // "Reapply markings" button handler. Idle until the user clicks; re-runs both clone systems'
+            // ApplyOrUpdate then mass-marks edges/nodes Updated. Modification1 is fine here (no
+            // SafeCommandBufferSystem dance needed — we touch EntityManager directly).
             updateSystem.UpdateAt<MarkingToggleSystem>(SystemUpdatePhase.Modification1);
         }
 
