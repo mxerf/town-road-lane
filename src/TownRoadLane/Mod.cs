@@ -34,10 +34,11 @@ namespace TownRoadLane
 
             // Read-only structural dump, useful when something changes between game patches.
             updateSystem.UpdateAt<RoadPrefabDumpSystem>(SystemUpdatePhase.PrefabUpdate);
-            // CarLaneFlagsDumpSystem kept in the project but not registered. Wire it in temporarily
-            // (UpdateAt<...>(SystemUpdatePhase.GameSimulation)) when the edge-line inject or its
-            // sibling logic for parking misbehaves; it dumps CarLane.m_Flags per Car Drive Lane 3
-            // and separates physical edge lanes from intersection-routing sublanes.
+            // Diagnostics for the inject paths. Both are one-shot — they dump on first load and then
+            // self-disable, so they're free in steady state. We leave them registered while we iterate
+            // on the curb / parking inject logic; pull them once everything settles.
+            updateSystem.UpdateAt<CarLaneFlagsDumpSystem>(SystemUpdatePhase.GameSimulation);
+            updateSystem.UpdateAt<ParkingLaneFlagsDumpSystem>(SystemUpdatePhase.GameSimulation);
 
             // Disable vanilla markings generator. Cars still drive normally — LaneSystem (primary lanes)
             // is untouched; only the secondary marking pass is replaced.
