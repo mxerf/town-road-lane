@@ -9,10 +9,10 @@ using TownRoadLane.Diagnostics;
 namespace TownRoadLane
 {
     /// <summary>
-    /// v2 phase 0: disable vanilla <see cref="SecondaryLaneSystem"/> and run our drop-in copy
-    /// <see cref="CustomSecondaryLaneSystem"/> instead. The copy is currently behaviour-identical
-    /// to vanilla — phase 1 will add the per-edge <c>MarkingOverride</c> read inside
-    /// <c>UpdateLanesJob.UpdateLanes</c>.
+    /// Entry point. Disables vanilla <see cref="SecondaryLaneSystem"/>, registers our drop-in copy
+    /// <see cref="CustomSecondaryLaneSystem"/> (Layer 2) plus the per-entity <c>MarkingOverride</c>
+    /// toggle (Layer 3). Layers 1 (clone systems) and 4 (node UI tool) are added in later phases —
+    /// see IMPLEMENTATION_PLAN.md.
     /// </summary>
     public class Mod : IMod
     {
@@ -34,17 +34,8 @@ namespace TownRoadLane
 
             // Read-only structural dump, useful when something changes between game patches.
             updateSystem.UpdateAt<RoadPrefabDumpSystem>(SystemUpdatePhase.PrefabUpdate);
-            // One-shot prefab patcher (idiom borrowed from v1.x EdgeMarkingPatchSystem): append city
-            // drive lanes to 'Car Bay Line' m_LeftLanes so the vanilla SecondaryLane pipeline draws a
-            // parking line between Parking Lane 2 and the adjacent carriageway on ordinary city roads.
-            // Lives in PrefabUpdate so it runs once before road entities are baked.
-            updateSystem.UpdateAt<ParkingLineLinkSystem>(SystemUpdatePhase.PrefabUpdate);
-            // Diagnostics for the inject paths. Both are one-shot — they dump on first load and then
-            // self-disable, so they're free in steady state. We leave them registered while we iterate
-            // on the curb / parking inject logic; pull them once everything settles.
-            updateSystem.UpdateAt<CarLaneFlagsDumpSystem>(SystemUpdatePhase.GameSimulation);
-            updateSystem.UpdateAt<ParkingLaneFlagsDumpSystem>(SystemUpdatePhase.GameSimulation);
-            updateSystem.UpdateAt<ParkingPairDumpSystem>(SystemUpdatePhase.GameSimulation);
+            // ParkingPairDumpSystem is kept in the tree for phase 4 endpoint-extraction debugging.
+            // Re-register when needed: updateSystem.UpdateAt<ParkingPairDumpSystem>(SystemUpdatePhase.GameSimulation);
 
             // Disable vanilla markings generator. Cars still drive normally — LaneSystem (primary lanes)
             // is untouched; only the secondary marking pass is replaced.
