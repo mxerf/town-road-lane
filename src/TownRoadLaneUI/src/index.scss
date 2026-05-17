@@ -1,0 +1,96 @@
+// Global styles — applied via MiniCssExtractPlugin straight into the page.
+// All component-scoped styles live in *.module.scss files (Sass modules).
+
+.trl-panel {
+  position: fixed;
+  top: 80px;
+  right: 16px;
+  width: 320px;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  background: rgba(20, 24, 32, 0.92);
+  color: #e8eaed;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-family: "Roboto", sans-serif;
+  font-size: 12px;
+  pointer-events: auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+
+  &__title {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  &__meta {
+    color: #9aa0a6;
+    font-size: 11px;
+    margin-bottom: 10px;
+  }
+
+  &__line {
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-bottom: 8px;
+  }
+
+  &__line-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+
+  &__line-style {
+    font-size: 10px;
+    color: #9aa0a6;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  &__segment {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px;
+    margin: 2px 0;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    &--hidden {
+      opacity: 0.45;
+    }
+  }
+
+  &__segment-info {
+    font-family: "Roboto Mono", monospace;
+    font-size: 11px;
+  }
+
+  &__toggle-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: inherit;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: background 0.12s ease;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+  }
+}

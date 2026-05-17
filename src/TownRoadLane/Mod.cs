@@ -19,9 +19,14 @@ namespace TownRoadLane
         public static ILog log = LogManager.GetLogger($"{nameof(TownRoadLane)}.{nameof(Mod)}").SetShowsErrorsInUI(false);
 
         public static Setting Settings { get; private set; }
+        // Singleton handle to the live mod instance — needed by TownRoadLaneUISystem so it can
+        // resolve its own ExecutableAsset path to read the React bundle. ModManager indexes
+        // assets by mod instance; using a fresh new Mod() would lose that mapping.
+        public static Mod Instance { get; private set; }
 
         public void OnLoad(UpdateSystem updateSystem)
         {
+            Instance = this;
             log.Info(nameof(OnLoad));
 
             if (GameManager.instance.modManager.TryGetExecutableAsset(this, out var asset))
@@ -106,6 +111,9 @@ namespace TownRoadLane
             // intentionally not registered any more — its TRLPairLink entities get GC'd by
             // MarkingSegmentEmissionSystem on first tick after migration.
             updateSystem.UpdateAt<MarkingSegmentEmissionSystem>(SystemUpdatePhase.Modification1);
+
+            // Stage 5d: React panel bridge. UISystemBase wants UIUpdate phase.
+            updateSystem.UpdateAt<TownRoadLaneUISystem>(SystemUpdatePhase.UIUpdate);
 
             // MarkingMeshRenderSystem (HDRP/Unlit + GameObject pipeline) kept as commented
             // fallback in case ECS path reveals an unknown blocker. Source file stays in tree.

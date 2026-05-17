@@ -18,7 +18,9 @@ namespace TownRoadLane
     /// </summary>
     public enum MarkingStyle : int
     {
-        Solid  = 0,
-        Dashed = 1,
+        Solid     = 0,
+        Dashed    = 1,
+        G87Solid  = 2,
+        G87Dashed = 3,
     }
 }

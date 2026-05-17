@@ -69,6 +69,12 @@
 		<Reference Include="Unity.RenderPipelines.HighDefinition.Runtime">
 			<Private>false</Private>
 		</Reference>
+		<!-- Stage 5d: React panel bridge needs cohtml.Net (View.ExecuteScript) and the
+		     UISystemBase / GetterValueBinding plumbing from Game's UI assembly. The latter
+		     comes in via the Game reference; the former needs an explicit assembly link. -->
+		<Reference Include="cohtml.Net">
+			<Private>false</Private>
+		</Reference>
 	</ItemGroup>
 
 	<ItemGroup>
