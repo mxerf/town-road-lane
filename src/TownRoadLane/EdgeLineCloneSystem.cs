@@ -10,7 +10,8 @@ namespace TownRoadLane
 {
     /// <summary>
     /// Gives ordinary city roads (3 m car lanes) the curb-side edge marking line that highway roads
-    /// already have.
+    /// already have, AND clones extra marking prefabs (one per <see cref="MarkingStyle"/>) so the
+    /// per-line UI tool can pick a style at draw time.
     ///
     /// v1.1 (commit 342afa4) patched the vanilla 'EU/NA Highway Edge Line' in place — appending city
     /// drive lanes to its m_LeftLanes. v2 instead CLONES that prefab so we can swap its mesh
@@ -19,6 +20,12 @@ namespace TownRoadLane
     /// NetInitializeSystem reverse-indexes our entries onto the vanilla lane prefab's SecondaryNetLane
     /// buffer — and any road (including Road Builder roads) that uses 'Car Drive Lane 3' picks up our
     /// markings automatically. See RESEARCH_road_builder.md §5.
+    ///
+    /// Stage 5c extension: for each style added to <see cref="MarkingStyle"/>, register a
+    /// (sourcePrefab, clonedPrefabName) recipe in <see cref="kStyleRecipes"/>. Source prefab must
+    /// be a vanilla NetLaneGeometryPrefab with SecondaryLane (else clone is skipped with a warn).
+    /// Each style gets its own EU + NA clone. Lookup at emission time goes via
+    /// <see cref="GetCloneEntity(MarkingStyle, bool)"/>.
     ///
     /// Per city lane we add TWO SecondaryLaneInfo entries, exact replica of what vanilla uses for
     /// 'Highway Drive Lane 3' on its own edge line:
@@ -52,42 +59,79 @@ namespace TownRoadLane
             "Public Transport Lane 3 - Tram",
         };
 
-        private const string kFallbackMesh = "White Solid Line Mesh";
-
-        private static readonly (string src, string clone)[] kRecipes =
+        // Per-style clone recipe. Source prefab name on the left; clone name (= what shows up in
+        // PrefabSystem) on the right. Fallback-mesh name is the asset we revert to if the
+        // user-picked / G87 mesh isn't loaded. Same arrangement for every style — solid uses
+        // White Solid Line Mesh, dashed uses White Dashed Line Mesh.
+        //
+        // To add a style:
+        //   1. Append entry to MarkingStyle enum.
+        //   2. Append rows here for EU + NA.
+        //   3. (Optional) add a per-style settings dropdown if the user should pick the mesh.
+        private struct StyleRecipe
         {
-            ("EU Highway Edge Line", "TownRoadLane EU City Edge Line"),
-            ("NA Highway Edge Line", "TownRoadLane NA City Edge Line"),
+            public MarkingStyle style;
+            public bool         isNA;
+            public string       sourcePrefabName;
+            public string       cloneName;
+            public string       fallbackMesh;
+            // True = host on city Car Drive Lane 3 (the v1.1 "edge line on city roads" feature).
+            // False = clone exists ONLY as a spawn-archetype source for the Phase-4 emission system;
+            // it must NOT inherit vanilla hosting from the source prefab or it gets auto-drawn on
+            // every city road as part of the vanilla SecondaryLane pass.
+            //
+            // Why this matters: Dashed clones source from "EU Car Lane Line", which is a vanilla
+            // lane-divider prefab. If we leave its hosting intact OR add city-lane hosting, every
+            // city road grows a dashed line in addition to its normal markings — observed as
+            // "странные неконсистентные полосы" after Stage 5c rolled out.
+            public bool         hostOnCityLanes;
+        }
+
+        private static readonly StyleRecipe[] kStyleRecipes =
+        {
+            new() { style = MarkingStyle.Solid,  isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU City Edge Line",   fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
+            new() { style = MarkingStyle.Solid,  isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA City Edge Line",   fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
+            new() { style = MarkingStyle.Dashed, isNA = false, sourcePrefabName = "EU Car Lane Line",     cloneName = "TownRoadLane EU City Dashed Line", fallbackMesh = "White Dashed Line Mesh", hostOnCityLanes = false },
+            new() { style = MarkingStyle.Dashed, isNA = true,  sourcePrefabName = "NA Car Lane Line",     cloneName = "TownRoadLane NA City Dashed Line", fallbackMesh = "White Dashed Line Mesh", hostOnCityLanes = false },
         };
 
         private PrefabSystem m_PrefabSystem;
         private EntityQuery m_LanePrefabQuery;
         private bool m_Done;
 
-        // Cached managed PrefabBase refs (stable across UpdatePrefab — only the ECS entity behind
-        // them gets re-created, see IMPLEMENTATION_PLAN.md K1). Consumers must resolve via
-        // CloneEntityEU / CloneEntityNA properties, which call PrefabSystem.GetEntity each time.
-        private NetLanePrefab m_CloneEU;
-        private NetLanePrefab m_CloneNA;
+        // Cached managed PrefabBase refs per (style, theme). Stable across UpdatePrefab —
+        // only the ECS entity behind them gets re-created, see IMPLEMENTATION_PLAN.md K1.
+        // Resolve to a live ECS entity via GetCloneEntity(...).
+        private readonly Dictionary<(MarkingStyle, bool), NetLanePrefab> m_ClonesByStyle = new();
 
-        /// <summary>Fresh ECS entity for the EU edge-line clone. Always re-resolved through
-        /// PrefabSystem so it survives K1 entity re-creations after UpdatePrefab.</summary>
-        public Entity CloneEntityEU => (m_CloneEU != null && m_PrefabSystem != null)
-            ? m_PrefabSystem.GetEntity(m_CloneEU)
-            : Entity.Null;
+        /// <summary>Fresh ECS entity for the clone matching the given style + theme. Returns
+        /// Entity.Null if that combo isn't loaded yet (caller should fall back to Solid).
+        /// K1-safe: re-resolves through PrefabSystem on every call so post-UpdatePrefab entity
+        /// re-creations don't leave us with stale handles.</summary>
+        public Entity GetCloneEntity(MarkingStyle style, bool isNA)
+        {
+            if (m_PrefabSystem == null) return Entity.Null;
+            return m_ClonesByStyle.TryGetValue((style, isNA), out var pb) && pb != null
+                ? m_PrefabSystem.GetEntity(pb)
+                : Entity.Null;
+        }
 
-        /// <summary>Fresh ECS entity for the NA edge-line clone — same K1-safe pattern as EU.</summary>
-        public Entity CloneEntityNA => (m_CloneNA != null && m_PrefabSystem != null)
-            ? m_PrefabSystem.GetEntity(m_CloneNA)
-            : Entity.Null;
+        /// <summary>Back-compat alias for callers that pre-date the style API. Solid + EU theme —
+        /// matches the original CloneEntityEU getter. Kept so this commit doesn't ripple into
+        /// MarkingPairEmissionSystem (which is dead-code-but-still-compiled) or anything that
+        /// still references the old name.</summary>
+        public Entity CloneEntityEU => GetCloneEntity(MarkingStyle.Solid, isNA: false);
+        public Entity CloneEntityNA => GetCloneEntity(MarkingStyle.Solid, isNA: true);
 
-        /// <summary>Managed NetLanePrefab refs — needed for Material acquisition via NetLaneMeshInfo.m_Mesh.ObtainMaterial().
-        /// Stable across UpdatePrefab (only the ECS entity changes), so safe to cache.</summary>
-        public NetLanePrefab ClonePrefabEU => m_CloneEU;
-        public NetLanePrefab ClonePrefabNA => m_CloneNA;
+        /// <summary>Managed NetLanePrefab refs for the solid EU/NA clones — kept for callers that
+        /// need to acquire Material via NetLaneMeshInfo.m_Mesh.ObtainMaterial(). Stable across
+        /// UpdatePrefab. New style-aware code should prefer working via Entity through
+        /// <see cref="GetCloneEntity"/>.</summary>
+        public NetLanePrefab ClonePrefabEU => m_ClonesByStyle.TryGetValue((MarkingStyle.Solid, false), out var p) ? p : null;
+        public NetLanePrefab ClonePrefabNA => m_ClonesByStyle.TryGetValue((MarkingStyle.Solid, true),  out var p) ? p : null;
 
         /// <summary>Names of the marking prefabs this system creates/updates — exposed for diagnostics.</summary>
-        public static IEnumerable<string> CreatedPrefabNames { get { foreach (var r in kRecipes) yield return r.clone; } }
+        public static IEnumerable<string> CreatedPrefabNames { get { foreach (var r in kStyleRecipes) yield return r.cloneName; } }
 
         protected override void OnCreate()
         {
@@ -112,18 +156,21 @@ namespace TownRoadLane
         }
 
         /// <summary>
-        /// Creates the edge-line prefabs (first call) or refreshes their mesh/SecondaryLane to match the
-        /// current settings (later calls). Safe to call from MarkingToggleSystem on reapply.
+        /// Creates (or refreshes) every style clone defined in <see cref="kStyleRecipes"/>.
+        /// Idempotent — safe to call from MarkingToggleSystem on reapply.
         /// When EdgeLineEnabled is false (set externally then reapply triggered), call
         /// <see cref="StripHostingIfDisabled"/> instead to clear hosting without recreating prefabs.
         /// </summary>
         public void ApplyOrUpdate()
         {
-            string meshName = Mod.Settings?.EdgeLineMeshName() ?? kFallbackMesh;
+            // User-pickable mesh from settings only governs the SOLID style for now; dashed
+            // always uses its fallback. When per-style mesh dropdowns are added in a future stage,
+            // this picks per-recipe.
+            string solidMeshName = Mod.Settings?.EdgeLineMeshName() ?? "White Solid Line Mesh";
 
             // Resolve every prefab we need by name in one pass over NetLanePrefab entities.
             var wantedLanes = new HashSet<string>(kCityLaneNames);
-            foreach (var r in kRecipes) { wantedLanes.Add(r.src); wantedLanes.Add(r.clone); }
+            foreach (var r in kStyleRecipes) { wantedLanes.Add(r.sourcePrefabName); wantedLanes.Add(r.cloneName); }
             var laneByName = new Dictionary<string, NetLanePrefab>();
             var laneEnts = m_LanePrefabQuery.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < laneEnts.Length; i++)
@@ -136,39 +183,55 @@ namespace TownRoadLane
             var cityLanes = ResolveList(laneByName, kCityLaneNames, "city host lane");
             if (cityLanes.Count == 0) { log.Warn("no city host lanes found — aborting"); return; }
 
-            var meshByName = ResolveMeshes(new[] { meshName, kFallbackMesh });
-            RenderPrefab mesh = PickMesh(meshByName, meshName, kFallbackMesh, "edge line");
+            // Collect every distinct mesh name we might need so we resolve all of them in one query pass.
+            var meshNames = new HashSet<string> { solidMeshName };
+            foreach (var r in kStyleRecipes) meshNames.Add(r.fallbackMesh);
+            var meshByName = ResolveMeshes(meshNames);
 
             int touched = 0;
-            foreach (var (srcName, cloneName) in kRecipes)
+            foreach (var recipe in kStyleRecipes)
             {
-                if (!laneByName.TryGetValue(cloneName, out var cloneBase) || cloneBase == null)
-                {
-                    if (!laneByName.TryGetValue(srcName, out var src) || !(src is NetLaneGeometryPrefab) || !src.TryGet<SecondaryLane>(out _))
-                    { log.Warn($"source '{srcName}' missing/invalid — can't create '{cloneName}'"); continue; }
-                    cloneBase = m_PrefabSystem.DuplicatePrefab(src, cloneName) as NetLanePrefab;
-                    laneByName[cloneName] = cloneBase;
-                }
-                if (cloneBase == null || !cloneBase.TryGet<SecondaryLane>(out var sec)) { log.Warn($"'{cloneName}' has no SecondaryLane — skipping"); continue; }
+                string wantedMesh = recipe.style == MarkingStyle.Solid ? solidMeshName : recipe.fallbackMesh;
+                RenderPrefab mesh = PickMesh(meshByName, wantedMesh, recipe.fallbackMesh, recipe.cloneName);
 
-                // Replace any host arrays the source ('EU/NA Highway Edge Line') brought along; our clone
-                // is for city lanes only, so we drop the highway-lane entries that came with DuplicatePrefab.
-                sec.m_LeftLanes = MakeCityLaneInfos(cityLanes);
+                if (!laneByName.TryGetValue(recipe.cloneName, out var cloneBase) || cloneBase == null)
+                {
+                    if (!laneByName.TryGetValue(recipe.sourcePrefabName, out var src) || !(src is NetLaneGeometryPrefab) || !src.TryGet<SecondaryLane>(out _))
+                    { log.Warn($"source '{recipe.sourcePrefabName}' missing/invalid — can't create '{recipe.cloneName}'"); continue; }
+                    cloneBase = m_PrefabSystem.DuplicatePrefab(src, recipe.cloneName) as NetLanePrefab;
+                    laneByName[recipe.cloneName] = cloneBase;
+                }
+                if (cloneBase == null || !cloneBase.TryGet<SecondaryLane>(out var sec)) { log.Warn($"'{recipe.cloneName}' has no SecondaryLane — skipping"); continue; }
+
+                // Always clear ALL host arrays first — DuplicatePrefab carries the source's hosting,
+                // and a vanilla divider prefab cloned for our archetype-source use would otherwise
+                // re-host itself on whatever the vanilla source originally targeted.
+                sec.m_LeftLanes = Array.Empty<SecondaryLaneInfo>();
                 sec.m_RightLanes = Array.Empty<SecondaryLaneInfo>();
                 sec.m_CrossingLanes = Array.Empty<SecondaryLaneInfo2>();
-                sec.m_CanFlipSides = true;
+                sec.m_CanFlipSides = false;
+
+                int hostCount = 0;
+                if (recipe.hostOnCityLanes)
+                {
+                    // Edge-line recipe (v1.1 behaviour): host on Car Drive Lane 3 + variants, both
+                    // RequireSafe entry and RequireMerge+RequireSafeMaster entry per lane.
+                    sec.m_LeftLanes = MakeCityLaneInfos(cityLanes);
+                    sec.m_CanFlipSides = true;
+                    hostCount = cityLanes.Count * 2;
+                }
+                // else: clone exists only as a spawn-archetype source for Phase-4 emission;
+                // intentionally hosted on nothing so vanilla SecondaryLaneSystem won't draw it.
 
                 int swapped = SwapMesh(cloneBase, mesh);
                 m_PrefabSystem.UpdatePrefab(cloneBase);
-                // Stash the managed clone ref for the phase-4 tool. K1-safe: getter resolves the
-                // current ECS entity through PrefabSystem on every access, so re-creations are fine.
-                if (cloneName.StartsWith("TownRoadLane EU")) m_CloneEU = cloneBase;
-                else m_CloneNA = cloneBase;
+
+                m_ClonesByStyle[(recipe.style, recipe.isNA)] = cloneBase;
                 touched++;
-                log.Info($"applied '{cloneName}': hosts={cityLanes.Count}*2 mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
+                log.Info($"applied '{recipe.cloneName}' [{recipe.style}/{(recipe.isNA ? "NA" : "EU")}]: hostedEntries={hostCount} mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
             }
 
-            log.Info($"EdgeLineCloneSystem: applied {touched} prefab(s) (mesh='{meshName}')");
+            log.Info($"EdgeLineCloneSystem: applied {touched} prefab(s)");
         }
 
         /// <summary>
@@ -181,7 +244,7 @@ namespace TownRoadLane
             if (Mod.Settings != null && Mod.Settings.EdgeLineEnabled) return; // still on, nothing to do
 
             var wantedLanes = new HashSet<string>();
-            foreach (var r in kRecipes) wantedLanes.Add(r.clone);
+            foreach (var r in kStyleRecipes) wantedLanes.Add(r.cloneName);
             var laneEnts = m_LanePrefabQuery.ToEntityArray(Allocator.Temp);
             int stripped = 0;
             for (int i = 0; i < laneEnts.Length; i++)

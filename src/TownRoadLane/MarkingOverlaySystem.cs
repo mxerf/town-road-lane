@@ -57,6 +57,12 @@ namespace TownRoadLane
         // if I un-hid it" apart from "this is the active line". Intersection markers = bright red X.
         private static readonly Color kColHiddenSegment = new Color(1.00f, 0.30f, 0.30f, 0.35f);
         private static readonly Color kColIntersection  = new Color(1.00f, 0.20f, 0.20f, 0.95f);
+
+        // Stage 5c: per-style dot colour so the user can see at a glance which style they'll
+        // draw next. Solid = warm orange (matches kColDot default), Dashed = cool blue. New
+        // styles get added here when they land; unknown styles fall back to kColDot.
+        private static readonly Color kColDotSolid  = new Color(1.00f, 0.55f, 0.10f, 0.95f); // same as kColDot
+        private static readonly Color kColDotDashed = new Color(0.35f, 0.75f, 1.00f, 0.95f);
         private const float kIntersectionMarkerSize  = 0.7f;
         private const float kIntersectionMarkerWidth = 0.18f;
         // Node ring colours: hover = bright cyan ("clickable"); has-pairs = soft green ("configured").
@@ -159,13 +165,16 @@ namespace TownRoadLane
                 }
             }
 
-            // 3. Dots on top. Source = white, hover = light orange, others = orange.
+            // 3. Dots on top. Base fill colour reflects the user's CURRENT STYLE (Stage 5c —
+            //    e.g. blue for dashed, orange for solid) so the picker state is visible without
+            //    a separate UI. Source = white (anchor), hover = light tint of the style colour.
+            var styleColor = StyleDotColor(_tool.CurrentStyle);
             for (int i = 0; i < endpoints.Count; i++)
             {
                 var ep = endpoints[i];
-                Color fill = kColDot;
+                Color fill = styleColor;
                 if (i == sourceIdx)     fill = kColSourceDot;
-                else if (i == hoverIdx) fill = kColHoverDot;
+                else if (i == hoverIdx) fill = Color.Lerp(styleColor, Color.white, 0.5f);
 
                 buf.DrawCircle(
                     outlineColor: kColOutline,
@@ -188,6 +197,16 @@ namespace TownRoadLane
         /// </summary>
         private static Bezier4x3 BuildSmoothCurve(float3 a, float2 ta, float3 b, float2 tb)
             => MarkingCurveBuilder.Build(a, ta, b, tb);
+
+        /// <summary>Pick the dot fill colour for the currently-selected style. New style values
+        /// land in <c>switch</c>; unrecognised ones fall back to the solid (orange) colour so
+        /// the UI doesn't go invisible when a future-version style isn't known yet.</summary>
+        private static Color StyleDotColor(MarkingStyle style) => style switch
+        {
+            MarkingStyle.Solid  => kColDotSolid,
+            MarkingStyle.Dashed => kColDotDashed,
+            _                   => kColDotSolid,
+        };
 
         /// <summary>Draw a small "+" shape at the intersection point. Projected on terrain so it
         /// stays visible on slopes.</summary>

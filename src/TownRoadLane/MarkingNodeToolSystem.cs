@@ -57,6 +57,12 @@ namespace TownRoadLane
         private Entity _hoveredNode; // raycast result while tool is active; Entity.Null when no node under cursor
         private int _heartbeatCounter; // logs raycast outcome periodically when active
 
+        // Stage 5c: current style for the next line the user draws. Cycled via the
+        // CycleMarkingStyle hotkey (default Y). Stays across tool deactivate/reactivate inside
+        // a session — feels right to a user who picks "I want dashed" once at the start.
+        private MarkingStyle _currentStyle = MarkingStyle.Solid;
+        private ProxyAction _cycleStyleAction;
+
         public State ToolState => _state;
         public Entity SelectedNode => _selectedNode;
         public Entity HoveredNode => _hoveredNode;
@@ -64,6 +70,7 @@ namespace TownRoadLane
         public int SourceEndpointIndex => _sourceIdx;
         public int HoveredEndpointIndex => _hoverIdx;
         public float3 CursorWorldPos => _cursorWorldPos;
+        public MarkingStyle CurrentStyle => _currentStyle;
 
         public override PrefabBase GetPrefab() => null;
         public override bool TrySetPrefab(PrefabBase prefab) => false;
@@ -71,7 +78,12 @@ namespace TownRoadLane
         protected override void OnCreate()
         {
             base.OnCreate();
-            log.Info($"MarkingNodeToolSystem: OnCreate — toolID='{toolID}' registered with ToolSystem.tools (count={m_ToolSystem.tools.Count})");
+            // Resolve the cycle-style action once (same pattern MarkingToolHotkeySystem uses for
+            // ToggleMarkingTool). Action stays disabled until OnStartRunning so the binding
+            // doesn't intercept Y when our tool isn't active.
+            if (Mod.Settings != null)
+                _cycleStyleAction = Mod.Settings.GetAction(Setting.CycleMarkingStyle);
+            log.Info($"MarkingNodeToolSystem: OnCreate — toolID='{toolID}' registered with ToolSystem.tools (count={m_ToolSystem.tools.Count}), cycleStyleAction={(_cycleStyleAction != null ? "OK" : "NULL")}");
         }
 
         protected override void OnStartRunning()
@@ -87,12 +99,14 @@ namespace TownRoadLane
             applyAction.shouldBeEnabled = true;
             secondaryApplyAction.shouldBeEnabled = true;
             cancelAction.shouldBeEnabled = true;
-            log.Info($"MarkingNodeToolSystem: activated, actions enabled (apply={applyAction != null}, cancel={cancelAction != null})");
+            if (_cycleStyleAction != null) _cycleStyleAction.shouldBeEnabled = true;
+            log.Info($"MarkingNodeToolSystem: activated, actions enabled (apply={applyAction != null}, cancel={cancelAction != null}, cycleStyle={_cycleStyleAction != null})");
         }
 
         protected override void OnStopRunning()
         {
             log.Info($"MarkingNodeToolSystem: deactivated (state was {_state}, selectedNode #{_selectedNode.Index})");
+            if (_cycleStyleAction != null) _cycleStyleAction.shouldBeEnabled = false;
             ResetSelection();
             base.OnStopRunning();
         }
@@ -150,6 +164,15 @@ namespace TownRoadLane
                     log.Info($"tool: hover cleared (was idx={_lastLoggedHoverIdx})");
                 }
                 _lastLoggedHoverIdx = _hoverIdx;
+            }
+
+            // Cycle marking style (Stage 5c). Independent of selection state — user can pre-pick
+            // a style before clicking the first dot, or change mid-flow. New value applies to the
+            // NEXT line created; doesn't retroactively restyle existing lines.
+            if (_cycleStyleAction != null && _cycleStyleAction.WasPerformedThisFrame())
+            {
+                _currentStyle = NextStyle(_currentStyle);
+                log.Info($"tool: cycled style → {_currentStyle}");
             }
 
             // Cancel (Esc / RMB-as-cancel): step back one state.
@@ -307,14 +330,26 @@ namespace TownRoadLane
             {
                 sourceEdge = src.edge, sourceGapIndex = src.gapIndex,
                 targetEdge = dst.edge, targetGapIndex = dst.gapIndex,
-                style = 0,
+                style = (int)_currentStyle,
             });
             if (!EntityManager.HasComponent<Updated>(_selectedNode))
                 EntityManager.AddComponent<Updated>(_selectedNode);
-            log.Info($"tool: toggled ON line #{buf.Length - 1} on node #{_selectedNode.Index} — "
+            log.Info($"tool: toggled ON line #{buf.Length - 1} on node #{_selectedNode.Index} style={_currentStyle} — "
                 + $"src(edge=#{src.edge.Index} gap={src.gapIndex}) → "
                 + $"dst(edge=#{dst.edge.Index} gap={dst.gapIndex})");
         }
 
+        /// <summary>Cycle to the next defined style. Wraps around at the end. Add new values to
+        /// <see cref="MarkingStyle"/> and they automatically participate — the cycle uses
+        /// <see cref="System.Enum.GetValues"/>.</summary>
+        private static MarkingStyle NextStyle(MarkingStyle current)
+        {
+            var values = (MarkingStyle[])System.Enum.GetValues(typeof(MarkingStyle));
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (values[i] == current) return values[(i + 1) % values.Length];
+            }
+            return MarkingStyle.Solid;
+        }
     }
 }

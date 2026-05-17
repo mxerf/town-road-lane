@@ -20,6 +20,7 @@ namespace TownRoadLane
     [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup, kReapplyGroup, kKeybindGroup)]
     [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup, kReapplyGroup, kKeybindGroup)]
     [SettingsUIKeyboardAction(ToggleMarkingTool, Usages.kDefaultUsage, Usages.kEditorUsage, Usages.kToolUsage)]
+    [SettingsUIKeyboardAction(CycleMarkingStyle, Usages.kToolUsage)]
     public class Setting : ModSetting
     {
         public const string kSection = "Main";
@@ -31,6 +32,11 @@ namespace TownRoadLane
         // Action name used by MarkingToolHotkeySystem to resolve the ProxyAction. Must match the
         // attribute name on this class and the binding property below.
         public const string ToggleMarkingTool = "ToggleMarkingTool";
+
+        // Stage 5c: cycle MarkingStyle (Solid → Dashed → Solid → ...) inside the marking tool.
+        // Single key (default Y), kept under Usages.kToolUsage so the binding only listens while
+        // the tool is the active tool — won't interfere with vanilla shortcuts otherwise.
+        public const string CycleMarkingStyle = "CycleMarkingStyle";
 
         public Setting(IMod mod) : base(mod) { }
 
@@ -85,6 +91,10 @@ namespace TownRoadLane
         [SettingsUISection(kSection, kKeybindGroup)]
         [SettingsUIKeyboardBinding(BindingKeyboard.M, ToggleMarkingTool, ctrl: true)]
         public ProxyBinding ToggleMarkingToolBinding { get; set; }
+
+        [SettingsUISection(kSection, kKeybindGroup)]
+        [SettingsUIKeyboardBinding(BindingKeyboard.Y, CycleMarkingStyle)]
+        public ProxyBinding CycleMarkingStyleBinding { get; set; }
 
         public bool IsEdgeDisabled() => !EdgeLineEnabled;
         public bool IsParkingDisabled() => !ParkingMarkingsEnabled;
@@ -229,6 +239,10 @@ namespace TownRoadLane
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ToggleMarkingToolBinding)), "Toggle marking tool (hotkey)" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleMarkingToolBinding)),
                     "Activates or deactivates the per-node marking customisation tool. Default Ctrl+M. If the hotkey doesn't work (other mod intercepts), use the button above instead." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.CycleMarkingStyleBinding)), "Cycle marking style (hotkey)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.CycleMarkingStyleBinding)),
+                    "While the marking tool is active, cycles through Solid → Dashed → … The chosen style is used for the NEXT line you draw. Default Y. The colour of the endpoint dots reflects the current style." },
 
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid), "White solid" },
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolidThick), "White solid (thick)" },

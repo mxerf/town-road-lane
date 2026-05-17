@@ -136,18 +136,18 @@ namespace TownRoadLane
             int created = 0;
             if (wanted.Count > 0)
             {
-                var prefab = PickPrefab();
-                if (prefab == Entity.Null)
+                // Resolve every style we might need this tick. Cached per (style, theme) so we
+                // don't re-query NetLaneArchetypeData per segment. Solid always required as the
+                // fallback when a line's style isn't loaded yet.
+                bool isNA = IsNATheme();
+                var prefabByStyle = new Dictionary<MarkingStyle, (Entity prefab, EntityArchetype arch)>();
+                if (!TryResolveStylePrefab(MarkingStyle.Solid, isNA, out var solidPair))
                 {
-                    log.Warn("segment-emission: no edge-line clone prefab resolved yet — deferring");
-                }
-                else if (!EntityManager.HasComponent<NetLaneArchetypeData>(prefab))
-                {
-                    log.Warn($"segment-emission: prefab #{prefab.Index} has no NetLaneArchetypeData yet — deferring");
+                    log.Warn("segment-emission: solid prefab not resolved yet — deferring entire tick");
                 }
                 else
                 {
-                    var arch = EntityManager.GetComponentData<NetLaneArchetypeData>(prefab).m_LaneArchetype;
+                    prefabByStyle[MarkingStyle.Solid] = solidPair;
                     nodes = _nodesWithLines.ToEntityArray(Allocator.Temp);
                     for (int n = 0; n < nodes.Length; n++)
                     {
@@ -157,10 +157,8 @@ namespace TownRoadLane
                         var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
                         var segs  = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
 
-                        // Pre-extract endpoints once per node (extractor walks every ConnectedEdge).
                         var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
 
-                        // Build full Beziers per line once — cheaper than once per segment.
                         var lineCount = lines.Length;
                         var fullBeziers = new Bezier4x3[lineCount];
                         var bezValid = new bool[lineCount];
@@ -173,7 +171,6 @@ namespace TownRoadLane
                             }
                         }
 
-                        // Same per-line counter the wanted set used.
                         var perLineCounter = new Dictionary<int, int>();
                         for (int s = 0; s < segs.Length; s++)
                         {
@@ -188,8 +185,24 @@ namespace TownRoadLane
 
                             if (seg.lineIndex < 0 || seg.lineIndex >= lineCount) continue;
                             if (!bezValid[seg.lineIndex]) continue;
+
+                            // Per-segment prefab lookup via the line's style. Lazy-resolve into
+                            // the cache so the FIRST line of a given style pays for the archetype
+                            // lookup and every later segment in the same style is a dictionary hit.
+                            var style = (MarkingStyle)lines[seg.lineIndex].style;
+                            if (!prefabByStyle.TryGetValue(style, out var pair))
+                            {
+                                if (!TryResolveStylePrefab(style, isNA, out pair))
+                                {
+                                    // Unknown / not-loaded style → degrade to solid. Old saves
+                                    // with future-style numbers and missed clones both land here.
+                                    pair = solidPair;
+                                }
+                                prefabByStyle[style] = pair;
+                            }
+
                             var spawned = SpawnSegmentSublane(ecb, node, seg.lineIndex, segIdx,
-                                fullBeziers[seg.lineIndex], seg.tStart, seg.tEnd, prefab, arch);
+                                fullBeziers[seg.lineIndex], seg.tStart, seg.tEnd, pair.prefab, pair.arch);
                             if (spawned != Entity.Null) created++;
                         }
                     }
@@ -238,17 +251,32 @@ namespace TownRoadLane
             return e;
         }
 
-        private Entity PickPrefab()
+        /// <summary>Whether the city's default theme is North American. Both EU and NA edge-line
+        /// prefab clones exist; this picks which one to use for every emission this tick.</summary>
+        private bool IsNATheme()
         {
-            if (_edgeLineSys == null) return Entity.Null;
             var theme = _cityConfig.defaultTheme;
-            if (theme == Entity.Null) return _edgeLineSys.CloneEntityEU;
+            if (theme == Entity.Null) return false;
             if (_prefabSystem.TryGetPrefab<PrefabBase>(theme, out var themePrefab) && themePrefab != null)
             {
                 var n = themePrefab.name;
-                if (!string.IsNullOrEmpty(n) && (n.Contains("North American") || n.StartsWith("NA "))) return _edgeLineSys.CloneEntityNA;
+                if (!string.IsNullOrEmpty(n) && (n.Contains("North American") || n.StartsWith("NA "))) return true;
             }
-            return _edgeLineSys.CloneEntityEU;
+            return false;
+        }
+
+        /// <summary>Look up the (prefab, archetype) pair for a given (style, theme). Returns false
+        /// when the clone isn't loaded yet or the prefab hasn't been baked through
+        /// NetLaneArchetypeData by PrefabSystem. Caller falls back to Solid in that case.</summary>
+        private bool TryResolveStylePrefab(MarkingStyle style, bool isNA, out (Entity prefab, EntityArchetype arch) pair)
+        {
+            pair = default;
+            if (_edgeLineSys == null) return false;
+            Entity prefab = _edgeLineSys.GetCloneEntity(style, isNA);
+            if (prefab == Entity.Null) return false;
+            if (!EntityManager.HasComponent<NetLaneArchetypeData>(prefab)) return false;
+            pair = (prefab, EntityManager.GetComponentData<NetLaneArchetypeData>(prefab).m_LaneArchetype);
+            return true;
         }
     }
 }
