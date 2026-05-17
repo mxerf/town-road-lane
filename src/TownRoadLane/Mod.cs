@@ -79,13 +79,20 @@ namespace TownRoadLane
             // (we read tool state, write to vanilla OverlayRenderSystem.Buffer).
             updateSystem.UpdateAt<MarkingOverlaySystem>(SystemUpdatePhase.Rendering);
 
-            // Phase 4 step 2: managed emission of marker sublanes from MarkingPair buffers.
-            // Runs on Modification1 (same phase as MarkingToggleSystem); diffs node buffers vs
-            // already-spawned TRLPairLink-tagged sublanes and reconciles.
-            updateSystem.UpdateAt<MarkingPairEmissionSystem>(SystemUpdatePhase.Modification1);
-            // Diagnostic — counts our cloned-prefab sublanes every 60 frames. Remove once
-            // emission is verified stable.
-            updateSystem.UpdateAt<UserPairEmissionDumpSystem>(SystemUpdatePhase.GameSimulation);
+            // Phase 4 step 3a: custom-mesh rendering via Graphics.DrawMesh. Replaces step 2's
+            // sublane-entity emission, which proved that hand-created ECS lane entities can't be
+            // picked up by vanilla's BatchInstanceSystem rendering pipeline (PrefabSystem-baked
+            // batch registration that we can't replicate from CreateEntity). Modelled on
+            // BrushRenderSystem; same pattern IMT (CS1) uses for the equivalent task.
+            //
+            // OnUpdate diffs MarkingPair buffers and rebuilds the Mesh cache; Render runs from
+            // RenderPipelineManager.beginContextRendering once per camera. Material is borrowed
+            // from our edge-line clone prefab.
+            updateSystem.UpdateAt<MarkingMeshRenderSystem>(SystemUpdatePhase.Rendering);
+            // Old sublane emission + diagnostic are intentionally NOT registered. Keep the source
+            // files for the moment in case we need to look back, but they're inert now.
+            // updateSystem.UpdateAt<MarkingPairEmissionSystem>(SystemUpdatePhase.Modification1);
+            // updateSystem.UpdateAt<UserPairEmissionDumpSystem>(SystemUpdatePhase.GameSimulation);
         }
 
         public void OnDispose()

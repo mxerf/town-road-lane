@@ -81,6 +81,11 @@ namespace TownRoadLane
             ? m_PrefabSystem.GetEntity(m_CloneNA)
             : Entity.Null;
 
+        /// <summary>Managed NetLanePrefab refs — needed for Material acquisition via NetLaneMeshInfo.m_Mesh.ObtainMaterial().
+        /// Stable across UpdatePrefab (only the ECS entity changes), so safe to cache.</summary>
+        public NetLanePrefab ClonePrefabEU => m_CloneEU;
+        public NetLanePrefab ClonePrefabNA => m_CloneNA;
+
         /// <summary>Names of the marking prefabs this system creates/updates — exposed for diagnostics.</summary>
         public static IEnumerable<string> CreatedPrefabNames { get { foreach (var r in kRecipes) yield return r.clone; } }
 

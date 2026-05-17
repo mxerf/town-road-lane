@@ -62,6 +62,13 @@
 		<Reference Include="Unity.Mathematics">
 			<Private>false</Private>
 		</Reference>
+		<!-- HDRP runtime — needed for HDMaterial.ValidateMaterial. Without that call, a
+		     freshly constructed Material from new Material(Shader.Find("HDRP/Unlit")) has
+		     unpopulated keywords/render-queue/stencil state and Graphics.DrawMesh silently
+		     renders nothing (all passes culled). Vanilla CS2 ships this assembly. -->
+		<Reference Include="Unity.RenderPipelines.HighDefinition.Runtime">
+			<Private>false</Private>
+		</Reference>
 	</ItemGroup>
 
 	<ItemGroup>
