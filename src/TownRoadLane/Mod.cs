@@ -94,7 +94,18 @@ namespace TownRoadLane
             //
             // Modification1 puts us BEFORE LaneSystem (4) / SecondaryLaneSystem (4B) /
             // SecondaryLaneReferencesSystem (5) — same phase the old commits used; proven safe.
-            updateSystem.UpdateAt<MarkingPairEmissionSystem>(SystemUpdatePhase.Modification1);
+            // Stage 5b migration: rewrite v2 MarkingPair buffers as v3 MarkingLine+MarkingSegment
+            // on first sight of a node. Idempotent + cheap (empty query 99% of frames). Must run
+            // before emission — [UpdateBefore] on the class handles ordering inside Modification1.
+            updateSystem.UpdateAt<MarkingPairMigrationSystem>(SystemUpdatePhase.Modification1);
+            // Stage 5b: pairwise Bezier intersection + segment buffer rewrite. Ordered between
+            // migration and emission via [UpdateAfter]/[UpdateBefore] on the class itself.
+            updateSystem.UpdateAt<MarkingTopologySystem>(SystemUpdatePhase.Modification1);
+            // Stage 5b emission: spawn one sublane per visible MarkingSegment (replaces the
+            // Phase-4 MarkingPairEmissionSystem which keyed off MarkingPair). The old system is
+            // intentionally not registered any more — its TRLPairLink entities get GC'd by
+            // MarkingSegmentEmissionSystem on first tick after migration.
+            updateSystem.UpdateAt<MarkingSegmentEmissionSystem>(SystemUpdatePhase.Modification1);
 
             // MarkingMeshRenderSystem (HDRP/Unlit + GameObject pipeline) kept as commented
             // fallback in case ECS path reveals an unknown blocker. Source file stays in tree.

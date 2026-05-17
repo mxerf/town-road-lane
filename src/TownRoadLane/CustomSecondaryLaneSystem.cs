@@ -304,12 +304,14 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public ComponentLookup<MarkingOverride> m_MarkingOverrideData;
 
-		// === v2 phase 4 ===
-		// Per-node user-drawn marking pairs. When a node entity has a non-empty MarkingPair buffer,
-		// vanilla CreateSecondaryLane calls are skipped here; MarkingPairEmissionSystem (managed,
-		// Modification1) creates the actual marker sublanes off-job.
+		// === v2 phase 4 / phase 5b ===
+		// Per-node user-drawn marking lines. When a node entity has a non-empty MarkingLine buffer,
+		// vanilla CreateSecondaryLane calls are skipped here; MarkingSegmentEmissionSystem
+		// (managed, Modification1) creates the actual marker sublanes off-job.
+		// Was MarkingPair pre-5b — same semantics, just the new schema. Field name kept so the
+		// _RO_BufferLookup wiring at the bottom of the file stays a one-line change.
 		[ReadOnly]
-		public BufferLookup<MarkingPair> m_MarkingPairs;
+		public BufferLookup<MarkingLine> m_MarkingPairs;
 
 		// Tag on sublanes we own (MarkingPairEmissionSystem). FillOldLaneBuffer must skip these:
 		// SecondaryLaneReferencesSystem registers them into node.SubLane buffer on the same tick
@@ -397,9 +399,9 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 				// RemoveUnusedOldLanes — anything we don't recreate gets cleaned up, so toggling the
 				// override on a live road removes its markings on the next update.
 				bool skipGeneration = m_MarkingOverrideData.TryGetComponent(owner, out var __markingOverride) && __markingOverride.HideAll;
-				// v2 phase 4: a node with a non-empty MarkingPair buffer fully overrides vanilla
+				// v2 phase 4/5b: a node with a non-empty MarkingLine buffer fully overrides vanilla
 				// markings on that node — vanilla generation is skipped here. Actual marker
-				// sublanes are produced by MarkingPairEmissionSystem (managed, Modification1).
+				// sublanes are produced by MarkingSegmentEmissionSystem (managed, Modification1).
 				bool hasUserPairs = isNode && m_MarkingPairs.TryGetBuffer(owner, out var __pairs) && __pairs.Length > 0;
 				if (hasUserPairs) skipGeneration = true;
 				if (skipGeneration) { goto skipMarkingGeneration; }
@@ -1913,9 +1915,9 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public ComponentLookup<MarkingOverride> __TownRoadLane_MarkingOverride_RO_ComponentLookup;
 
-		// v2 phase 4
+		// v2 phase 4 / 5b
 		[ReadOnly]
-		public BufferLookup<MarkingPair> __TownRoadLane_MarkingPair_RO_BufferLookup;
+		public BufferLookup<MarkingLine> __TownRoadLane_MarkingPair_RO_BufferLookup;
 
 		[ReadOnly]
 		public ComponentLookup<TRLPairLink> __TownRoadLane_TRLPairLink_RO_ComponentLookup;
@@ -1960,7 +1962,7 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			__Game_Prefabs_SecondaryNetLane_RO_BufferLookup = state.GetBufferLookup<SecondaryNetLane>(isReadOnly: true);
 			__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup = state.GetBufferLookup<ObjectRequirementElement>(isReadOnly: true);
 			__TownRoadLane_MarkingOverride_RO_ComponentLookup = state.GetComponentLookup<MarkingOverride>(isReadOnly: true);
-			__TownRoadLane_MarkingPair_RO_BufferLookup = state.GetBufferLookup<MarkingPair>(isReadOnly: true);
+			__TownRoadLane_MarkingPair_RO_BufferLookup = state.GetBufferLookup<MarkingLine>(isReadOnly: true);
 			__TownRoadLane_TRLPairLink_RO_ComponentLookup = state.GetComponentLookup<TRLPairLink>(isReadOnly: true);
 		}
 	}

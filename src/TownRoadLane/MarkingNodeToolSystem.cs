@@ -244,10 +244,13 @@ namespace TownRoadLane
             _endpoints = MarkingEndpointExtractor.Extract(EntityManager, node, log: true);
             _sourceIdx = -1;
             _state = State.NodeSelected;
-            int existingPairs = EntityManager.HasBuffer<MarkingPair>(node)
-                ? EntityManager.GetBuffer<MarkingPair>(node, isReadOnly: true).Length
+            int existingLines = EntityManager.HasBuffer<MarkingLine>(node)
+                ? EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true).Length
                 : 0;
-            log.Info($"tool: selected node #{node.Index} — {_endpoints.Count} endpoint(s), {existingPairs} existing pair(s)");
+            int existingSegs = EntityManager.HasBuffer<MarkingSegment>(node)
+                ? EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true).Length
+                : 0;
+            log.Info($"tool: selected node #{node.Index} — {_endpoints.Count} endpoint(s), {existingLines} line(s), {existingSegs} segment(s)");
         }
 
         private int FindHoveredEndpoint(float3 cursor)
@@ -264,15 +267,22 @@ namespace TownRoadLane
             return best;
         }
 
-        /// <summary>Create-or-delete: if a pair with matching endpoints (order-insensitive) already
-        /// exists, remove it; otherwise append a new one. Matches Traffic-style toggle UX.</summary>
+        /// <summary>Create-or-delete: if a line with matching endpoints (order-insensitive) already
+        /// exists, remove it; otherwise append a new one. Matches Traffic-style toggle UX.
+        ///
+        /// On delete: also clears the MarkingSegment buffer. Otherwise old segments referencing
+        /// the removed line's lineIndex would survive into the next topology recompute (which
+        /// reads the updated MarkingLine list and would mis-index). TopologySystem rebuilds the
+        /// segment buffer from scratch on next tick — cheaper than trying to surgically shift
+        /// lineIndex values across the segment buffer.
+        /// </summary>
         private void TogglePair(MarkingEndpoint src, MarkingEndpoint dst)
         {
-            if (!EntityManager.HasBuffer<MarkingPair>(_selectedNode))
+            if (!EntityManager.HasBuffer<MarkingLine>(_selectedNode))
             {
-                EntityManager.AddBuffer<MarkingPair>(_selectedNode);
+                EntityManager.AddBuffer<MarkingLine>(_selectedNode);
             }
-            var buf = EntityManager.GetBuffer<MarkingPair>(_selectedNode);
+            var buf = EntityManager.GetBuffer<MarkingLine>(_selectedNode);
 
             for (int i = 0; i < buf.Length; i++)
             {
@@ -281,22 +291,27 @@ namespace TownRoadLane
                 bool swappedSides   = p.sourceEdge == dst.edge && p.sourceGapIndex == dst.gapIndex && p.targetEdge == src.edge && p.targetGapIndex == src.gapIndex;
                 if (sameDirection || swappedSides)
                 {
-                    log.Info($"tool: toggled OFF pair #{i} on node #{_selectedNode.Index}");
+                    log.Info($"tool: toggled OFF line #{i} on node #{_selectedNode.Index}");
                     buf.RemoveAt(i);
+                    // Wipe segments so TopologySystem rebuilds from the new line list — see XML
+                    // comment above for the lineIndex-shift reason.
+                    if (EntityManager.HasBuffer<MarkingSegment>(_selectedNode))
+                        EntityManager.GetBuffer<MarkingSegment>(_selectedNode).Clear();
                     if (!EntityManager.HasComponent<Updated>(_selectedNode))
                         EntityManager.AddComponent<Updated>(_selectedNode);
                     return;
                 }
             }
 
-            buf.Add(new MarkingPair
+            buf.Add(new MarkingLine
             {
                 sourceEdge = src.edge, sourceGapIndex = src.gapIndex,
                 targetEdge = dst.edge, targetGapIndex = dst.gapIndex,
+                style = 0,
             });
             if (!EntityManager.HasComponent<Updated>(_selectedNode))
                 EntityManager.AddComponent<Updated>(_selectedNode);
-            log.Info($"tool: toggled ON pair #{buf.Length - 1} on node #{_selectedNode.Index} — "
+            log.Info($"tool: toggled ON line #{buf.Length - 1} on node #{_selectedNode.Index} — "
                 + $"src(edge=#{src.edge.Index} gap={src.gapIndex}) → "
                 + $"dst(edge=#{dst.edge.Index} gap={dst.gapIndex})");
         }
