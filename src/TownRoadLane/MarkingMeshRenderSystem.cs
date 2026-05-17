@@ -37,11 +37,12 @@ namespace TownRoadLane
     {
         private static readonly ILog log = Mod.log;
 
-        // PoC values: deliberately exaggerated (1m wide, 0.5m above ground) so a visible bar
-        // is easy to spot in-game. Production-tune to ~0.3m wide / ~0.02m once we confirm
-        // the render pipeline works.
-        private const float kMarkingWidth   = 1.0f;
-        private const float kHeightOffset   = 0.5f;
+        // Tuned proportions. Width matches the visual weight of vanilla edge-line strokes.
+        // Height: 0.01m is enough to clear road-surface z-fighting in most cases — the
+        // ribbon mesh is still opaque geometry (not a true HDRP projected decal), so a
+        // tiny lift is needed. Lower → more z-fight risk; higher → visible floating.
+        private const float kMarkingWidth   = 0.15f;
+        private const float kHeightOffset   = 0.01f;
 
         private EdgeLineCloneSystem _edgeLineSys;
         private CityConfigurationSystem _cityConfig;
@@ -122,7 +123,7 @@ namespace TownRoadLane
                         mesh = new Mesh { name = $"TRL_Pair_{node.Index}_{i}" };
                         _meshes[key] = mesh;
                     }
-                    BuildQuadMesh(mesh, src.position, dst.position);
+                    BuildRibbonMesh(mesh, src.position, src.tangent, dst.position, dst.tangent);
                 }
             }
             nodes.Dispose();
@@ -206,28 +207,55 @@ namespace TownRoadLane
             _materialAttempted = true;
             try
             {
-                // FINAL approach — canonical vanilla CS2 pattern proven by decomp:
-                //
-                //   AssetImportPipeline.cs:189-200, OverlayRenderSystem.cs:797-808,
-                //   ManagedBatchSystem.cs:1388-1392
-                //
-                // The critical missing call in all previous PoC attempts was
-                // HDMaterial.ValidateMaterial(). HDRP's material system derives its shader
-                // keywords (_SURFACE_TYPE_OPAQUE, _BLENDMODE_*, _DISABLE_DECALS, etc.),
-                // render queue, and stencil state from material *properties* (_SurfaceType,
-                // _BlendMode, _CullMode, _DoubleSidedEnable), but only computes them inside
-                // ValidateMaterial. Without it, a fresh new Material(HDRP/Unlit) has NO
-                // keywords enabled — every render pass is culled to a no-op, DrawMesh
-                // dispatches silently to a zero-output shader variant. No errors, no
-                // warnings, no pixels. Exactly our symptom for 4+ attempts.
+                // Decal path attempted, abandoned: HDRP decal materials (shader
+                // 'BH/Decals/DefaultDecalShader') don't render via Graphics.DrawMesh on
+                // ordinary mesh geometry. They're authored for the DecalProjector path —
+                // need a cube-volume bounding mesh + UNITY_VT atlas registration + the
+                // engine's deferred decal pass. Verified empirically: borrowed
+                // 'EU_RoadArrow_*' material loaded cleanly (renderQueue=2000, 2 passes,
+                // keywords incl. ENABLE_VT) but produced zero pixels on our ribbon mesh.
+                // Future: try DecalProjector (Unity HDRP MonoBehaviour) as a separate
+                // experiment — different API entirely. For now, HDRP/Unlit works and is
+                // good enough for the killer feature (segmentation) we want to build.
+
+                // Proven path. See AssetImportPipeline.cs:189-200,
+                // OverlayRenderSystem.cs:797-808, ManagedBatchSystem.cs:1388-1392 for the
+                // canonical vanilla pattern. The critical undocumented call is
+                // HDMaterial.ValidateMaterial — without it HDRP shader keywords aren't
+                // derived from properties and every render pass is a silent no-op.
                 var shader = Shader.Find("HDRP/Unlit");
                 if (shader == null) { log.Warn("MarkingMeshRenderSystem: HDRP/Unlit shader not found"); return null; }
 
                 _material = new Material(shader) { name = "TRL_PairPoC_Unlit" };
                 _material.color = Color.white;
                 _material.SetFloat("_SurfaceType", 0f);           // 0 = Opaque
-                _material.SetFloat("_DoubleSidedEnable", 1f);     // both sides visible (we don't know quad winding orientation relative to camera)
-                _material.SetFloat("_CullMode", 0f);              // CullMode.Off → renders both sides
+                _material.SetFloat("_DoubleSidedEnable", 1f);     // both sides visible
+                _material.SetFloat("_CullMode", 0f);              // CullMode.Off
+
+                // Borrow vanilla road-line texture from our EdgeLineClone prefab. The
+                // RenderPrefab returned by NetLaneMeshInfo.m_Mesh contains the same
+                // 'LaneLine_*' material that vanilla edge-lines use; we want only its
+                // mainTexture (the painted-line bitmap). We do NOT use the whole material
+                // because it's BH/Decals/CurvedDecalShader, which is decal-pipeline-only
+                // and won't render through DrawMesh (see decal-experiment fallout). The
+                // texture itself, however, is a normal Texture2D — HDRP/Unlit will sample
+                // it via _BaseColorMap / _UnlitColorMap / mainTexture exactly like any
+                // texture asset.
+                var tex = TryBorrowLaneLineTexture();
+                if (tex != null)
+                {
+                    // HDRP/Unlit exposes the bitmap as _UnlitColorMap; legacy alias _MainTex
+                    // also works because shader.mainTexture proxies to it.
+                    if (_material.HasProperty("_UnlitColorMap")) _material.SetTexture("_UnlitColorMap", tex);
+                    if (_material.HasProperty("_MainTex"))       _material.SetTexture("_MainTex",       tex);
+                    _material.mainTexture = tex;
+                    log.Info($"MarkingMeshRenderSystem: applied borrowed texture '{tex.name}' ({tex.width}x{tex.height})");
+                }
+                else
+                {
+                    log.Info("MarkingMeshRenderSystem: no vanilla LaneLine texture found — staying solid white");
+                }
+
                 HDMaterial.ValidateMaterial(_material);
 
                 var kw = _material.enabledKeywords;
@@ -242,6 +270,38 @@ namespace TownRoadLane
                 log.Error(ex, "MarkingMeshRenderSystem: material acquisition threw");
             }
             return null;
+        }
+
+        /// <summary>Extract the painted-line bitmap from our edge-line clone prefab's
+        /// material. We don't reuse the whole material (its shader is decal-pipeline-only),
+        /// but the texture itself is a plain Texture2D and renders fine through HDRP/Unlit.
+        /// Returns null if the clone hasn't baked yet or the material has no texture slot —
+        /// caller falls back to solid white.</summary>
+        private Texture TryBorrowLaneLineTexture()
+        {
+            try
+            {
+                var prefab = PickClonePrefab();
+                if (prefab == null) return null;
+                if (!(prefab is NetLaneGeometryPrefab geom)) return null;
+                if (geom.m_Meshes == null || geom.m_Meshes.Length == 0) return null;
+                var meshInfo = geom.m_Meshes[0];
+                if (meshInfo?.m_Mesh == null) return null;
+                var vanillaMat = meshInfo.m_Mesh.ObtainMaterial(0, useVT: false);
+                if (vanillaMat == null) return null;
+                // Try common texture property names in priority order. CurvedDecalShader
+                // exposes its bitmap via _BaseColorMap on the HDRP surface inputs.
+                Texture t = null;
+                if (vanillaMat.HasProperty("_BaseColorMap")) t = vanillaMat.GetTexture("_BaseColorMap");
+                if (t == null && vanillaMat.HasProperty("_MainTex")) t = vanillaMat.GetTexture("_MainTex");
+                if (t == null) t = vanillaMat.mainTexture;
+                return t;
+            }
+            catch (System.Exception ex)
+            {
+                log.Error(ex, "MarkingMeshRenderSystem: TryBorrowLaneLineTexture threw");
+                return null;
+            }
         }
 
         private NetLanePrefab PickClonePrefab()
@@ -259,34 +319,89 @@ namespace TownRoadLane
             return _edgeLineSys.ClonePrefabEU;
         }
 
-        /// <summary>Flat axis-aligned quad of width kMarkingWidth between two world points,
-        /// raised by kHeightOffset above the chord midpoint y. Two triangles, no UVs (decal
-        /// shader uses world-space sampling per vanilla setup).</summary>
-        private static void BuildQuadMesh(Mesh mesh, float3 a, float3 b)
+        // Bezier ribbon tuning. kSegments = N quads along the curve. 24 makes the arc
+        // visually smooth even on tight turns; GPU cost is negligible (50 verts, 48 tris
+        // per pair vs 26/24 at 12 segs — a current-gen GPU doesn't notice the difference
+        // for hundreds of pairs). CPU cost is in the per-frame rebuild — see roadmap step 5
+        // for the "diff only changed pairs" optimisation.
+        // kPullFactor matches MarkingOverlaySystem so the drag-preview and the rendered
+        // marking trace the same Bezier — what the user sees on hover is exactly what
+        // they get.
+        // kTextureTileMeters — how often the texture repeats along the curve. Vanilla
+        // road-line bitmaps look right when tiled roughly every metre. Too small → texture
+        // squished; too large → texture stretched into a smear.
+        private const int   kSegments         = 24;
+        private const float kPullFactor       = 0.4f;
+        private const float kTextureTileMeters = 1.0f;
+
+        /// <summary>Build a ribbon (strip of N quads) following the Bezier arc between two
+        /// endpoints. Each endpoint contributes a tangent direction so the curve leaves the
+        /// dot perpendicular to its parent edge (same control-point construction as the
+        /// overlay drag-preview, see <see cref="MarkingOverlaySystem.BuildSmoothCurve"/>).
+        /// Vertices are positioned in world space; the ribbon is widened along the per-segment
+        /// horizontal-right vector (perpendicular to tangent in the XZ plane) and lifted by
+        /// kHeightOffset.</summary>
+        private static void BuildRibbonMesh(Mesh mesh, float3 a, float2 aTan, float3 b, float2 bTan)
         {
-            float3 dir = b - a;
-            float len = math.length(dir);
-            if (len < 0.01f) { mesh.Clear(); return; }
-            float3 fwd = dir / len;
-            float3 right = math.normalizesafe(math.cross(new float3(0f, 1f, 0f), fwd));
+            float chord = math.distance(a, b);
+            if (chord < 0.01f) { mesh.Clear(); return; }
+            float pull = chord * kPullFactor;
+            // MarkingEndpoint.tangent points OUTWARD from the node into the parent edge.
+            // For the curve to leave each dot toward the intersection interior we negate.
+            float3 aT = new float3(-aTan.x, 0f, -aTan.y);
+            float3 bT = new float3(-bTan.x, 0f, -bTan.y);
+            float3 p0 = a;
+            float3 p1 = a + aT * pull;
+            float3 p2 = b + bT * pull;
+            float3 p3 = b;
+
             float halfW = kMarkingWidth * 0.5f;
             float3 lift = new float3(0f, kHeightOffset, 0f);
 
-            var verts = new Vector3[4]
+            int vCount = (kSegments + 1) * 2;
+            int tCount = kSegments * 6;
+            var verts = new Vector3[vCount];
+            var uvs   = new Vector2[vCount];
+            var tris  = new int[tCount];
+
+            // Sample Bezier at N+1 evenly spaced t values; lay down left+right vertices.
+            // Track running arc-length (sum of segment chords) so the texture v-coord can
+            // be tiled in metres, not normalised — keeps the marking pattern at consistent
+            // scale regardless of arc length.
+            float3 prevPos = p0;
+            float arcLen = 0f;
+            for (int i = 0; i <= kSegments; i++)
             {
-                (Vector3)(a - right * halfW + lift),
-                (Vector3)(a + right * halfW + lift),
-                (Vector3)(b + right * halfW + lift),
-                (Vector3)(b - right * halfW + lift),
-            };
-            var tris = new int[6] { 0, 1, 2, 0, 2, 3 };
-            var uvs = new Vector2[4]
+                float t = (float)i / kSegments;
+                float3 pos = CubicBezier(p0, p1, p2, p3, t);
+                if (i > 0) arcLen += math.distance(prevPos, pos);
+                prevPos = pos;
+                float3 tan = CubicBezierTangent(p0, p1, p2, p3, t);
+                // Horizontal-right vector: perpendicular to tangent in XZ plane. Ignore Y
+                // component of tangent for the cross — keeps the ribbon flat-relative-to-ground.
+                float3 tanFlat = new float3(tan.x, 0f, tan.z);
+                float3 right = math.normalizesafe(math.cross(new float3(0f, 1f, 0f), tanFlat));
+                Vector3 lv = (Vector3)(pos - right * halfW + lift);
+                Vector3 rv = (Vector3)(pos + right * halfW + lift);
+                verts[i * 2 + 0] = lv;
+                verts[i * 2 + 1] = rv;
+                float v = arcLen / kTextureTileMeters;
+                uvs[i * 2 + 0]   = new Vector2(0f, v);
+                uvs[i * 2 + 1]   = new Vector2(1f, v);
+            }
+            // Stitch: per segment two triangles connecting consecutive (L,R) pairs.
+            for (int i = 0; i < kSegments; i++)
             {
-                new Vector2(0f, 0f),
-                new Vector2(1f, 0f),
-                new Vector2(1f, len),
-                new Vector2(0f, len),
-            };
+                int baseV = i * 2;
+                int o = i * 6;
+                tris[o + 0] = baseV + 0;
+                tris[o + 1] = baseV + 1;
+                tris[o + 2] = baseV + 3;
+                tris[o + 3] = baseV + 0;
+                tris[o + 4] = baseV + 3;
+                tris[o + 5] = baseV + 2;
+            }
+
             mesh.Clear();
             mesh.vertices = verts;
             mesh.triangles = tris;
@@ -294,12 +409,23 @@ namespace TownRoadLane
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             // HDRP Forward+ frustum culling can drop meshes whose AABB has zero extent on
-            // any axis. Our flat quad has bounds.size.y == 0, since all 4 verts share Y.
-            // Expand vertically by 1m so the culler keeps it. Vanilla avoids this by
-            // multiplying with a TRS matrix that has non-unit Y scale; we pass identity.
+            // any axis. The ribbon lives in a thin band (all verts at the same Y + lift),
+            // so bounds.size.y is tiny. Expand vertically so the culler keeps it.
             var meshBounds = mesh.bounds;
             meshBounds.Expand(new Vector3(0f, 1f, 0f));
             mesh.bounds = meshBounds;
+        }
+
+        private static float3 CubicBezier(float3 p0, float3 p1, float3 p2, float3 p3, float t)
+        {
+            float u = 1f - t;
+            return u * u * u * p0 + 3f * u * u * t * p1 + 3f * u * t * t * p2 + t * t * t * p3;
+        }
+
+        private static float3 CubicBezierTangent(float3 p0, float3 p1, float3 p2, float3 p3, float t)
+        {
+            float u = 1f - t;
+            return 3f * u * u * (p1 - p0) + 6f * u * t * (p2 - p1) + 3f * t * t * (p3 - p2);
         }
 
         private static bool TryFindEndpoint(List<MarkingEndpoint> endpoints, Entity edge, int gap, out MarkingEndpoint ep)
