@@ -1,10 +1,154 @@
 # IMPLEMENTATION PLAN — TownRoadLane v2
 
-> **Status:** approved 2026-05-16, Layer 4 architecture pivoted 2026-05-17 (see below).
-> **Branch:** `v2`. **Base commit:** `6155ccf`. **Current head:** `385b545`.
-> **Companion docs:** `RESEARCH_decomp.md`, `RESEARCH_traffic.md`, `RESEARCH_v1_1.md`,
-> `RESEARCH_road_builder.md`, `RESEARCH_ui_framework.md`, `RESEARCH_ui_endpoints.md`,
-> `SESSION_2026-05-17.md` (latest session snapshot — read first).
+> **Status:** Phase 4 ✅ COMPLETE (commit `cdc96a5` — 2026-05-17 evening).
+> **Branch:** `v2`. **Next: Phase 5 (Marking customization MVP)** — see below.
+> **Companion docs:** all `RESEARCH_*.md` in `research/`; `SESSION_2026-05-17.md`.
+
+---
+
+## Phase 5 — Marking customization MVP
+
+Phase 4 delivered: per-node user pairs render as proper vanilla decals
+via ECS sublane emission. Phase 5 builds the killer feature stack on top.
+
+### Recipe that finally worked (Phase 4 — don't break these in Phase 5)
+
+These are **earned invariants** — each cost real hours of debugging. They
+must be preserved by any future emission/lifecycle code:
+
+- **Use `NetLaneArchetypeData.m_LaneArchetype` from a `SecondaryLane`-tagged
+  prefab** (our `EdgeLineCloneSystem` clones already qualify). The archetype
+  auto-includes `Game.Net.SecondaryLane`, which:
+  - Protects from `LaneSystem.RemoveUnusedOldLanes` GC (skips Secondary
+    in `FillOldLaneBuffer` at LaneSystem.cs:2022).
+  - Triggers `SecondaryLaneReferencesSystem` (Modification5) to auto-register
+    us in `node.SubLane` with `PathMethods = ~allKnownMethods` (decoration
+    sentinel — pathfinder ignores us).
+- **Dedup key = `(node, bufferIndex)`, NEVER a geometry hash.** Earlier rev
+  hashed (sourceEdge, sourceGap, targetEdge, targetGap) into a synthetic key;
+  the hash collapsed when the same edge pair had matching gap indices on
+  both ends, silently dropping ~20% of user pairs. `bufferIndex` is uniquely
+  stable per (node, tick) — no collision possible.
+- **Do NOT mark owner node `Updated` after spawn.** Cascade fanouts through
+  `LaneSystem` → `SecondaryLaneSystem` produced runaway spawn loops in earlier
+  attempts.
+- **All structural changes via one ECB per OnUpdate, played back at end.**
+  Direct `EntityManager.AddComponent` mid-update invalidates query iterators
+  and produces "delete one → another appears" thrashing.
+- **PathNode slot base ≥ 32768** (`idxBase = 32768 + bufferIdx * 4`) to keep
+  3 slots/pair clear of vanilla primary lane allocations (which start at 0).
+- **NEVER `Graphics.DrawMesh + decal shader` or `MeshRenderer + decal shader`
+  paths.** The vanilla `BH/Decals/CurvedDecalShader` reads `colossal_CurveMatrix`
+  as a DOTS InstanceProperty supplied only by BRG. Outside BRG it defaults
+  to zero, collapsing geometry. The non-curved `BH/Decals/DefaultDecalShader`
+  has the same family of problems. Full dead-end exploration archived in
+  `research/RESEARCH_decal_*.md` (3 docs, ~1500 lines). Single moral: route
+  decals through ECS sublanes, full stop.
+
+### Stage 5a — Minimal UX polish (~1 session, pure C#)
+
+Goal: lower friction for own testing of later stages. No React yet.
+
+- Toolbar button (use vanilla `ToolbarUISystem` C# API; pattern from
+  `decomp/Game/Game.UI.InGame/` or RoadBuilder mod source).
+- Hover-highlight selectable nodes when tool is active (raycast through
+  `ToolBaseSystem.GetRaycastResult` → overlay through existing
+  `MarkingOverlaySystem`).
+- ESC/right-click consistent cancel behavior.
+- Quick-fix any pain points discovered in Phase 4 testing (overlay polish,
+  visual feedback).
+
+### Stage 5b — Segmentation core (~1-2 sessions, no UI)
+
+Goal: data model + intersection math + spawn-per-segment. Test through
+dump systems and hardcoded fixtures.
+
+**Data model swap:**
+- `MarkingPair` buffer → split into:
+  - `MarkingLine` buffer: `{ sourceEndpoint, targetEndpoint, style }` (logical)
+  - `MarkingSegment` buffer: `{ lineIndex, tStart, tEnd, visible }` (drawable)
+- New line auto-gets one segment `[0, 1, visible=true]`.
+- Save/migration: detect old `MarkingPair` on load, transform to new format
+  one-time per save (mark MarkingPair as `[Obsolete]` schema v2 → v3 migration).
+
+**Intersection math:**
+- `Bezier4x3 ∩ Bezier4x3` via Bezier clipping (recursive subdivision,
+  ~50-80 LOC). Result: list of `(tOnLineA, tOnLineB)` intersection points.
+- When user adds/edits a line, re-compute intersections with every other
+  line on the same node. Update each affected line's `MarkingSegment` buffer:
+  insert/merge segment boundaries at intersection `t` values.
+- Each new boundary spawns 2 segments by default both `visible=true` (line
+  unchanged visually until user explicitly hides a segment).
+
+**Emission update:**
+- `MarkingPairEmissionSystem` → renamed `MarkingSegmentEmissionSystem`.
+- Iterate `MarkingSegment` buffer instead of `MarkingPair`.
+- For each `visible=true` segment, compute `Bezier4x3.Cut(originalBez, tStart, tEnd)`
+  (use Colossal math API if available; if not, ~12 LOC De Casteljau subdivision).
+- Spawn entity per visible segment.
+- Dedup key = `(node, lineIndex, segmentIndex)`.
+- PathNode slot base = `32768 + lineIndex * 256 + segmentIndex * 4`
+  (max 256 segments/line, 64 lines/node before overflow — far above usable).
+- Same archetype, same Owner/Elevation pattern. NO other changes to the
+  vanilla-side recipe.
+
+**Testing fixtures:**
+- Hardcoded "make 2 crossing lines on a 4-way intersection, verify both
+  produce 2 segments after intersection" via debug overlay drawing parametric
+  `t` markers.
+- Dump system listing all `MarkingSegment` buffers + computed Bezier cuts.
+
+### Stage 5c — Line styles (~1-2 sessions, simple C# UI)
+
+Goal: solid / dashed / double / stop / crosswalk styles.
+
+- Style enum on `MarkingLine` (or per-segment if granularity makes sense
+  — open question, decide during implementation).
+- Per-style prefab clone in `EdgeLineCloneSystem` (parallel to current EU/NA
+  edge-line clones). One prefab per style; mesh choice via existing G87
+  fallback chain.
+- Style → which prefab to spawn lookup at emission time.
+- Inline toolbar mini-buttons for style picker (3-5 icons, pure C# UI).
+- Default new line = "Solid".
+
+### Stage 5d — Segmentation UI (React, full UI overhaul)
+
+Goal: hover/click selection of segments, style picker panel, pair management.
+
+**Bootstrap:**
+- Clone React+TS+SCSS+i18next setup from user's `SystemTimeMod` reference
+  project (`C:\Users\Максим\RiderProjects\SystemTimeMod\SystemTimeMod\SystemTimeModUI`).
+  Created via `create-csii-ui-mod` template, has webpack + i18next + lucide-react
+  + sass-loader already wired. Saves hours of bootstrap.
+- Bridge: existing C# tool emits state events; React consumes via cohtml
+  bridge; React dispatches actions back through bound C# props.
+
+**UI components:**
+- Segment hover/click selection with overlay highlights (extends
+  `MarkingOverlaySystem`).
+- Per-node pair list panel (collapsed by default).
+- Style picker per pair / per segment.
+- Segment visibility toggles.
+- Localization scaffolding (EN/RU at minimum).
+
+### Open questions (defer to Phase 6+)
+
+- **First-edit transition UX**: currently when user creates first pair on a
+  node, ALL vanilla markings disappear (suppressed) leaving just the one
+  custom line. Options for v3: auto-generate vanilla replica on first edit
+  vs current "wipe and replace" vs layered mode.
+- **Style granularity**: per-line vs per-segment. Per-segment is more
+  powerful (e.g. solid → dashed → solid), per-line is simpler UI.
+- **Vanilla edge-line intersection**: extending segmentation to vanilla
+  lines too (the canonical "median crosses left-turn lane" scenario).
+  Requires vanilla edge-line entity discovery + insertion into our
+  intersection graph. High complexity.
+- **Save format versioning**: MarkingPair → MarkingLine+MarkingSegment
+  schema migration. Need version tag in buffer; one-time migrator at load.
+- **Performance**: dense intersections (16-way roundabouts) could produce
+  hundreds of segments. Profile before optimising; baseline Phase 5b first.
+
+---
 
 ---
 
