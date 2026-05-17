@@ -78,19 +78,20 @@ namespace TownRoadLane
             public static readonly int _LodDistanceFactor = Shader.PropertyToID("colossal_LodDistanceFactor");
         }
 
-        // Heartbeat: every N OnUpdate/Render call we log a status line so we can tell whether
-        // the system is even being driven. Plain "not rendering" could mean OnUpdate isn't
-        // firing (managed system without RequireForUpdate), or Render is firing but
-        // _meshes.Count == 0, or cameras filter dropped all cameras.
+        // Heartbeat: every N OnUpdate call we log a status line.
         private int _updateTicks;
-        private int _renderTicks;
-        private int _drawsLastReport;
 
         // Live geometry source: MarkingPair buffers on node entities. Each tick we diff
-        // (node, pairIndex, srcEdge, srcGap, dstEdge, dstGap) tuples against _meshes and
+        // (node, pairIndex, srcEdge, srcGap, dstEdge, dstGap) tuples against _pairs and
         // rebuild any that changed. Cheap because pair counts are tiny per node.
-        private readonly Dictionary<PairKey, Mesh> _meshes = new();
+        private readonly Dictionary<PairKey, PairRender> _pairs = new();
         private EntityQuery _nodesWithPairs;
+
+        // Root for all pair GameObjects. Keeping them under one parent makes scene cleanup
+        // and inspector debugging easier. Pattern lifted from vanilla
+        // RenderPrefabRenderer.cs:202-203 — same approach: one parent transform, child
+        // GameObjects per mesh.
+        private GameObject _root;
 
         protected override void OnCreate()
         {
@@ -105,15 +106,16 @@ namespace TownRoadLane
                 All = new[] { ComponentType.ReadOnly<MarkingPair>(), ComponentType.ReadOnly<Game.Net.Node>() },
                 None = new[] { ComponentType.ReadOnly<Game.Common.Deleted>(), ComponentType.ReadOnly<Game.Tools.Temp>() },
             });
-            RenderPipelineManager.beginContextRendering += Render;
-            log.Info("MarkingMeshRenderSystem: created, subscribed to beginContextRendering");
+            _root = new GameObject("TRL_MarkingRoot") { hideFlags = HideFlags.DontSave };
+            log.Info("MarkingMeshRenderSystem: created (GameObject+MeshRenderer pipeline)");
         }
 
         protected override void OnDestroy()
         {
-            RenderPipelineManager.beginContextRendering -= Render;
-            foreach (var m in _meshes.Values) SafeDestroy(m);
-            _meshes.Clear();
+            foreach (var p in _pairs.Values) p.Destroy();
+            _pairs.Clear();
+            SafeDestroy(_root);
+            _root = null;
             base.OnDestroy();
         }
 
@@ -121,12 +123,12 @@ namespace TownRoadLane
         {
             _updateTicks++;
             if (_updateTicks % 120 == 1)
-                log.Info($"[mesh-render] OnUpdate tick={_updateTicks} nodesWithPairs={_nodesWithPairs.CalculateEntityCount()} meshCache={_meshes.Count} renderTicks={_renderTicks} drawsLastReport={_drawsLastReport}");
+                log.Info($"[mesh-render] OnUpdate tick={_updateTicks} nodesWithPairs={_nodesWithPairs.CalculateEntityCount()} pairs={_pairs.Count}");
 
-            // Per-tick reconcile: rebuild mesh cache from MarkingPair buffers. Small N (pairs
-            // per node × nodes with pairs), runs main-thread because Mesh API requires it.
-            // We rebuild every wanted pair every tick for the PoC — cheap and simpler than
-            // diffing. Optimise later if it shows up in profiler.
+            var mat = GetMaterial();
+            if (mat == null) return; // material not yet acquireable (clone not baked)
+
+            // Per-tick reconcile: rebuild geometry + ensure a GameObject per active pair.
             var nextKeys = new HashSet<PairKey>();
             var nodes = _nodesWithPairs.ToEntityArray(Unity.Collections.Allocator.Temp);
             for (int n = 0; n < nodes.Length; n++)
@@ -143,85 +145,45 @@ namespace TownRoadLane
                     if (!TryFindEndpoint(endpoints, p.targetEdge, p.targetGapIndex, out var dst)) continue;
                     var key = new PairKey(node, i);
                     nextKeys.Add(key);
-                    if (!_meshes.TryGetValue(key, out var mesh))
+                    if (!_pairs.TryGetValue(key, out var entry))
                     {
-                        mesh = new Mesh { name = $"TRL_Pair_{node.Index}_{i}" };
-                        _meshes[key] = mesh;
+                        entry = PairRender.Create(_root, mat, $"TRL_Pair_{node.Index}_{i}");
+                        _pairs[key] = entry;
                     }
-                    BuildRibbonMesh(mesh, src.position, src.tangent, dst.position, dst.tangent);
+                    BuildRibbonMesh(entry.mesh, src.position, src.tangent, dst.position, dst.tangent);
+                    UpdatePairMpb(entry);
                 }
             }
             nodes.Dispose();
 
-            // Sweep meshes whose pair was removed.
-            if (_meshes.Count > nextKeys.Count)
+            // Sweep entries whose pair was removed.
+            if (_pairs.Count > nextKeys.Count)
             {
                 var toRemove = new List<PairKey>();
-                foreach (var kv in _meshes)
+                foreach (var kv in _pairs)
                     if (!nextKeys.Contains(kv.Key)) toRemove.Add(kv.Key);
                 foreach (var k in toRemove)
                 {
-                    SafeDestroy(_meshes[k]);
-                    _meshes.Remove(k);
+                    _pairs[k].Destroy();
+                    _pairs.Remove(k);
                 }
             }
         }
 
-        private void Render(ScriptableRenderContext context, List<Camera> cameras)
+        /// <summary>Push per-pair decal uniforms onto the MeshRenderer via its MPB.
+        /// Vanilla equivalent: RenderPrefabRenderer.SetDecalProperties at line 401, called
+        /// from Update() on line 818. colossal_DecalLayerMask is NOT here — it lives on
+        /// the material (HDRP reads it from material constants for the decal pass).</summary>
+        private void UpdatePairMpb(PairRender entry)
         {
-            _renderTicks++;
-            int draws = 0;
-            int eligibleCameras = 0;
-            for (int c = 0; c < cameras.Count; c++)
-                if (cameras[c].cameraType == CameraType.Game || cameras[c].cameraType == CameraType.SceneView)
-                    eligibleCameras++;
-            if (_renderTicks % 120 == 1)
-                log.Info($"[mesh-render] Render tick={_renderTicks} cameras={cameras.Count} eligible={eligibleCameras} meshCache={_meshes.Count}");
-
-            if (_meshes.Count == 0) { _drawsLastReport = 0; return; }
-            var mat = GetMaterial();
-            if (mat == null) { _drawsLastReport = 0; return; }
-            // Heartbeat — confirm WHICH material we're actually using each frame. If this shows
-            // a stale Unlit/HDRP material from a previous build (game wasn't fully restarted),
-            // that explains "no visual but draws=N".
-            if (_renderTicks % 120 == 1)
-                log.Info($"[mesh-render] using material='{mat.name}' shader='{mat.shader?.name}' renderQueue={mat.renderQueue} passCount={mat.passCount}");
-            // Diagnostic sample: bounds of first mesh in cache (helps spot mesh-frustum-cull issue).
-            if (_renderTicks % 120 == 1)
-            {
-                foreach (var kv in _meshes)
-                {
-                    var b = kv.Value.bounds;
-                    log.Info($"[mesh-render] mesh sample key=(#{kv.Key.node.Index},{kv.Key.index}) vertCount={kv.Value.vertexCount} bounds.center=({b.center.x:F1},{b.center.y:F1},{b.center.z:F1}) bounds.size=({b.size.x:F1},{b.size.y:F1},{b.size.z:F1})");
-                    break;
-                }
-            }
-            var matrix = Matrix4x4.identity; // mesh is in world-space already
-            foreach (var kv in _meshes)
-            {
-                var mesh = kv.Value;
-                if (mesh == null) continue;
-                // Per-draw decal uniforms (vanilla equivalent: ManagedBatchSystem.cs:1010-1024).
-                // colossal_MeshSize: xyz = world-space bounds.size, w = bounds.center.y
-                // (shader uses .w as projection cutoff). colossal_LodDistanceFactor: HDRP
-                // fades the decal out at distance if absent — pin to 1 for LOD 0.
-                // colossal_DecalLayerMask is NOT here — see GetMaterial(): it lives on
-                // the material, not the MPB (HDRP reads it from material constants).
-                _props.Clear();
-                var bounds = mesh.bounds;
-                _props.SetVector(ShaderIDs._TextureArea,    _textureArea);
-                _props.SetVector(ShaderIDs._MeshSize,       new Vector4(bounds.size.x, bounds.size.y, bounds.size.z, bounds.center.y));
-                _props.SetFloat (ShaderIDs._LodDistanceFactor, 1f);
-                for (int c = 0; c < cameras.Count; c++)
-                {
-                    var cam = cameras[c];
-                    if (cam.cameraType != CameraType.Game && cam.cameraType != CameraType.SceneView) continue;
-                    Graphics.DrawMesh(mesh, matrix, mat, layer: 0, cam, submeshIndex: 0, _props,
-                                      ShadowCastingMode.Off, receiveShadows: false);
-                    draws++;
-                }
-            }
-            _drawsLastReport = draws;
+            var bounds = entry.mesh.bounds;
+            _props.Clear();
+            _props.SetVector(ShaderIDs._TextureArea,    _textureArea);
+            // w = 0f to match vanilla (RenderPrefabRenderer.cs:408). v1 PoC speculated
+            // w = bounds.center.y; cross-reference proved that wrong.
+            _props.SetVector(ShaderIDs._MeshSize,       new Vector4(bounds.size.x, bounds.size.y, bounds.size.z, 0f));
+            _props.SetFloat (ShaderIDs._LodDistanceFactor, 1f);
+            entry.renderer.SetPropertyBlock(_props);
         }
 
         /// <summary>Path B Step 2: build a DefaultDecalShader material at runtime so the box
@@ -271,70 +233,110 @@ namespace TownRoadLane
         /// keywords aren't derived from properties and every render pass is a silent no-op.</summary>
         private Material BuildDecalMaterial()
         {
-            // Diagnostic — check if a curved variant exists (rumoured but never cited in
-            // decomp). One-time log line at first material build; informs future shader
-            // swap experiments. Cost: trivial.
-            var curvedProbe = Shader.Find("BH/Decals/CurvedDecal");
-            log.Info($"MarkingMeshRenderSystem: BH/Decals/CurvedDecal probe → {(curvedProbe != null ? "FOUND" : "not found")}");
-
-            var shader = Shader.Find("BH/Decals/DefaultDecalShader");
-            if (shader == null)
+            // PATH B.3 — clone the vanilla CurvedDecalShader material straight from
+            // EdgeLineCloneSystem's prefab. This is the recipe that finally works:
+            //
+            // 1) Vanilla decal materials use shader 'BH/Decals/CurvedDecalShader',
+            //    NOT 'BH/Decals/DefaultDecalShader'. The previous PoC was on the
+            //    wrong shader entirely (Shader.Find("BH/Decals/CurvedDecal") probed
+            //    the wrong name).
+            // 2) The vanilla material ships with _NormalMap, _MaskMap, baked stencil
+            //    refs (_DecalStencilRef=16, _DecalStencilWriteMask=16), surface-type
+            //    flags and renderQueue=1975 (decal-pre-pass slot, NOT generic 2000).
+            //    Building via `new Material(shader)` defaults all of these wrong;
+            //    HDMaterial.ValidateMaterial has a documented runtime gap that
+            //    does not recover them.
+            // 3) Cloning the vanilla material brings ALL of those for free, plus
+            //    the correct shader. We then only override per-instance properties
+            //    via MPB at draw time.
+            //
+            // See research/RESEARCH_decal_breakthrough_hunt.md §2 and §4, and the
+            // mat-dump diff captured in TownRoadLane.Mod.log on 2026-05-17 19:24:17.
+            var vanillaMat = BorrowVanillaDecalMaterialForDiff();
+            if (vanillaMat == null)
             {
-                log.Warn("MarkingMeshRenderSystem: shader 'BH/Decals/DefaultDecalShader' not found");
+                log.Warn("MarkingMeshRenderSystem: vanilla decal material not yet available; will retry next tick");
                 return null;
             }
 
-            var mat = new Material(shader) { name = "TRL_PairPoC_Decal" };
+            var mat = new Material(vanillaMat) { name = "TRL_PairPoC_Decal", hideFlags = HideFlags.HideAndDontSave };
 
-            // Borrow the painted-line bitmap AND atlas sub-rect from the vanilla
-            // edge-line prefab. The shader samples _BaseColorMap and uses
-            // colossal_TextureArea (sent per-draw via MPB) to crop to the correct
-            // sprite inside the 8192×4096 atlas.
-            if (TryBorrowLaneLineTexture(out var tex, out var texArea))
-            {
-                if (mat.HasProperty("_BaseColorMap")) mat.SetTexture("_BaseColorMap", tex);
-                if (mat.HasProperty("_MainTex"))      mat.SetTexture("_MainTex",      tex);
-                mat.mainTexture = tex;
-                log.Info($"MarkingMeshRenderSystem: decal borrowed texture '{tex.name}' ({tex.width}x{tex.height})");
-            }
-            else
-            {
-                log.Info("MarkingMeshRenderSystem: decal has no source texture — projection will be solid white");
-            }
-            _textureArea = texArea;
+            // Store the borrowed TextureArea (atlas sub-rect for the lane-line sprite)
+            // for per-draw MPB use. Texture itself is already on the cloned material —
+            // no need to re-set it.
+            if (TryBorrowLaneLineTexture(out _, out var texArea)) _textureArea = texArea;
 
-            // CRITICAL — colossal_DecalLayerMask must be on the MATERIAL, not the MPB.
-            // The HDRP decal pass reads layer mask from material constants; if absent
-            // it defaults to 0 and the decal is culled against every receiver, producing
-            // exactly the "draws=N, zero pixels" symptom we observed. Encoded as the
-            // float bit-cast of an int (vanilla pattern at ManagedBatchSystem.cs:1408).
-            // 2 = DecalLayers.Roads — paint applies to road surfaces only.
+            // Belt-and-braces — set decal layer mask on the clone, in case the vanilla
+            // material left it at 0 (the dump showed colossal_DecalLayerMask=0 on
+            // vanilla too, but it works there because the BRG pipeline sets it via
+            // material-key — out of band from the material constants). Encoded as
+            // float bit-cast of int (ManagedBatchSystem.cs:1408 pattern).
             mat.SetFloat(ShaderIDs._DecalLayerMask,
                          BitConverter.Int32BitsToSingle((int)Game.Rendering.DecalLayers.Roads));
 
-            // HDRP decal "affects" keywords. Logs already show these get enabled by
-            // ValidateMaterial but be explicit — cheap insurance and self-documenting.
-            mat.EnableKeyword("_MATERIAL_AFFECTS_ALBEDO");
-            mat.EnableKeyword("_MATERIAL_AFFECTS_NORMAL");
-            mat.EnableKeyword("_MATERIAL_AFFECTS_MASKMAP");
-
-            // Virtual-texturing must stay off — vanilla also disables it after material
-            // clone (see RenderPrefabRenderer.cs:194). Our texture is not registered with
-            // HDRP's VT atlas; sampling through VT would silently return zero.
-            mat.DisableKeyword("ENABLE_VT");
-
-            if (mat.HasProperty("_DrawOrder"))
-                mat.SetFloat("_DrawOrder", 0f);
-            if (mat.HasProperty("_DecalMeshDepthBias"))
-                mat.SetFloat("_DecalMeshDepthBias", 0f);
-
+            // Re-validate after clone — keyword/pass derivation runs against the
+            // cloned property state, not the source.
             HDMaterial.ValidateMaterial(mat);
 
-            var kw = mat.enabledKeywords;
-            string kwStr = "";
-            for (int i = 0; i < kw.Length; i++) { if (i > 0) kwStr += ","; kwStr += kw[i].name; }
-            log.Info($"MarkingMeshRenderSystem: built decal material '{mat.name}' shader='{mat.shader.name}' renderQueue={mat.renderQueue} passes={mat.passCount} keywords=[{kwStr}]");
+            log.Info($"MarkingMeshRenderSystem: cloned vanilla decal material '{vanillaMat.name}' → '{mat.name}' shader='{mat.shader.name}' renderQueue={mat.renderQueue}");
+            DumpMaterial("CLONED", mat);
+
             return mat;
+        }
+
+        private static void DumpMaterial(string tag, Material m)
+        {
+            try
+            {
+                var s = m.shader;
+                log.Info($"[mat-dump:{tag}] name='{m.name}' shader='{s.name}' renderQueue={m.renderQueue} passCount={s.passCount} propCount={s.GetPropertyCount()}");
+                for (int i = 0; i < s.GetPropertyCount(); i++)
+                {
+                    var name = s.GetPropertyName(i);
+                    var type = s.GetPropertyType(i);
+                    string val;
+                    switch (type)
+                    {
+                        case UnityEngine.Rendering.ShaderPropertyType.Float:
+                        case UnityEngine.Rendering.ShaderPropertyType.Range: val = m.GetFloat(name).ToString("F3"); break;
+                        case UnityEngine.Rendering.ShaderPropertyType.Int:   val = m.GetInt(name).ToString(); break;
+                        case UnityEngine.Rendering.ShaderPropertyType.Color: val = m.GetColor(name).ToString(); break;
+                        case UnityEngine.Rendering.ShaderPropertyType.Vector:val = m.GetVector(name).ToString(); break;
+                        case UnityEngine.Rendering.ShaderPropertyType.Texture: val = m.GetTexture(name)?.name ?? "<null>"; break;
+                        default: val = "?"; break;
+                    }
+                    log.Info($"[mat-dump:{tag}]   prop {name} ({type}) = {val}");
+                }
+                for (int i = 0; i < m.passCount; i++)
+                {
+                    var pname = m.GetPassName(i);
+                    bool enabled = string.IsNullOrEmpty(pname) ? true : m.GetShaderPassEnabled(pname);
+                    log.Info($"[mat-dump:{tag}]   pass[{i}] name='{pname}' enabled={enabled}");
+                }
+                var kws = m.enabledKeywords;
+                string ks = "";
+                for (int i = 0; i < kws.Length; i++) { if (i > 0) ks += ","; ks += kws[i].name; }
+                log.Info($"[mat-dump:{tag}]   enabledKeywords=[{ks}]");
+            }
+            catch (System.Exception ex) { log.Error(ex, $"DumpMaterial:{tag} threw"); }
+        }
+
+        /// <summary>One-shot borrow of the vanilla decal material straight from our edge-line
+        /// clone prefab's mesh — for diagnostic comparison with our hand-built one. NOT used
+        /// for rendering, only for the side-by-side dump in BuildDecalMaterial().</summary>
+        private Material BorrowVanillaDecalMaterialForDiff()
+        {
+            try
+            {
+                var prefab = PickClonePrefab();
+                if (prefab is NetLaneGeometryPrefab geom && geom.m_Meshes != null && geom.m_Meshes.Length > 0)
+                {
+                    var meshInfo = geom.m_Meshes[0];
+                    if (meshInfo?.m_Mesh != null) return meshInfo.m_Mesh.ObtainMaterial(0, useVT: false);
+                }
+            }
+            catch (System.Exception ex) { log.Error(ex, "BorrowVanillaDecalMaterialForDiff threw"); }
+            return null;
         }
 
         /// <summary>HDRP/Unlit fallback — kept because it's the proven working path from
@@ -611,6 +613,56 @@ namespace TownRoadLane
             public bool Equals(PairKey o) => node == o.node && index == o.index;
             public override bool Equals(object o) => o is PairKey k && Equals(k);
             public override int GetHashCode() => (node.Index * 397) ^ (int)((uint)node.Version << 8) ^ index;
+        }
+
+        /// <summary>One pair = one GameObject + MeshFilter + MeshRenderer + Mesh.
+        /// Pattern mirrors vanilla RenderPrefabRenderer.cs:202-219 — proven HDRP-compatible
+        /// way to feed a runtime-built mesh + decal material into the SRP. Replaces the
+        /// Graphics.DrawMesh path that delivered draw calls but never reached the decal
+        /// pass (commit d7872a9 captured the dead end).</summary>
+        private sealed class PairRender
+        {
+            public readonly GameObject go;
+            public readonly MeshFilter filter;
+            public readonly MeshRenderer renderer;
+            public readonly Mesh mesh;
+
+            private PairRender(GameObject g, MeshFilter f, MeshRenderer r, Mesh m)
+            { go = g; filter = f; renderer = r; mesh = m; }
+
+            public static PairRender Create(GameObject parent, Material sharedMaterial, string name)
+            {
+                var go = new GameObject(name) { hideFlags = HideFlags.DontSave };
+                go.transform.SetParent(parent.transform, worldPositionStays: false);
+                // Mesh vertices are world-space, so the GO sits at origin (no local offset).
+                go.transform.localPosition = Vector3.zero;
+                go.transform.localRotation = Quaternion.identity;
+                go.transform.localScale = Vector3.one;
+
+                var mesh = new Mesh { name = name };
+                var filter = go.AddComponent<MeshFilter>();
+                filter.sharedMesh = mesh;
+                var renderer = go.AddComponent<MeshRenderer>();
+                renderer.sharedMaterial = sharedMaterial;
+                renderer.shadowCastingMode = ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                renderer.lightProbeUsage = LightProbeUsage.Off;
+                renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+                // CRITICAL: HDRP Decal Meshes (our MeshRenderer + decal material) are
+                // filtered by renderingLayerMask, NOT by colossal_DecalLayerMask. Default
+                // MeshRenderer.renderingLayerMask = 1, vanilla BRG draw commands use
+                // uint.MaxValue (BatchManagerSystem.cs:603,831). Mismatch with receiver
+                // mask = silent zero pixels. Open the floodgates first; narrow later if
+                // we get too much spill onto non-road surfaces.
+                renderer.renderingLayerMask = uint.MaxValue;
+                return new PairRender(go, filter, renderer, mesh);
+            }
+
+            public void Destroy()
+            {
+                SafeDestroy(mesh);
+                SafeDestroy(go);
+            }
         }
     }
 }
