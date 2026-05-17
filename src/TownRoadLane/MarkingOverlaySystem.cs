@@ -132,8 +132,10 @@ namespace TownRoadLane
             // tangent stored in MarkingEndpoint points OUTWARD from the node into the edge. The
             // curve should leave the dot in the OPPOSITE direction (into the intersection), so
             // we negate.
+            // Pull factor matches MarkingPairEmissionSystem so the drag preview reflects the
+            // real Bezier the system will emit.
             float chord = math.distance(a, b);
-            float pull = chord / 3f;
+            float pull = chord * 0.4f;
             float3 ta3 = new float3(-ta.x, 0f, -ta.y);
             float3 tb3 = new float3(-tb.x, 0f, -tb.y);
             float3 ctrl1 = a + ta3 * pull;

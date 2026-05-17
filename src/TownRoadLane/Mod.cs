@@ -79,8 +79,12 @@ namespace TownRoadLane
             // (we read tool state, write to vanilla OverlayRenderSystem.Buffer).
             updateSystem.UpdateAt<MarkingOverlaySystem>(SystemUpdatePhase.Rendering);
 
-            // Phase 4 step 2 diagnostic — counts our cloned-prefab sublanes every 60 frames.
-            // Remove once emission is verified working.
+            // Phase 4 step 2: managed emission of marker sublanes from MarkingPair buffers.
+            // Runs on Modification1 (same phase as MarkingToggleSystem); diffs node buffers vs
+            // already-spawned TRLPairLink-tagged sublanes and reconciles.
+            updateSystem.UpdateAt<MarkingPairEmissionSystem>(SystemUpdatePhase.Modification1);
+            // Diagnostic — counts our cloned-prefab sublanes every 60 frames. Remove once
+            // emission is verified stable.
             updateSystem.UpdateAt<UserPairEmissionDumpSystem>(SystemUpdatePhase.GameSimulation);
         }
 
