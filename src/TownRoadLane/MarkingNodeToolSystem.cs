@@ -54,10 +54,12 @@ namespace TownRoadLane
         private int _hoverIdx  = -1;
         private int _lastLoggedHoverIdx = -2; // -2 = "never logged"; -1 = "no hover"
         private float3 _cursorWorldPos;
+        private Entity _hoveredNode; // raycast result while tool is active; Entity.Null when no node under cursor
         private int _heartbeatCounter; // logs raycast outcome periodically when active
 
         public State ToolState => _state;
         public Entity SelectedNode => _selectedNode;
+        public Entity HoveredNode => _hoveredNode;
         public IReadOnlyList<MarkingEndpoint> Endpoints => _endpoints;
         public int SourceEndpointIndex => _sourceIdx;
         public int HoveredEndpointIndex => _hoverIdx;
@@ -103,6 +105,7 @@ namespace TownRoadLane
             _sourceIdx = -1;
             _hoverIdx = -1;
             _lastLoggedHoverIdx = -2;
+            _hoveredNode = Entity.Null;
         }
 
         public override void InitializeRaycast()
@@ -121,6 +124,7 @@ namespace TownRoadLane
             RaycastHit hit;
             bool hitSomething = GetRaycastResult(out Entity hitEntity, out hit);
             _cursorWorldPos = hitSomething ? hit.m_HitPosition : float3.zero;
+            _hoveredNode = (hitSomething && EntityManager.HasComponent<Node>(hitEntity)) ? hitEntity : Entity.Null;
             _hoverIdx = (_state != State.Default && hitSomething) ? FindHoveredEndpoint(_cursorWorldPos) : -1;
 
             // Heartbeat every ~120 frames (~2 sec @60fps) — confirms tool is actually running and
