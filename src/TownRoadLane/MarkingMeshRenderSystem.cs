@@ -37,12 +37,18 @@ namespace TownRoadLane
     {
         private static readonly ILog log = Mod.log;
 
-        // Tuned proportions. Width matches the visual weight of vanilla edge-line strokes.
-        // Height: 0.01m is enough to clear road-surface z-fighting in most cases — the
-        // ribbon mesh is still opaque geometry (not a true HDRP projected decal), so a
-        // tiny lift is needed. Lower → more z-fight risk; higher → visible floating.
-        private const float kMarkingWidth   = 0.15f;
-        private const float kHeightOffset   = 0.01f;
+        // Path B box geometry. Marking is extruded into a thin box volume — bottom
+        // sits below road surface, top above. With DefaultDecalShader the box
+        // becomes a projection volume; the shader paints the bitmap onto whatever
+        // road surface lies inside. With HDRP/Unlit (Step 1 fallback) the box is
+        // visible as a flat 3D bar — useful sanity check that the mesh is built
+        // correctly before swapping the material.
+        // kHeightOffset is the BOTTOM of the box relative to the curve y.
+        // kBoxHeight is total vertical extent. The bottom dips below ground so that
+        // on crowned/sloped roads the projection still catches the surface.
+        private const float kMarkingWidth   = 0.3f;
+        private const float kHeightOffset   = -0.5f;
+        private const float kBoxHeight      =  1.5f;
 
         private EdgeLineCloneSystem _edgeLineSys;
         private CityConfigurationSystem _cityConfig;
@@ -334,20 +340,24 @@ namespace TownRoadLane
         private const float kPullFactor       = 0.4f;
         private const float kTextureTileMeters = 1.0f;
 
-        /// <summary>Build a ribbon (strip of N quads) following the Bezier arc between two
-        /// endpoints. Each endpoint contributes a tangent direction so the curve leaves the
-        /// dot perpendicular to its parent edge (same control-point construction as the
-        /// overlay drag-preview, see <see cref="MarkingOverlaySystem.BuildSmoothCurve"/>).
-        /// Vertices are positioned in world space; the ribbon is widened along the per-segment
-        /// horizontal-right vector (perpendicular to tangent in the XZ plane) and lifted by
-        /// kHeightOffset.</summary>
+        /// <summary>Build a thin extruded box following the Bezier arc between two endpoints.
+        /// Each Bezier sample produces FOUR vertices: L_bot, R_bot, L_top, R_top. Per segment
+        /// we emit 8 triangles (top quad + bottom quad + 2 side quads). The resulting closed
+        /// volume serves two purposes:
+        ///   - With HDRP/Unlit material the box is visible as a thin 3D bar — sanity-check
+        ///     that geometry is correct (Path B Step 1 — geometry only).
+        ///   - With DefaultDecalShader material the box becomes a projection volume; the
+        ///     shader paints its texture onto whatever surface lies inside (Path B Step 2).
+        ///
+        /// Winding convention: outward-facing normals. Looking down +Y, vertices are laid
+        /// out as L_bot=0, R_bot=1, L_top=2, R_top=3 per sample; "right" = +cross(up,tangent).
+        /// Top quad uses (L_top, R_top, R_top_next, L_top_next) wound CCW from above.
+        /// Bottom quad is wound CCW from below. Side quads face outward in ±right.</summary>
         private static void BuildRibbonMesh(Mesh mesh, float3 a, float2 aTan, float3 b, float2 bTan)
         {
             float chord = math.distance(a, b);
             if (chord < 0.01f) { mesh.Clear(); return; }
             float pull = chord * kPullFactor;
-            // MarkingEndpoint.tangent points OUTWARD from the node into the parent edge.
-            // For the curve to leave each dot toward the intersection interior we negate.
             float3 aT = new float3(-aTan.x, 0f, -aTan.y);
             float3 bT = new float3(-bTan.x, 0f, -bTan.y);
             float3 p0 = a;
@@ -356,50 +366,75 @@ namespace TownRoadLane
             float3 p3 = b;
 
             float halfW = kMarkingWidth * 0.5f;
-            float3 lift = new float3(0f, kHeightOffset, 0f);
+            float3 liftBot = new float3(0f, kHeightOffset,                0f);
+            float3 liftTop = new float3(0f, kHeightOffset + kBoxHeight,   0f);
 
-            int vCount = (kSegments + 1) * 2;
-            int tCount = kSegments * 6;
+            int sampleCount = kSegments + 1;
+            int vCount = sampleCount * 4;
+            // 8 triangles per segment × 3 indices each = 24 indices per segment.
+            int tCount = kSegments * 24;
             var verts = new Vector3[vCount];
             var uvs   = new Vector2[vCount];
             var tris  = new int[tCount];
 
-            // Sample Bezier at N+1 evenly spaced t values; lay down left+right vertices.
-            // Track running arc-length (sum of segment chords) so the texture v-coord can
-            // be tiled in metres, not normalised — keeps the marking pattern at consistent
-            // scale regardless of arc length.
             float3 prevPos = p0;
             float arcLen = 0f;
-            for (int i = 0; i <= kSegments; i++)
+            for (int i = 0; i < sampleCount; i++)
             {
                 float t = (float)i / kSegments;
                 float3 pos = CubicBezier(p0, p1, p2, p3, t);
                 if (i > 0) arcLen += math.distance(prevPos, pos);
                 prevPos = pos;
                 float3 tan = CubicBezierTangent(p0, p1, p2, p3, t);
-                // Horizontal-right vector: perpendicular to tangent in XZ plane. Ignore Y
-                // component of tangent for the cross — keeps the ribbon flat-relative-to-ground.
                 float3 tanFlat = new float3(tan.x, 0f, tan.z);
                 float3 right = math.normalizesafe(math.cross(new float3(0f, 1f, 0f), tanFlat));
-                Vector3 lv = (Vector3)(pos - right * halfW + lift);
-                Vector3 rv = (Vector3)(pos + right * halfW + lift);
-                verts[i * 2 + 0] = lv;
-                verts[i * 2 + 1] = rv;
+
+                Vector3 lBot = (Vector3)(pos - right * halfW + liftBot);
+                Vector3 rBot = (Vector3)(pos + right * halfW + liftBot);
+                Vector3 lTop = (Vector3)(pos - right * halfW + liftTop);
+                Vector3 rTop = (Vector3)(pos + right * halfW + liftTop);
+
+                int baseV = i * 4;
+                verts[baseV + 0] = lBot;
+                verts[baseV + 1] = rBot;
+                verts[baseV + 2] = lTop;
+                verts[baseV + 3] = rTop;
+
+                // All 4 verts at a sample share the same arc-length v coordinate; u maps
+                // across the width (0 on left edge, 1 on right edge). Only the top face
+                // is visible to the camera under typical viewing, but DefaultDecalShader
+                // remaps via colossal_TextureArea so exact UVs barely matter — we provide
+                // them mainly for the Unlit fallback render.
                 float v = arcLen / kTextureTileMeters;
-                uvs[i * 2 + 0]   = new Vector2(0f, v);
-                uvs[i * 2 + 1]   = new Vector2(1f, v);
+                uvs[baseV + 0] = new Vector2(0f, v);
+                uvs[baseV + 1] = new Vector2(1f, v);
+                uvs[baseV + 2] = new Vector2(0f, v);
+                uvs[baseV + 3] = new Vector2(1f, v);
             }
-            // Stitch: per segment two triangles connecting consecutive (L,R) pairs.
+
             for (int i = 0; i < kSegments; i++)
             {
-                int baseV = i * 2;
-                int o = i * 6;
-                tris[o + 0] = baseV + 0;
-                tris[o + 1] = baseV + 1;
-                tris[o + 2] = baseV + 3;
-                tris[o + 3] = baseV + 0;
-                tris[o + 4] = baseV + 3;
-                tris[o + 5] = baseV + 2;
+                int a0 = i * 4;          // current sample base: L_bot, R_bot, L_top, R_top
+                int b0 = (i + 1) * 4;    // next sample base
+                int Lb0 = a0 + 0, Rb0 = a0 + 1, Lt0 = a0 + 2, Rt0 = a0 + 3;
+                int Lb1 = b0 + 0, Rb1 = b0 + 1, Lt1 = b0 + 2, Rt1 = b0 + 3;
+                int o = i * 24;
+
+                // Top face (normal +Y). Winding CCW viewed from above: Lt0 → Rt0 → Rt1 → Lt1.
+                tris[o +  0] = Lt0; tris[o +  1] = Rt0; tris[o +  2] = Rt1;
+                tris[o +  3] = Lt0; tris[o +  4] = Rt1; tris[o +  5] = Lt1;
+
+                // Bottom face (normal −Y). Winding CCW viewed from below: reverse of top.
+                tris[o +  6] = Lb0; tris[o +  7] = Rb1; tris[o +  8] = Rb0;
+                tris[o +  9] = Lb0; tris[o + 10] = Lb1; tris[o + 11] = Rb1;
+
+                // Right side (normal +right). Verts: Rb0, Rb1 (bottom), Rt0, Rt1 (top).
+                tris[o + 12] = Rb0; tris[o + 13] = Rb1; tris[o + 14] = Rt1;
+                tris[o + 15] = Rb0; tris[o + 16] = Rt1; tris[o + 17] = Rt0;
+
+                // Left side (normal −right). Verts: Lb0, Lb1 (bottom), Lt0, Lt1 (top).
+                tris[o + 18] = Lb0; tris[o + 19] = Lt1; tris[o + 20] = Lb1;
+                tris[o + 21] = Lb0; tris[o + 22] = Lt0; tris[o + 23] = Lt1;
             }
 
             mesh.Clear();
@@ -408,11 +443,12 @@ namespace TownRoadLane
             mesh.uv = uvs;
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
-            // HDRP Forward+ frustum culling can drop meshes whose AABB has zero extent on
-            // any axis. The ribbon lives in a thin band (all verts at the same Y + lift),
-            // so bounds.size.y is tiny. Expand vertically so the culler keeps it.
+            // Box has real Y extent (kBoxHeight) so the bounds.size.y == 0 culling
+            // workaround from the flat-ribbon era is no longer needed. Keep a small
+            // safety expansion just in case the curve happens to fall in a degenerate
+            // configuration (e.g. both endpoints exactly coplanar with camera).
             var meshBounds = mesh.bounds;
-            meshBounds.Expand(new Vector3(0f, 1f, 0f));
+            meshBounds.Expand(0.1f);
             mesh.bounds = meshBounds;
         }
 
