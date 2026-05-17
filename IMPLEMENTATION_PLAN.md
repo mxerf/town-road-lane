@@ -1,9 +1,96 @@
 # IMPLEMENTATION PLAN — TownRoadLane v2
 
-> **Status:** approved 2026-05-16, after 6 research reports + working-tree audit.
-> **Branch:** `v2`. **Base commit:** `6155ccf`.
+> **Status:** approved 2026-05-16, Layer 4 architecture pivoted 2026-05-17 (see below).
+> **Branch:** `v2`. **Base commit:** `6155ccf`. **Current head:** `385b545`.
 > **Companion docs:** `RESEARCH_decomp.md`, `RESEARCH_traffic.md`, `RESEARCH_v1_1.md`,
-> `RESEARCH_road_builder.md`, `RESEARCH_ui_framework.md`, `RESEARCH_ui_endpoints.md`.
+> `RESEARCH_road_builder.md`, `RESEARCH_ui_framework.md`, `RESEARCH_ui_endpoints.md`,
+> `SESSION_2026-05-17.md` (latest session snapshot — read first).
+
+---
+
+## ⚠ 2026-05-17 ARCHITECTURE PIVOT — Layer 4
+
+The original plan (preserved unchanged below for historical context) assumed
+**Layer 4 would create ECS sublane entities** with the right component set,
+expecting vanilla rendering to pick them up automatically. This **does not work**:
+vanilla `BatchInstanceSystem` requires `PrefabSystem`-baked batch-group
+registrations that hand-created entities don't inherit. Even an entity with
+identical component types to a vanilla edge-line sublane (`Curve`, `Lane`,
+`Owner`, `PrefabRef`, `SecondaryLane`, `MeshBatch`, `CullingInfo`,
+`LaneGeometry`, `Simulate`, `Elevation`) is silently ignored by the renderer.
+
+### New Layer 4 — custom-mesh rendering
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Layer 4 — Per-node MarkingPair UI tool + custom mesh renderer       │
+│   MarkingNodeToolSystem  → MarkingPair buffer on node (unchanged)   │
+│   MarkingMeshRenderSystem (NEW):                                    │
+│     • Dictionary<PairKey, Mesh> cache, procedurally built           │
+│     • RenderPipelineManager.beginContextRendering → Graphics.DrawMesh│
+│     • Material: HDRP/Unlit + HDMaterial.ValidateMaterial            │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Pattern mirrors CS1 **NodeMarkup / IMT** (vendored at `_refs/IMT/`). Vanilla CS2
+itself uses the same `Graphics.DrawMesh` pattern in 6+ systems
+(`BrushRenderSystem`, `AggregateRenderSystem`, `AreaRenderSystem`,
+`RouteRenderSystem`, `NotificationIconRenderSystem`, `OverlayRenderSystem`).
+
+### Critical undocumented gotcha — `HDMaterial.ValidateMaterial`
+
+**Must call** `UnityEngine.Rendering.HighDefinition.HDMaterial.ValidateMaterial(material)`
+on every freshly constructed `Material`. Without it, HDRP shader keywords
+(`_SURFACE_TYPE_OPAQUE`, `_BLENDMODE_*`, etc.) and stencil state are never
+derived from material properties, so every render pass is culled to a no-op.
+`Graphics.DrawMesh` dispatches but produces zero pixels — **no errors, no
+warnings, no shader-compile log**. Vanilla CS2 calls `ValidateMaterial` in
+`OverlayRenderSystem.cs:804`, `ManagedBatchSystem.cs:1392`,
+`AssetImportPipeline.cs:195` — all from infrastructure code paths invisible from
+normal "rendering example" reading.
+
+Also: HDRP Forward+ frustum culling drops meshes whose bounds collapse on any
+axis. Flat quads (4 verts in one plane) need `mesh.bounds.Expand((0, 1, 0))`
+after `RecalculateBounds()`, or pass a non-unit-Y scale via `Matrix4x4.TRS` to
+`DrawMesh` (vanilla does the latter — `BrushRenderSystem.cs:114`).
+
+### Files added / changed by the pivot
+
+| File | Status | Role |
+|---|---|---|
+| `MarkingMeshRenderSystem.cs` | **NEW** | Custom-mesh renderer — main new file |
+| `Mod.cs` | Modified | Register `MarkingMeshRenderSystem` at `SystemUpdatePhase.Rendering`; deregister `MarkingPairEmissionSystem` + `UserPairEmissionDumpSystem` |
+| `EdgeLineCloneSystem.cs` | Modified | Expose managed `ClonePrefabEU/NA` (kept for future material sourcing) |
+| `TownRoadLane.csproj` | Modified | Added `Unity.RenderPipelines.HighDefinition.Runtime` reference |
+| `MarkingPairEmissionSystem.cs` | **Inert** (kept in tree) | Deprecated ECS-sublane emission |
+| `Diagnostics/UserPairEmissionDumpSystem.cs` | **Inert** (kept in tree) | Was for ECS-sublane debugging |
+| `CustomSecondaryLaneSystem.cs` | Has `TRLPairLink` guard | Suppression gate for nodes with user pairs still active; sublane GC guard kept defensively |
+
+### Roadmap (post-pivot) — toward IMT-equivalent feature set
+
+The killer feature is **line-line intersection segmentation** (split markings at
+crossings, delete individual segments) — IMT's main differentiator. Now reachable.
+
+1. **Bezier ribbon mesh** (cosmetic, ~1h) — replace flat quad with curve-following
+   ribbon. Reuses `chord*0.4` pull from `MarkingOverlaySystem`.
+2. **Realistic look** (~2h) — road-decal material, ~0.02m height, alpha.
+3. **Line styles** (~1d) — solid/dashed/double/stop. One mesh-gen function per style.
+4. **Default markings generator** (~1d) — auto-fill MarkingPair buffer from vanilla
+   NetCompositionLane so users don't draw every line manually.
+5. **Bezier-Bezier intersection math** (~1d) — LUT-sample intersections per node.
+6. **Segment delete UI** (~½d) — split rendering when delete range present.
+7. **Fillers, decals, symbols** — IMT-tier, on demand.
+
+See `SESSION_2026-05-17.md` for deeper notes.
+
+---
+
+## Historical 4-layer plan (preserved for context)
+
+The plan as approved 2026-05-16 follows below. Layers 1–3 are still in effect
+as designed. **Layer 4 has been replaced** by the custom-mesh approach above —
+the descriptions of Layer 4 below should be read as "what we tried before the
+pivot."
 
 ---
 
