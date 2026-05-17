@@ -261,6 +261,27 @@ namespace TownRoadLane
 
             var mat = new Material(vanillaMat) { name = "TRL_PairPoC_Decal", hideFlags = HideFlags.HideAndDontSave };
 
+            // CRITICAL — swap shader to the non-curved variant. Vanilla material uses
+            // 'BH/Decals/CurvedDecalShader', whose vertex stage multiplies positions by
+            // colossal_CurveMatrix to bend a rest-pose strip onto the bezier. That matrix
+            // is a DOTS InstanceProperty (LaneProperty.cs:7-12), supplied only by BRG —
+            // through MeshRenderer it defaults to all-zero, collapsing every vertex to
+            // origin → 0 pixels. DefaultDecalShader is the non-curved variant CO ships
+            // for static prop decals; it uses material-level properties only, and the
+            // bezier curvature we already bake into the mesh via BuildRibbonMesh is the
+            // correct world-space geometry it expects to project from.
+            // See research/RESEARCH_decal_renderer_registration.md §2-§3, §5.
+            var defaultShader = Shader.Find("BH/Decals/DefaultDecalShader");
+            if (defaultShader == null)
+            {
+                log.Warn("MarkingMeshRenderSystem: 'BH/Decals/DefaultDecalShader' not found — keeping CurvedDecalShader (will render 0 pixels)");
+            }
+            else
+            {
+                mat.shader = defaultShader;
+                log.Info($"MarkingMeshRenderSystem: swapped shader to '{defaultShader.name}' on cloned material");
+            }
+
             // Store the borrowed TextureArea (atlas sub-rect for the lane-line sprite)
             // for per-draw MPB use. Texture itself is already on the cloned material —
             // no need to re-set it.
@@ -274,11 +295,11 @@ namespace TownRoadLane
             mat.SetFloat(ShaderIDs._DecalLayerMask,
                          BitConverter.Int32BitsToSingle((int)Game.Rendering.DecalLayers.Roads));
 
-            // Re-validate after clone — keyword/pass derivation runs against the
-            // cloned property state, not the source.
+            // Re-validate after clone + shader swap. Keyword/pass derivation runs
+            // against the new shader's property layout, not the source.
             HDMaterial.ValidateMaterial(mat);
 
-            log.Info($"MarkingMeshRenderSystem: cloned vanilla decal material '{vanillaMat.name}' → '{mat.name}' shader='{mat.shader.name}' renderQueue={mat.renderQueue}");
+            log.Info($"MarkingMeshRenderSystem: cloned vanilla material '{vanillaMat.name}' → '{mat.name}' final shader='{mat.shader.name}' renderQueue={mat.renderQueue}");
             DumpMaterial("CLONED", mat);
 
             return mat;
