@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Colossal.Logging;
 using Game;
@@ -58,6 +59,24 @@ namespace TownRoadLane
         private Material _material;
         private bool _materialAttempted;
         private MaterialPropertyBlock _props;
+
+        // Cached at material-build time alongside the borrowed texture: where inside
+        // the LaneLine_BaseColor atlas our lane-line sprite lives. Sent per-draw via
+        // colossal_TextureArea — full-atlas (0,0,1,1) gives mostly transparent
+        // garbage outside the actual paint sprite.
+        private Vector4 _textureArea = new Vector4(0f, 0f, 1f, 1f);
+
+        // Per-draw shader uniform IDs — matches vanilla constants from
+        // RenderPrefabRenderer.ShaderIDs (decomp lines 580-584) and
+        // MaterialProperty.cs (TextureArea, MeshSize, LodDistanceFactor).
+        // Cached statically so we don't string-hash on every frame.
+        private static class ShaderIDs
+        {
+            public static readonly int _TextureArea       = Shader.PropertyToID("colossal_TextureArea");
+            public static readonly int _MeshSize          = Shader.PropertyToID("colossal_MeshSize");
+            public static readonly int _DecalLayerMask    = Shader.PropertyToID("colossal_DecalLayerMask");
+            public static readonly int _LodDistanceFactor = Shader.PropertyToID("colossal_LodDistanceFactor");
+        }
 
         // Heartbeat: every N OnUpdate/Render call we log a status line so we can tell whether
         // the system is even being driven. Plain "not rendering" could mean OnUpdate isn't
@@ -182,6 +201,17 @@ namespace TownRoadLane
             {
                 var mesh = kv.Value;
                 if (mesh == null) continue;
+                // Per-draw decal uniforms (vanilla equivalent: ManagedBatchSystem.cs:1010-1024).
+                // colossal_MeshSize: xyz = world-space bounds.size, w = bounds.center.y
+                // (shader uses .w as projection cutoff). colossal_LodDistanceFactor: HDRP
+                // fades the decal out at distance if absent — pin to 1 for LOD 0.
+                // colossal_DecalLayerMask is NOT here — see GetMaterial(): it lives on
+                // the material, not the MPB (HDRP reads it from material constants).
+                _props.Clear();
+                var bounds = mesh.bounds;
+                _props.SetVector(ShaderIDs._TextureArea,    _textureArea);
+                _props.SetVector(ShaderIDs._MeshSize,       new Vector4(bounds.size.x, bounds.size.y, bounds.size.z, bounds.center.y));
+                _props.SetFloat (ShaderIDs._LodDistanceFactor, 1f);
                 for (int c = 0; c < cameras.Count; c++)
                 {
                     var cam = cameras[c];
@@ -194,18 +224,16 @@ namespace TownRoadLane
             _drawsLastReport = draws;
         }
 
-        /// <summary>PoC-stage material acquisition. The vanilla edge-line material uses
-        /// 'BH/Decals/CurvedDecalShader' which is a HDRP projected-decal shader requiring a
-        /// cube bounding volume + per-instance shader uniforms (start/end positions, tangents,
-        /// curve parameters). A simple flat quad rendered with it likely projects nothing —
-        /// that's our suspected reason the previous PoC was invisible despite material being
-        /// acquired correctly.
+        /// <summary>Path B Step 2: build a DefaultDecalShader material at runtime so the box
+        /// mesh becomes a projection volume that paints onto road surface, not opaque
+        /// geometry. Previous decal attempt failed because the receiving mesh was a flat
+        /// strip with zero volume — agent's vanilla-pipeline decomp identified that decal
+        /// shaders project onto whatever surface lies inside their bounding volume, and a
+        /// flat strip has no inside. With Step 3c-1 the receiver is now a thin box.
         ///
-        /// To prove the rest of the pipeline (Mesh build, DrawMesh dispatch, camera filter,
-        /// layer) works, we first try a plain opaque shader ('Universal Render Pipeline/Lit'
-        /// fallback chain) on a flat quad. If THAT renders, we know the cause is the decal
-        /// shader path and need to either (a) build a cube + drive curved-decal uniforms, or
-        /// (b) keep an opaque-mesh approach with a y-offset (less pretty but works).</summary>
+        /// Falls back to HDRP/Unlit (Step 3b path) if either shader lookup fails or the
+        /// validated material somehow ends up unusable. Fallback is silent at the material
+        /// level — we log which path we took but never throw.</summary>
         private Material GetMaterial()
         {
             if (_material != null) return _material;
@@ -213,63 +241,21 @@ namespace TownRoadLane
             _materialAttempted = true;
             try
             {
-                // Decal path attempted, abandoned: HDRP decal materials (shader
-                // 'BH/Decals/DefaultDecalShader') don't render via Graphics.DrawMesh on
-                // ordinary mesh geometry. They're authored for the DecalProjector path —
-                // need a cube-volume bounding mesh + UNITY_VT atlas registration + the
-                // engine's deferred decal pass. Verified empirically: borrowed
-                // 'EU_RoadArrow_*' material loaded cleanly (renderQueue=2000, 2 passes,
-                // keywords incl. ENABLE_VT) but produced zero pixels on our ribbon mesh.
-                // Future: try DecalProjector (Unity HDRP MonoBehaviour) as a separate
-                // experiment — different API entirely. For now, HDRP/Unlit works and is
-                // good enough for the killer feature (segmentation) we want to build.
-
-                // Proven path. See AssetImportPipeline.cs:189-200,
-                // OverlayRenderSystem.cs:797-808, ManagedBatchSystem.cs:1388-1392 for the
-                // canonical vanilla pattern. The critical undocumented call is
-                // HDMaterial.ValidateMaterial — without it HDRP shader keywords aren't
-                // derived from properties and every render pass is a silent no-op.
-                var shader = Shader.Find("HDRP/Unlit");
-                if (shader == null) { log.Warn("MarkingMeshRenderSystem: HDRP/Unlit shader not found"); return null; }
-
-                _material = new Material(shader) { name = "TRL_PairPoC_Unlit" };
-                _material.color = Color.white;
-                _material.SetFloat("_SurfaceType", 0f);           // 0 = Opaque
-                _material.SetFloat("_DoubleSidedEnable", 1f);     // both sides visible
-                _material.SetFloat("_CullMode", 0f);              // CullMode.Off
-
-                // Borrow vanilla road-line texture from our EdgeLineClone prefab. The
-                // RenderPrefab returned by NetLaneMeshInfo.m_Mesh contains the same
-                // 'LaneLine_*' material that vanilla edge-lines use; we want only its
-                // mainTexture (the painted-line bitmap). We do NOT use the whole material
-                // because it's BH/Decals/CurvedDecalShader, which is decal-pipeline-only
-                // and won't render through DrawMesh (see decal-experiment fallout). The
-                // texture itself, however, is a normal Texture2D — HDRP/Unlit will sample
-                // it via _BaseColorMap / _UnlitColorMap / mainTexture exactly like any
-                // texture asset.
-                var tex = TryBorrowLaneLineTexture();
-                if (tex != null)
+                var decalMat = BuildDecalMaterial();
+                if (decalMat != null)
                 {
-                    // HDRP/Unlit exposes the bitmap as _UnlitColorMap; legacy alias _MainTex
-                    // also works because shader.mainTexture proxies to it.
-                    if (_material.HasProperty("_UnlitColorMap")) _material.SetTexture("_UnlitColorMap", tex);
-                    if (_material.HasProperty("_MainTex"))       _material.SetTexture("_MainTex",       tex);
-                    _material.mainTexture = tex;
-                    log.Info($"MarkingMeshRenderSystem: applied borrowed texture '{tex.name}' ({tex.width}x{tex.height})");
+                    _material = decalMat;
+                    _materialAttempted = false;
+                    return _material;
                 }
-                else
+                log.Warn("MarkingMeshRenderSystem: DefaultDecalShader path unavailable, falling back to HDRP/Unlit");
+                var unlitMat = BuildUnlitMaterial();
+                if (unlitMat != null)
                 {
-                    log.Info("MarkingMeshRenderSystem: no vanilla LaneLine texture found — staying solid white");
+                    _material = unlitMat;
+                    _materialAttempted = false;
+                    return _material;
                 }
-
-                HDMaterial.ValidateMaterial(_material);
-
-                var kw = _material.enabledKeywords;
-                string kwStr = "";
-                for (int i = 0; i < kw.Length; i++) { if (i > 0) kwStr += ","; kwStr += kw[i].name; }
-                log.Info($"MarkingMeshRenderSystem: built validated material '{_material.name}' shader='{_material.shader.name}' renderQueue={_material.renderQueue} passes={_material.passCount} keywords=[{kwStr}]");
-                _materialAttempted = false;
-                return _material;
             }
             catch (System.Exception ex)
             {
@@ -278,35 +264,166 @@ namespace TownRoadLane
             return null;
         }
 
-        /// <summary>Extract the painted-line bitmap from our edge-line clone prefab's
-        /// material. We don't reuse the whole material (its shader is decal-pipeline-only),
-        /// but the texture itself is a plain Texture2D and renders fine through HDRP/Unlit.
-        /// Returns null if the clone hasn't baked yet or the material has no texture slot —
-        /// caller falls back to solid white.</summary>
-        private Texture TryBorrowLaneLineTexture()
+        /// <summary>Construct the decal material. Property names + values mirror what
+        /// ManagedBatchSystem sets on vanilla decal materials (see decomp:
+        /// ManagedBatchSystem.cs around line 1388 for the canonical setup). The critical
+        /// undocumented call is HDMaterial.ValidateMaterial — without it the HDRP shader
+        /// keywords aren't derived from properties and every render pass is a silent no-op.</summary>
+        private Material BuildDecalMaterial()
         {
+            // Diagnostic — check if a curved variant exists (rumoured but never cited in
+            // decomp). One-time log line at first material build; informs future shader
+            // swap experiments. Cost: trivial.
+            var curvedProbe = Shader.Find("BH/Decals/CurvedDecal");
+            log.Info($"MarkingMeshRenderSystem: BH/Decals/CurvedDecal probe → {(curvedProbe != null ? "FOUND" : "not found")}");
+
+            var shader = Shader.Find("BH/Decals/DefaultDecalShader");
+            if (shader == null)
+            {
+                log.Warn("MarkingMeshRenderSystem: shader 'BH/Decals/DefaultDecalShader' not found");
+                return null;
+            }
+
+            var mat = new Material(shader) { name = "TRL_PairPoC_Decal" };
+
+            // Borrow the painted-line bitmap AND atlas sub-rect from the vanilla
+            // edge-line prefab. The shader samples _BaseColorMap and uses
+            // colossal_TextureArea (sent per-draw via MPB) to crop to the correct
+            // sprite inside the 8192×4096 atlas.
+            if (TryBorrowLaneLineTexture(out var tex, out var texArea))
+            {
+                if (mat.HasProperty("_BaseColorMap")) mat.SetTexture("_BaseColorMap", tex);
+                if (mat.HasProperty("_MainTex"))      mat.SetTexture("_MainTex",      tex);
+                mat.mainTexture = tex;
+                log.Info($"MarkingMeshRenderSystem: decal borrowed texture '{tex.name}' ({tex.width}x{tex.height})");
+            }
+            else
+            {
+                log.Info("MarkingMeshRenderSystem: decal has no source texture — projection will be solid white");
+            }
+            _textureArea = texArea;
+
+            // CRITICAL — colossal_DecalLayerMask must be on the MATERIAL, not the MPB.
+            // The HDRP decal pass reads layer mask from material constants; if absent
+            // it defaults to 0 and the decal is culled against every receiver, producing
+            // exactly the "draws=N, zero pixels" symptom we observed. Encoded as the
+            // float bit-cast of an int (vanilla pattern at ManagedBatchSystem.cs:1408).
+            // 2 = DecalLayers.Roads — paint applies to road surfaces only.
+            mat.SetFloat(ShaderIDs._DecalLayerMask,
+                         BitConverter.Int32BitsToSingle((int)Game.Rendering.DecalLayers.Roads));
+
+            // HDRP decal "affects" keywords. Logs already show these get enabled by
+            // ValidateMaterial but be explicit — cheap insurance and self-documenting.
+            mat.EnableKeyword("_MATERIAL_AFFECTS_ALBEDO");
+            mat.EnableKeyword("_MATERIAL_AFFECTS_NORMAL");
+            mat.EnableKeyword("_MATERIAL_AFFECTS_MASKMAP");
+
+            // Virtual-texturing must stay off — vanilla also disables it after material
+            // clone (see RenderPrefabRenderer.cs:194). Our texture is not registered with
+            // HDRP's VT atlas; sampling through VT would silently return zero.
+            mat.DisableKeyword("ENABLE_VT");
+
+            if (mat.HasProperty("_DrawOrder"))
+                mat.SetFloat("_DrawOrder", 0f);
+            if (mat.HasProperty("_DecalMeshDepthBias"))
+                mat.SetFloat("_DecalMeshDepthBias", 0f);
+
+            HDMaterial.ValidateMaterial(mat);
+
+            var kw = mat.enabledKeywords;
+            string kwStr = "";
+            for (int i = 0; i < kw.Length; i++) { if (i > 0) kwStr += ","; kwStr += kw[i].name; }
+            log.Info($"MarkingMeshRenderSystem: built decal material '{mat.name}' shader='{mat.shader.name}' renderQueue={mat.renderQueue} passes={mat.passCount} keywords=[{kwStr}]");
+            return mat;
+        }
+
+        /// <summary>HDRP/Unlit fallback — kept because it's the proven working path from
+        /// Step 3b. If DefaultDecalShader misbehaves we degrade gracefully back to the
+        /// visible white-bar render rather than dropping rendering entirely.</summary>
+        private Material BuildUnlitMaterial()
+        {
+            var shader = Shader.Find("HDRP/Unlit");
+            if (shader == null) { log.Warn("MarkingMeshRenderSystem: HDRP/Unlit shader not found"); return null; }
+
+            var mat = new Material(shader) { name = "TRL_PairPoC_Unlit" };
+            mat.color = Color.white;
+            mat.SetFloat("_SurfaceType", 0f);
+            mat.SetFloat("_DoubleSidedEnable", 1f);
+            mat.SetFloat("_CullMode", 0f);
+
+            if (TryBorrowLaneLineTexture(out var tex, out _))
+            {
+                if (mat.HasProperty("_UnlitColorMap")) mat.SetTexture("_UnlitColorMap", tex);
+                if (mat.HasProperty("_MainTex"))       mat.SetTexture("_MainTex",       tex);
+                mat.mainTexture = tex;
+                log.Info($"MarkingMeshRenderSystem: unlit borrowed texture '{tex.name}' ({tex.width}x{tex.height})");
+            }
+
+            HDMaterial.ValidateMaterial(mat);
+
+            var kw = mat.enabledKeywords;
+            string kwStr = "";
+            for (int i = 0; i < kw.Length; i++) { if (i > 0) kwStr += ","; kwStr += kw[i].name; }
+            log.Info($"MarkingMeshRenderSystem: built unlit material '{mat.name}' shader='{mat.shader.name}' renderQueue={mat.renderQueue} passes={mat.passCount} keywords=[{kwStr}]");
+            return mat;
+        }
+
+        /// <summary>Extract the painted-line bitmap AND its sub-rectangle inside the
+        /// vanilla atlas. The borrowed texture (LaneLine_BaseColor_*) is an 8192×4096
+        /// atlas — we MUST pass the prefab's DecalProperties.m_TextureArea as
+        /// colossal_TextureArea, otherwise the shader samples the whole atlas (which
+        /// outside the actual lane-line sprite is mostly transparent or unrelated
+        /// pixels — explains why "all material slots set correctly, still zero
+        /// visible pixels" was the symptom).
+        ///
+        /// Returns false if the clone hasn't baked yet or the prefab is missing
+        /// DecalProperties — caller falls back to solid white + full-atlas UVs.</summary>
+        private bool TryBorrowLaneLineTexture(out Texture tex, out Vector4 textureArea)
+        {
+            tex = null;
+            textureArea = new Vector4(0f, 0f, 1f, 1f); // safe default = full atlas
             try
             {
                 var prefab = PickClonePrefab();
-                if (prefab == null) return null;
-                if (!(prefab is NetLaneGeometryPrefab geom)) return null;
-                if (geom.m_Meshes == null || geom.m_Meshes.Length == 0) return null;
+                if (prefab == null) return false;
+                if (!(prefab is NetLaneGeometryPrefab geom)) return false;
+
+                // Borrow texture from the prefab's render material.
+                if (geom.m_Meshes == null || geom.m_Meshes.Length == 0) return false;
                 var meshInfo = geom.m_Meshes[0];
-                if (meshInfo?.m_Mesh == null) return null;
+                if (meshInfo?.m_Mesh == null) return false;
                 var vanillaMat = meshInfo.m_Mesh.ObtainMaterial(0, useVT: false);
-                if (vanillaMat == null) return null;
-                // Try common texture property names in priority order. CurvedDecalShader
-                // exposes its bitmap via _BaseColorMap on the HDRP surface inputs.
-                Texture t = null;
-                if (vanillaMat.HasProperty("_BaseColorMap")) t = vanillaMat.GetTexture("_BaseColorMap");
-                if (t == null && vanillaMat.HasProperty("_MainTex")) t = vanillaMat.GetTexture("_MainTex");
-                if (t == null) t = vanillaMat.mainTexture;
-                return t;
+                if (vanillaMat != null)
+                {
+                    if (vanillaMat.HasProperty("_BaseColorMap")) tex = vanillaMat.GetTexture("_BaseColorMap");
+                    if (tex == null && vanillaMat.HasProperty("_MainTex")) tex = vanillaMat.GetTexture("_MainTex");
+                    if (tex == null) tex = vanillaMat.mainTexture;
+                }
+
+                // Borrow texture-area from DecalProperties. Important: DecalProperties
+                // lives on the RENDER prefab (the mesh asset inside m_Meshes[].m_Mesh),
+                // not on the NetLaneGeometryPrefab wrapping it. NetLanePrefab is just a
+                // layout/host descriptor; the actual decal-bearing prefab is the mesh.
+                Game.Prefabs.DecalProperties decalProps = null;
+                if (meshInfo.m_Mesh != null) decalProps = meshInfo.m_Mesh.GetComponent<Game.Prefabs.DecalProperties>();
+                if (decalProps == null) decalProps = prefab.GetComponent<Game.Prefabs.DecalProperties>(); // safety fallback
+                if (decalProps != null)
+                {
+                    var area = decalProps.m_TextureArea;
+                    textureArea = new Vector4(area.min.x, area.min.y, area.max.x, area.max.y);
+                    log.Info($"MarkingMeshRenderSystem: borrowed DecalProperties.m_TextureArea = ({textureArea.x:F3},{textureArea.y:F3})..({textureArea.z:F3},{textureArea.w:F3}) layerMask={decalProps.m_LayerMask}");
+                }
+                else
+                {
+                    var meshName = meshInfo.m_Mesh != null ? meshInfo.m_Mesh.name : "<null>";
+                    log.Info($"MarkingMeshRenderSystem: neither '{prefab.name}' nor mesh '{meshName}' has DecalProperties — using full-atlas UVs");
+                }
+                return tex != null;
             }
             catch (System.Exception ex)
             {
                 log.Error(ex, "MarkingMeshRenderSystem: TryBorrowLaneLineTexture threw");
-                return null;
+                return false;
             }
         }
 
@@ -480,10 +597,10 @@ namespace TownRoadLane
 
         /// <summary>Destroy a managed Unity Object safely — Object.Destroy throws if called
         /// outside play mode; we're always in play here but the null-check costs nothing.</summary>
-        private static void SafeDestroy(Object o)
+        private static void SafeDestroy(UnityEngine.Object o)
         {
             if (o == null) return;
-            Object.Destroy(o);
+            UnityEngine.Object.Destroy(o);
         }
 
         private readonly struct PairKey : System.IEquatable<PairKey>
