@@ -79,19 +79,26 @@ namespace TownRoadLane
             // (we read tool state, write to vanilla OverlayRenderSystem.Buffer).
             updateSystem.UpdateAt<MarkingOverlaySystem>(SystemUpdatePhase.Rendering);
 
-            // Phase 4 step 3a: custom-mesh rendering via Graphics.DrawMesh. Replaces step 2's
-            // sublane-entity emission, which proved that hand-created ECS lane entities can't be
-            // picked up by vanilla's BatchInstanceSystem rendering pipeline (PrefabSystem-baked
-            // batch registration that we can't replicate from CreateEntity). Modelled on
-            // BrushRenderSystem; same pattern IMT (CS1) uses for the equivalent task.
+            // Phase 4 step 4 (B.1 revive): spawn vanilla SecondaryLane entities per user pair.
+            // The earlier custom-mesh path (MarkingMeshRenderSystem on Graphics.DrawMesh /
+            // GameObject+MeshRenderer) was exhaustively explored and proven incompatible with
+            // HDRP's DBufferMesh pass — vanilla decal shaders depend on DOTS InstanceProperties
+            // (colossal_CurveMatrix) only BRG can supply. See commits 35e504c..7d6a9f1 +
+            // research/RESEARCH_decal_*.md for the full dead-end exploration.
             //
-            // OnUpdate diffs MarkingPair buffers and rebuilds the Mesh cache; Render runs from
-            // RenderPipelineManager.beginContextRendering once per camera. Material is borrowed
-            // from our edge-line clone prefab.
-            updateSystem.UpdateAt<MarkingMeshRenderSystem>(SystemUpdatePhase.Rendering);
-            // Old sublane emission + diagnostic are intentionally NOT registered. Keep the source
-            // files for the moment in case we need to look back, but they're inert now.
-            // updateSystem.UpdateAt<MarkingPairEmissionSystem>(SystemUpdatePhase.Modification1);
+            // ECS path: spawn entity with edge-line clone prefab's archetype, vanilla BRG
+            // pipeline picks it up via Game.Net.SecondaryLane tag (auto-included by archetype),
+            // SecondaryLaneReferencesSystem registers it in node.SubLane at Modification5,
+            // vanilla CurvedDecalShader renders with full quality. Same path EAI/RealVision use.
+            // See research/RESEARCH_sublane_lifecycle.md for the full spec.
+            //
+            // Modification1 puts us BEFORE LaneSystem (4) / SecondaryLaneSystem (4B) /
+            // SecondaryLaneReferencesSystem (5) — same phase the old commits used; proven safe.
+            updateSystem.UpdateAt<MarkingPairEmissionSystem>(SystemUpdatePhase.Modification1);
+
+            // MarkingMeshRenderSystem (HDRP/Unlit + GameObject pipeline) kept as commented
+            // fallback in case ECS path reveals an unknown blocker. Source file stays in tree.
+            // updateSystem.UpdateAt<MarkingMeshRenderSystem>(SystemUpdatePhase.Rendering);
             // updateSystem.UpdateAt<UserPairEmissionDumpSystem>(SystemUpdatePhase.GameSimulation);
         }
 

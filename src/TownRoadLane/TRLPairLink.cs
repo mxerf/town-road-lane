@@ -8,12 +8,15 @@ namespace TownRoadLane
     /// exist" (entries in the MarkingPair buffer) against "what does exist" (sublanes carrying this
     /// component for the node) without re-creating anything that's already correct.
     ///
-    /// pairKey is a stable identity for a pair regardless of buffer index — we hash the source +
-    /// target identifiers so order-swapped duplicates collide and never produce two sublanes.
+    /// Identity is (node, pairIndex). pairIndex is the buffer slot in node.MarkingPair — uniquely
+    /// stable per (node,tick), never collides. pairKey is the geometry hash from ComputeKey, kept
+    /// for human-readable diagnostics but NOT used for dedup (earlier rev used pairKey and lost
+    /// ~20% of pairs to silent hash collisions — see commit history + log [emission-collision]).
     /// </summary>
     public struct TRLPairLink : IComponentData
     {
         public Entity node;
+        public int    pairIndex;
         public int    pairKey;
 
         public static int ComputeKey(MarkingPair p)

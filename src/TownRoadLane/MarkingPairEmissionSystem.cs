@@ -41,6 +41,11 @@ namespace TownRoadLane
         private EdgeLineCloneSystem _edgeLineSys;
         private CityConfigurationSystem _cityConfig;
 
+        // Diagnostic state — one-shot logging gates so we don't spam every tick.
+        // See research/RESEARCH_sublane_lifecycle.md §6 for what we're checking.
+        private bool _firstSurvivalDumped;
+        private int _heartbeatTicks;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -62,6 +67,43 @@ namespace TownRoadLane
 
         protected override void OnUpdate()
         {
+            // Diagnostic §6.2: at first appearance of any TRLPairLink entity in the
+            // alive query, dump archetype + node.SubLane membership. Confirms
+            // SecondaryLaneReferencesSystem (Modification5) picked us up by next tick.
+            // One-shot — gated by _firstSurvivalDumped to avoid log spam.
+            if (!_firstSurvivalDumped && _ourSubLanes.CalculateEntityCount() > 0)
+            {
+                _firstSurvivalDumped = true;
+                var survSample = _ourSubLanes.ToEntityArray(Allocator.Temp);
+                int n = math.min(survSample.Length, 3);
+                for (int i = 0; i < n; i++)
+                {
+                    var e = survSample[i];
+                    var sb = new System.Text.StringBuilder($"[emission-survival] e=#{e.Index} archetype: ");
+                    using (var types = EntityManager.GetComponentTypes(e, Allocator.Temp))
+                        for (int t = 0; t < types.Length; t++) { if (t > 0) sb.Append(", "); sb.Append(types[t].GetManagedType().Name); }
+                    log.Info(sb.ToString());
+                    if (EntityManager.HasComponent<Owner>(e))
+                    {
+                        var owner = EntityManager.GetComponentData<Owner>(e).m_Owner;
+                        bool inBuffer = false;
+                        int bufLen = -1;
+                        if (EntityManager.HasBuffer<SubLane>(owner))
+                        {
+                            var buf = EntityManager.GetBuffer<SubLane>(owner, isReadOnly: true);
+                            bufLen = buf.Length;
+                            for (int b = 0; b < buf.Length; b++) if (buf[b].m_SubLane == e) { inBuffer = true; break; }
+                        }
+                        log.Info($"[emission-survival] e=#{e.Index} owner=node#{owner.Index} bufLen={bufLen} inBuffer={inBuffer}");
+                    }
+                }
+                survSample.Dispose();
+            }
+
+            _heartbeatTicks++;
+            if (_heartbeatTicks % 120 == 1)
+                log.Info($"[emission] heartbeat tick={_heartbeatTicks} nodesWithPairs={_nodesWithPairs.CalculateEntityCount()} ourSubLanes={_ourSubLanes.CalculateEntityCount()}");
+
             // Use one ECB for the whole tick — structural changes (AddComponent / CreateEntity)
             // applied directly to EntityManager mid-OnUpdate invalidate query snapshots, which is
             // what caused the "+2 created, wanted=0" loop after a toggle (the reconciliation pass
@@ -70,7 +112,13 @@ namespace TownRoadLane
             // until the end of OnUpdate keeps every read on a consistent snapshot.
             var ecb = new EntityCommandBuffer(Allocator.Temp);
 
-            // 1. Build a set of (node, pairKey) that SHOULD exist according to MarkingPair buffers.
+            // 1. Build a set of (node, pairIndex) that SHOULD exist according to MarkingPair
+            // buffers. Earlier rev hashed (sourceEdge,sourceGap,targetEdge,targetGap) into a
+            // synthetic pairKey for stable identity, but that hash was lossy — confirmed
+            // collisions on common patterns like (edgeA:g1↔edgeB:g1) vs (edgeA:g2↔edgeB:g2),
+            // dropping ~20% of user pairs silently. pairIndex is uniquely stable per (node,tick)
+            // and never collides, which is the only invariant we need for the diff pass.
+            // pairKey is still stored on TRLPairLink for human debugging but not used for dedup.
             var wanted = new HashSet<(Entity, int)>();
             var nodes = _nodesWithPairs.ToEntityArray(Allocator.Temp);
             for (int n = 0; n < nodes.Length; n++)
@@ -79,15 +127,14 @@ namespace TownRoadLane
                 if (!EntityManager.HasBuffer<MarkingPair>(node)) continue;
                 var pairs = EntityManager.GetBuffer<MarkingPair>(node, isReadOnly: true);
                 for (int i = 0; i < pairs.Length; i++)
-                    wanted.Add((node, TRLPairLink.ComputeKey(pairs[i])));
+                    wanted.Add((node, i));
             }
             nodes.Dispose();
 
             // 2. Walk existing sublanes we own. Match against wanted set:
             //    - in set    → keep, mark as "resolved" by removing from set
             //    - not in set → delete (its pair was toggled off)
-            // Dedupe-by-key: query may return multiple entities for the same key if previous
-            // ticks accidentally spawned dupes; keep one, queue the rest for deletion via ECB.
+            // We need pairIndex on TRLPairLink for this comparison; store it at spawn time.
             var existing = _ourSubLanes.ToEntityArray(Allocator.Temp);
             var seen = new HashSet<(Entity, int)>();
             int deleted = 0;
@@ -95,7 +142,7 @@ namespace TownRoadLane
             {
                 var sub = existing[i];
                 var link = EntityManager.GetComponentData<TRLPairLink>(sub);
-                var key = (link.node, link.pairKey);
+                var key = (link.node, link.pairIndex);
                 if (!wanted.Contains(key))
                 {
                     ecb.AddComponent<Deleted>(sub);
@@ -152,15 +199,10 @@ namespace TownRoadLane
                         var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
                         for (int i = 0; i < pairs.Length; i++)
                         {
-                            int key = TRLPairLink.ComputeKey(pairs[i]);
-                            if (!wanted.Contains((node, key))) continue;
-                            wanted.Remove((node, key));
-                            // Pass the buffer index `i` as the PathNode slot — it's stable per
-                            // node-tick and unique among pairs on the same node. Hash-derived
-                            // slots collided when two pairs produced the same XOR (delete-one →
-                            // another appears, classic symptom).
-                            if (SpawnSublane(ecb, node, pairs[i], key, i, prefab, arch, endpoints))
-                                created++;
+                            if (!wanted.Contains((node, i))) continue;
+                            wanted.Remove((node, i));
+                            var spawned = SpawnSublane(ecb, node, pairs[i], i, prefab, arch, endpoints);
+                            if (spawned != Entity.Null) created++;
                         }
                     }
                     nodes.Dispose();
@@ -176,10 +218,20 @@ namespace TownRoadLane
             ecb.Dispose();
         }
 
-        private bool SpawnSublane(EntityCommandBuffer ecb, Entity node, MarkingPair pair, int pairKey, int pairIndex, Entity prefab, EntityArchetype archetype, List<MarkingEndpoint> endpoints)
+        private Entity SpawnSublane(EntityCommandBuffer ecb, Entity node, MarkingPair pair, int pairIndex, Entity prefab, EntityArchetype archetype, List<MarkingEndpoint> endpoints)
         {
-            if (!TryFindEndpoint(endpoints, pair.sourceEdge, pair.sourceGapIndex, out var src)) return false;
-            if (!TryFindEndpoint(endpoints, pair.targetEdge, pair.targetGapIndex, out var dst)) return false;
+            if (!TryFindEndpoint(endpoints, pair.sourceEdge, pair.sourceGapIndex, out var src))
+            {
+                // Diagnostic — pair lost because source endpoint wasn't extracted. Dump the
+                // full endpoint list so we can compare against what the pair wanted.
+                LogSkippedPair("source not found", node, pairIndex, pair, endpoints);
+                return Entity.Null;
+            }
+            if (!TryFindEndpoint(endpoints, pair.targetEdge, pair.targetGapIndex, out var dst))
+            {
+                LogSkippedPair("target not found", node, pairIndex, pair, endpoints);
+                return Entity.Null;
+            }
 
             // Pull factor controls how "curvy" the connector is. 0.55 approximates a quarter
             // circle (cubic-Bezier ideal); 0.4 gives a softer arc that still reads as curved
@@ -211,13 +263,31 @@ namespace TownRoadLane
             ecb.SetComponent(e, new Curve { m_Bezier = bez, m_Length = MathUtils.Length(bez) });
             ecb.AddComponent(e, new Owner { m_Owner = node });
             ecb.AddComponent(e, default(Elevation));
-            ecb.AddComponent(e, new TRLPairLink { node = node, pairKey = pairKey });
+            ecb.AddComponent(e, new TRLPairLink { node = node, pairIndex = pairIndex, pairKey = TRLPairLink.ComputeKey(pair) });
             ecb.AddComponent(e, default(Created));
             ecb.AddComponent(e, default(Updated));
             // We deliberately do NOT mark the owner node Updated. That cascaded through
             // LaneReferencesSystem and re-triggered CustomSecondaryLaneSystem on the node every
             // tick, which fanned out into hundreds of duplicate Spawn calls.
-            return true;
+
+            return e;
+        }
+
+        /// <summary>Log diagnostic dump for a pair we couldn't spawn. One-shot per
+        /// (node, pairIndex) — guarded by a HashSet so we don't spam every tick.</summary>
+        private readonly HashSet<(Entity, int)> _skipLogged = new();
+        private void LogSkippedPair(string why, Entity node, int pairIndex, MarkingPair pair, List<MarkingEndpoint> endpoints)
+        {
+            var key = (node, pairIndex);
+            if (_skipLogged.Contains(key)) return;
+            _skipLogged.Add(key);
+            var sb = new System.Text.StringBuilder($"[emission-skip] node#{node.Index} pairIdx={pairIndex} ({why}): wanted src=edge#{pair.sourceEdge.Index} gap={pair.sourceGapIndex}  dst=edge#{pair.targetEdge.Index} gap={pair.targetGapIndex}. Available endpoints ({endpoints.Count}): ");
+            for (int i = 0; i < endpoints.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append($"edge#{endpoints[i].edge.Index}:gap{endpoints[i].gapIndex}");
+            }
+            log.Info(sb.ToString());
         }
 
         private static bool TryFindEndpoint(List<MarkingEndpoint> endpoints, Entity edge, int gap, out MarkingEndpoint ep)
