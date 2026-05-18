@@ -1,0 +1,9 @@
+{
+  "id": "TownRoadLane",
+  "displayName": "Town Road Lane",
+  "author": "mxerf",
+  "version": "0.5.0",
+  "description": "Custom road markings with per-segment control",
+  "isCodeMod": true,
+  "dependencies": []
+}

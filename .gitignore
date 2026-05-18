@@ -2,6 +2,11 @@
 [Bb]in/
 [Oo]bj/
 Library/
+dist/
+
+# Node / React UI artefacts (src/TownRoadLaneUI/)
+node_modules/
+package-lock.json
 
 # Decompiled game assemblies (local reference only, ~41M, do not commit)
 decomp/

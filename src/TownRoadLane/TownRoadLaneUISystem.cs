@@ -1,10 +1,8 @@
-using System.IO;
 using System.Text;
 using Colossal.Logging;
 using Colossal.Mathematics;
 using Colossal.UI.Binding;
 using Game.Common;
-using Game.SceneFlow;
 using Game.Tools;
 using Game.UI;
 using Unity.Entities;
@@ -30,8 +28,12 @@ namespace TownRoadLane
     /// their normal jobs. This means the same invariants (PathNode slot allocation, archetype
     /// sourcing, GC protection) hold automatically.
     ///
-    /// Also handles the one-time UI bundle injection via ExecuteScript on first OnUpdate after
-    /// the GameManager userInterface is ready — same pattern SystemTimeMod uses.
+    /// UI bundle loading: handled by the game's normal UIModuleAsset pipeline. Our .mjs ships
+    /// next to the .dll, exports a default ModRegistrar that appends components into
+    /// GameTopLeft (toolbar button) + GameTopRight (panel) slots. No ExecuteScript hack
+    /// needed — that was carried over from SystemTimeMod and caused a NullReferenceException
+    /// in UIModuleAsset.PostCreate when AssetDatabase tried to register tags from an empty
+    /// mod.json manifest.
     /// </summary>
     public partial class TownRoadLaneUISystem : UISystemBase
     {
@@ -42,15 +44,14 @@ namespace TownRoadLane
 
         private GetterValueBinding<string> _stateBinding;
         private MarkingNodeToolSystem _tool;
+        private DefaultToolSystem _defaultTool;
         private ToolSystem _toolSystem;
-
-        private string _jsContent;
-        private bool _uiLoaded;
 
         protected override void OnCreate()
         {
             base.OnCreate();
             _tool = World.GetOrCreateSystemManaged<MarkingNodeToolSystem>();
+            _defaultTool = World.GetOrCreateSystemManaged<DefaultToolSystem>();
             _toolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
 
             AddBinding(_stateBinding = new GetterValueBinding<string>(
@@ -62,59 +63,17 @@ namespace TownRoadLane
                 "TownRoadLane", "SetLineStyle", OnSetLineStyle));
             AddBinding(new TriggerBinding<int>(
                 "TownRoadLane", "DeleteLine", OnDeleteLine));
+            AddBinding(new TriggerBinding(
+                "TownRoadLane", "ActivateTool", OnActivateTool));
 
-            LoadUIBundle();
             log.Info("TownRoadLaneUISystem: bindings registered");
         }
 
         protected override void OnUpdate()
         {
             base.OnUpdate();
-
-            // Inject the React bundle on the first frame the game UI is ready. After that the
-            // panel manages itself via the bindings.
-            if (!_uiLoaded && !string.IsNullOrEmpty(_jsContent)
-                && GameManager.instance?.userInterface != null)
-            {
-                try
-                {
-                    GameManager.instance.userInterface.view.View.ExecuteScript(_jsContent);
-                    _uiLoaded = true;
-                    log.Info("TownRoadLaneUISystem: UI bundle mounted");
-                }
-                catch (System.Exception ex)
-                {
-                    log.Error($"TownRoadLaneUISystem: ExecuteScript failed: {ex}");
-                }
-            }
-
             // Republish state every tick — cheap, the binding only fires on JSON change.
             _stateBinding?.Update();
-        }
-
-        private void LoadUIBundle()
-        {
-            try
-            {
-                if (Mod.Instance == null || !GameManager.instance.modManager.TryGetExecutableAsset(Mod.Instance, out var asset))
-                {
-                    log.Warn("TownRoadLaneUISystem: could not get mod asset path");
-                    return;
-                }
-                var modDir = Path.GetDirectoryName(asset.path);
-                var jsPath = Path.Combine(modDir, "TownRoadLane.mjs");
-                if (!File.Exists(jsPath))
-                {
-                    log.Warn($"TownRoadLaneUISystem: UI bundle not found at '{jsPath}' (build the UI project: `npm run build` inside src/TownRoadLaneUI/)");
-                    return;
-                }
-                _jsContent = File.ReadAllText(jsPath);
-                log.Info($"TownRoadLaneUISystem: loaded UI bundle from {jsPath} ({_jsContent.Length} bytes)");
-            }
-            catch (System.Exception ex)
-            {
-                log.Error($"TownRoadLaneUISystem: failed to load UI bundle: {ex}");
-            }
         }
 
         // --- State publishing ---
@@ -191,6 +150,23 @@ namespace TownRoadLane
         }
 
         // --- Commands ---
+
+        /// <summary>Toolbar-button command: toggle our tool active/inactive. Same semantics as
+        /// the Ctrl+M hotkey path — flip activeTool between ours and DefaultToolSystem.</summary>
+        private void OnActivateTool()
+        {
+            if (_toolSystem == null || _tool == null) return;
+            if (_toolSystem.activeTool == _tool)
+            {
+                _toolSystem.activeTool = _defaultTool;
+                log.Info("UI: toolbar button deactivated tool");
+            }
+            else
+            {
+                _toolSystem.activeTool = _tool;
+                log.Info("UI: toolbar button activated tool");
+            }
+        }
 
         private void OnToggleSegment(int lineIndex, int segmentIndexPerLine)
         {

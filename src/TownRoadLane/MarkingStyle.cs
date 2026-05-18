@@ -23,4 +23,22 @@ namespace TownRoadLane
         G87Solid  = 2,
         G87Dashed = 3,
     }
+
+    public static class MarkingStyleExtensions
+    {
+        /// <summary>
+        /// How many overlapping draw passes a style needs to look correct. Vanilla decals (Solid,
+        /// Dashed) use a single pass — they're opaque enough on their own. G87 decals are
+        /// semi-transparent and need 2 overlapping passes to match the brightness vanilla
+        /// parking markings achieve (their SecondaryLane hosts on both left+right lanes, which
+        /// implicitly causes vanilla to draw the same prefab twice along the boundary). Without
+        /// this, G87 styles look ~30% dimmer than their parking counterparts.
+        /// </summary>
+        public static int DrawPasses(this MarkingStyle style) => style switch
+        {
+            MarkingStyle.G87Solid  => 3,
+            MarkingStyle.G87Dashed => 3,
+            _                      => 1,
+        };
+    }
 }

@@ -94,4 +94,37 @@
 		<None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
 	</ItemGroup>
 
+	<!-- NOTE: Do NOT ship mod.json next to the .dll/.mjs in the local-mod deploy folder.
+	     Every working CS2 UI mod we sampled (AdvancedRoadTools, Platter, SystemTimeMod, etc.
+	     in .cache/Mods/pdx_mods/) ships ONLY .mjs + .css + .dll without a manifest — the game
+	     synthesises a UIModuleAsset on the fly from filename conventions. The only mod we
+	     saw with a manifest was TTE, and that ships through PDX Mods (different code path).
+	     When we shipped mod.json for local mods the game's UIModuleAsset.PostCreate called
+	     AddTags(null) and threw NullReferenceException at load.
+	     mod.json stays in source so the UI webpack can read MOD.id for output naming; just
+	     don't copy it into the local-mod deploy. -->
+	<ItemGroup>
+		<None Include="mod.json" CopyToOutputDirectory="Never" />
+	</ItemGroup>
+
+	<!-- Stage 5d: build the React UI bundle and copy it next to the .dll. Pattern mirrors
+	     ZessonsDE/TrafficToolEssentials (_refs/TrafficToolEssentials/TrafficToolEssentials.csproj
+	     BuildFrontend target). Runs BEFORE Mod.targets' AfterBuild deploy step, so by the time
+	     deploy fires the .mjs + .css are sitting in $(OutDir) and get mirrored to Mods/.
+	     Skipped if node_modules is missing (`npm install` from the user side once is enough). -->
+	<Target Name="BuildFrontend" BeforeTargets="AfterBuild" Condition="Exists('..\TownRoadLaneUI\node_modules')">
+		<Message Text="[BuildFrontend] Running webpack in ..\TownRoadLaneUI\" Importance="high" />
+		<Exec Command="npm run build" WorkingDirectory="..\TownRoadLaneUI\" ContinueOnError="false" />
+		<Copy SourceFiles="..\TownRoadLaneUI\dist\TownRoadLane.mjs" DestinationFolder="$(OutDir)" />
+		<Copy SourceFiles="..\TownRoadLaneUI\dist\TownRoadLane.css" DestinationFolder="$(OutDir)" Condition="Exists('..\TownRoadLaneUI\dist\TownRoadLane.css')" />
+		<!-- Ship mod.json next to .mjs so UIModuleAsset.PostCreate has `tags` to read instead
+		     of null. Without it the game's AssetData.AddTags(null) throws NullReferenceException
+		     on every startup — UI still works, but the error log noise is annoying. -->
+		<Copy SourceFiles="..\TownRoadLaneUI\mod.json" DestinationFolder="$(OutDir)" />
+		<Message Text="[BuildFrontend] Copied UI bundle + manifest into $(OutDir)" Importance="high" />
+	</Target>
+	<Target Name="BuildFrontendMissingWarn" BeforeTargets="AfterBuild" Condition="!Exists('..\TownRoadLaneUI\node_modules')">
+		<Message Text="[BuildFrontend] Skipping — ..\TownRoadLaneUI\node_modules not found. Run `npm install` inside src\TownRoadLaneUI\ to enable the UI bundle build." Importance="high" />
+	</Target>
+
 </Project>

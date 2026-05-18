@@ -60,3 +60,9 @@ export const cmdSetLineStyle = (lineIndex: number, style: number) => {
 export const cmdDeleteLine = (lineIndex: number) => {
   trigger("TownRoadLane", "DeleteLine", lineIndex);
 };
+
+// Toggle the marking tool active/inactive — same as Ctrl+M or the settings
+// button. Triggered from the toolbar button in GameTopLeft.
+export const cmdActivateTool = () => {
+  trigger("TownRoadLane", "ActivateTool");
+};

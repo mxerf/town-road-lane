@@ -20,5 +20,11 @@ namespace TownRoadLane
         public Entity node;
         public int    lineIndex;
         public int    segmentIndex;
+        // For styles that need multiple stacked draw passes to look right (e.g. G87 styles use
+        // a semi-transparent decal that needs two overlapping copies to match the brightness of
+        // vanilla markings — observed against parking-line G87 reference). pass=0 for the base
+        // draw, pass=1+ for additive copies on the exact same geometry. dedup key includes pass
+        // so the second copy doesn't get treated as a duplicate of the first.
+        public int    passIndex;
     }
 }

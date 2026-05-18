@@ -89,38 +89,42 @@ namespace TownRoadLane
                 legacy.Dispose();
             }
 
-            // 1. Build the "wanted" set: (node, lineIndex, segmentIndex) for every visible segment.
-            var wanted = new HashSet<(Entity, int, int)>();
+            // 1. Build the "wanted" set: (node, lineIndex, segmentIndex, passIndex) for every
+            // visible segment. Some styles need multiple draw passes — see MarkingStyle.DrawPasses.
+            var wanted = new HashSet<(Entity, int, int, int)>();
             var nodes = _nodesWithLines.ToEntityArray(Allocator.Temp);
             for (int n = 0; n < nodes.Length; n++)
             {
                 var node = nodes[n];
                 if (!EntityManager.HasBuffer<MarkingSegment>(node)) continue;
+                if (!EntityManager.HasBuffer<MarkingLine>(node)) continue;
                 var segs = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
-                // Per-line counter so segmentIndex is dense per line (0..K-1 inside one line).
-                // Without this, segmentIndex would just be the flat buffer position, which is
-                // also unique but harder to read in logs.
+                var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
                 var perLineCounter = new Dictionary<int, int>();
                 for (int s = 0; s < segs.Length; s++)
                 {
                     var seg = segs[s];
                     if (!seg.visible) continue;
+                    if (seg.lineIndex < 0 || seg.lineIndex >= lines.Length) continue;
                     int segIdx = perLineCounter.TryGetValue(seg.lineIndex, out var c) ? c : 0;
                     perLineCounter[seg.lineIndex] = segIdx + 1;
-                    wanted.Add((node, seg.lineIndex, segIdx));
+                    var style = (MarkingStyle)lines[seg.lineIndex].style;
+                    int passes = style.DrawPasses();
+                    for (int p = 0; p < passes; p++)
+                        wanted.Add((node, seg.lineIndex, segIdx, p));
                 }
             }
             nodes.Dispose();
 
             // 2. Diff existing sublanes against wanted set.
             var existing = _ourSubLanes.ToEntityArray(Allocator.Temp);
-            var seen = new HashSet<(Entity, int, int)>();
+            var seen = new HashSet<(Entity, int, int, int)>();
             int deleted = 0;
             for (int i = 0; i < existing.Length; i++)
             {
                 var sub = existing[i];
                 var link = EntityManager.GetComponentData<TRLSegmentLink>(sub);
-                var key = (link.node, link.lineIndex, link.segmentIndex);
+                var key = (link.node, link.lineIndex, link.segmentIndex, link.passIndex);
                 if (!wanted.Contains(key) || seen.Contains(key))
                 {
                     ecb.AddComponent<Deleted>(sub);
@@ -179,10 +183,6 @@ namespace TownRoadLane
                             int segIdx = perLineCounter.TryGetValue(seg.lineIndex, out var c) ? c : 0;
                             perLineCounter[seg.lineIndex] = segIdx + 1;
 
-                            var key = (node, seg.lineIndex, segIdx);
-                            if (!wanted.Contains(key)) continue;
-                            wanted.Remove(key);
-
                             if (seg.lineIndex < 0 || seg.lineIndex >= lineCount) continue;
                             if (!bezValid[seg.lineIndex]) continue;
 
@@ -193,17 +193,22 @@ namespace TownRoadLane
                             if (!prefabByStyle.TryGetValue(style, out var pair))
                             {
                                 if (!TryResolveStylePrefab(style, isNA, out pair))
-                                {
-                                    // Unknown / not-loaded style → degrade to solid. Old saves
-                                    // with future-style numbers and missed clones both land here.
                                     pair = solidPair;
-                                }
                                 prefabByStyle[style] = pair;
                             }
 
-                            var spawned = SpawnSegmentSublane(ecb, node, seg.lineIndex, segIdx,
-                                fullBeziers[seg.lineIndex], seg.tStart, seg.tEnd, pair.prefab, pair.arch);
-                            if (spawned != Entity.Null) created++;
+                            // Spawn one sublane per draw pass. Multi-pass styles overlap copies
+                            // on the same geometry to boost alpha — see MarkingStyle.DrawPasses.
+                            int passes = style.DrawPasses();
+                            for (int p = 0; p < passes; p++)
+                            {
+                                var key = (node, seg.lineIndex, segIdx, p);
+                                if (!wanted.Contains(key)) continue;
+                                wanted.Remove(key);
+                                var spawned = SpawnSegmentSublane(ecb, node, seg.lineIndex, segIdx, p,
+                                    fullBeziers[seg.lineIndex], seg.tStart, seg.tEnd, pair.prefab, pair.arch);
+                                if (spawned != Entity.Null) created++;
+                            }
                         }
                     }
                     nodes.Dispose();
@@ -218,17 +223,17 @@ namespace TownRoadLane
         }
 
         private Entity SpawnSegmentSublane(EntityCommandBuffer ecb, Entity node, int lineIndex, int segmentIndex,
-            Bezier4x3 fullBezier, float tStart, float tEnd, Entity prefab, EntityArchetype archetype)
+            int passIndex, Bezier4x3 fullBezier, float tStart, float tEnd, Entity prefab, EntityArchetype archetype)
         {
             // Cut the full-line Bezier to the segment's parameter range. MathUtils.Cut takes
             // float2(start, end) — vanilla uses this exact API for navigation curve trimming.
             Bezier4x3 segBez = MathUtils.Cut(fullBezier, new float2(tStart, tEnd));
 
-            // PathNode slots per the v2 plan: base = 32768 + lineIndex*256 + segmentIndex*4.
-            // Allows up to 256 segments per line and ~14 lines per node before colliding with
-            // ushort wrap — far above anything realistic (typical 4-way: 4-6 lines, 8 segments).
-            // Vanilla primary lanes occupy 0..N-1, so 32768+ is well clear.
-            ushort idxBase = (ushort)(32768 + lineIndex * 256 + segmentIndex * 4);
+            // PathNode slots: base = 32768 + lineIndex*512 + segmentIndex*16 + passIndex*4.
+            // Each segment reserves 16 slots → up to 4 passes of 4 PathNode slots each. 512 slots
+            // per line → up to 32 segments per line before colliding with the next line.
+            // Vanilla primary lanes occupy 0..N-1; 32768+ keeps us clear.
+            ushort idxBase = (ushort)(32768 + lineIndex * 512 + segmentIndex * 16 + passIndex * 4);
             var lane = new Lane
             {
                 m_StartNode  = new PathNode(new PathNode(node, idxBase),               secondaryNode: true),
@@ -242,7 +247,7 @@ namespace TownRoadLane
             ecb.SetComponent(e, new Curve { m_Bezier = segBez, m_Length = MathUtils.Length(segBez) });
             ecb.AddComponent(e, new Owner { m_Owner = node });
             ecb.AddComponent(e, default(Elevation));
-            ecb.AddComponent(e, new TRLSegmentLink { node = node, lineIndex = lineIndex, segmentIndex = segmentIndex });
+            ecb.AddComponent(e, new TRLSegmentLink { node = node, lineIndex = lineIndex, segmentIndex = segmentIndex, passIndex = passIndex });
             ecb.AddComponent(e, default(Created));
             ecb.AddComponent(e, default(Updated));
             // NOT marking owner Updated — same reason as the old PairEmissionSystem (cascade

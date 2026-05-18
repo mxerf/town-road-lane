@@ -102,10 +102,15 @@ namespace TownRoadLane
             new() { style = MarkingStyle.Solid,     isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA City Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
             new() { style = MarkingStyle.Dashed,    isNA = false, sourcePrefabName = "EU Car Lane Line",     cloneName = "TownRoadLane EU City Dashed Line",     fallbackMesh = "White Dashed Line Mesh", hostOnCityLanes = false },
             new() { style = MarkingStyle.Dashed,    isNA = true,  sourcePrefabName = "NA Car Lane Line",     cloneName = "TownRoadLane NA City Dashed Line",     fallbackMesh = "White Dashed Line Mesh", hostOnCityLanes = false },
-            new() { style = MarkingStyle.G87Solid,  isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU City G87 Solid Line",  fallbackMesh = kG87SolidMesh,            hostOnCityLanes = false },
-            new() { style = MarkingStyle.G87Solid,  isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA City G87 Solid Line",  fallbackMesh = kG87SolidMesh,            hostOnCityLanes = false },
-            new() { style = MarkingStyle.G87Dashed, isNA = false, sourcePrefabName = "EU Car Lane Line",     cloneName = "TownRoadLane EU City G87 Dashed Line", fallbackMesh = kG87DashedMesh,           hostOnCityLanes = false },
-            new() { style = MarkingStyle.G87Dashed, isNA = true,  sourcePrefabName = "NA Car Lane Line",     cloneName = "TownRoadLane NA City G87 Dashed Line", fallbackMesh = kG87DashedMesh,           hostOnCityLanes = false },
+            // G87 styles: use 'Car Bay Line' as the source prefab. Same prefab the parking-line
+            // clone uses, and parking renders G87 decals brightly while edge-line-source G87s look
+            // washed out. Suspected cause: Car Bay Line's NetLaneMeshInfo has the LOD chain /
+            // width / material flags G87 was designed against; Highway Edge Line and Car Lane Line
+            // have different layouts that scale the G87 decal opacity weirdly.
+            new() { style = MarkingStyle.G87Solid,  isNA = false, sourcePrefabName = "EU Car Bay Line", cloneName = "TownRoadLane EU City G87 Solid Line",  fallbackMesh = kG87SolidMesh,  hostOnCityLanes = false },
+            new() { style = MarkingStyle.G87Solid,  isNA = true,  sourcePrefabName = "NA Car Bay Line", cloneName = "TownRoadLane NA City G87 Solid Line",  fallbackMesh = kG87SolidMesh,  hostOnCityLanes = false },
+            new() { style = MarkingStyle.G87Dashed, isNA = false, sourcePrefabName = "EU Car Bay Line", cloneName = "TownRoadLane EU City G87 Dashed Line", fallbackMesh = kG87DashedMesh, hostOnCityLanes = false },
+            new() { style = MarkingStyle.G87Dashed, isNA = true,  sourcePrefabName = "NA Car Bay Line", cloneName = "TownRoadLane NA City G87 Dashed Line", fallbackMesh = kG87DashedMesh, hostOnCityLanes = false },
         };
 
         private PrefabSystem m_PrefabSystem;

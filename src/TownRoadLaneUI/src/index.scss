@@ -1,10 +1,37 @@
 // Global styles — applied via MiniCssExtractPlugin straight into the page.
 // All component-scoped styles live in *.module.scss files (Sass modules).
 
+// Toolbar toggle button — lives in the GameTopLeft slot. Compact pill that
+// reflects tool-active state via a coloured border + filled background.
+.trl-toolbar-btn {
+  background: rgba(20, 24, 32, 0.85);
+  color: #e8eaed;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  padding: 6px 12px;
+  margin: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.12s ease, border-color 0.12s ease;
+
+  &:hover {
+    background: rgba(40, 48, 60, 0.95);
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+
+  &--active {
+    background: rgba(70, 140, 255, 0.55);
+    border-color: rgba(140, 200, 255, 0.95);
+  }
+}
+
 .trl-panel {
-  position: fixed;
-  top: 80px;
-  right: 16px;
+  position: absolute;
+  top: 8px;
+  right: 8px;
   width: 320px;
   max-height: calc(100vh - 160px);
   overflow-y: auto;

@@ -5,12 +5,15 @@ const { CSSPresencePlugin } = require("./tools/css-presence");
 const TerserPlugin = require("terser-webpack-plugin");
 const gray = (text) => `\x1b[90m${text}\x1b[0m`;
 
-const CSII_USERDATAPATH = process.env.CSII_USERDATAPATH;
-if (!CSII_USERDATAPATH) {
-  throw "CSII_USERDATAPATH environment variable is not set, ensure the CSII Modding Toolchain is installed correctly";
-}
-
-const OUTPUT_DIR = `${CSII_USERDATAPATH}\\Mods\\${MOD.id}`;
+// Output to a local dist/ folder inside the UI project. The C# csproj's BuildFrontend target
+// (mirrors the TTE pattern: TLEFrontend → TrafficToolEssentials build pipeline) picks up
+// dist/*.mjs + dist/*.css + mod.json and copies them into its own OutDir, which Mod.targets
+// then mirrors into $(LocalModsPath)\TownRoadLane\.
+//
+// Earlier this script emitted straight into Mods/TownRoadLane/, but the C# Mod.targets does
+// <RemoveDir $(DeployDir)> on every build and wiped the .mjs that we'd just placed there —
+// the UI went silently missing after every C# rebuild.
+const OUTPUT_DIR = "./dist/";
 const banner = `\n * Cities: Skylines II UI Module\n * Id: ${MOD.id}\n * Author: ${MOD.author}\n * Version: ${MOD.version}\n`;
 
 module.exports = {
