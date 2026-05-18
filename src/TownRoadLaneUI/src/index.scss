@@ -1,12 +1,26 @@
-// Global styles — applied via MiniCssExtractPlugin straight into the page.
-// All component-scoped styles live in *.module.scss files (Sass modules).
+// Global styles. CS2 vanilla UI uses a darkish glass aesthetic; we mirror it
+// with a panel that sits in GameTopRight, accordion line list, and tighter
+// segment rows. Width / spacing tuned against the CS2 default Tools panel.
 
-// Toolbar toggle button — lives in the GameTopLeft slot. Compact pill that
-// reflects tool-active state via a coloured border + filled background.
+$bg-panel: rgba(18, 22, 30, 0.94);
+$bg-row: rgba(255, 255, 255, 0.035);
+$bg-row-hover: rgba(255, 255, 255, 0.08);
+$bg-row-active: rgba(70, 140, 255, 0.22);
+$border-soft: rgba(255, 255, 255, 0.10);
+$border-mid: rgba(255, 255, 255, 0.18);
+$text-primary: #e8eaed;
+$text-muted: #8c93a0;
+$accent: #5aaaff;
+$accent-soft: rgba(90, 170, 255, 0.55);
+$danger: #f47373;
+
+// ------------------------------------------------------------------
+// Toolbar toggle button — GameTopLeft slot.
+// ------------------------------------------------------------------
 .trl-toolbar-btn {
-  background: rgba(20, 24, 32, 0.85);
-  color: #e8eaed;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: $bg-panel;
+  color: $text-primary;
+  border: 1px solid $border-mid;
   border-radius: 4px;
   padding: 6px 12px;
   margin: 6px;
@@ -23,101 +37,291 @@
   }
 
   &--active {
-    background: rgba(70, 140, 255, 0.55);
+    background: $accent-soft;
     border-color: rgba(140, 200, 255, 0.95);
   }
 }
 
+// ------------------------------------------------------------------
+// Main panel — GameTopRight slot.
+// ------------------------------------------------------------------
 .trl-panel {
   position: absolute;
   top: 8px;
   right: 8px;
-  width: 320px;
+  width: 300px;
   max-height: calc(100vh - 160px);
   overflow-y: auto;
-  background: rgba(20, 24, 32, 0.92);
-  color: #e8eaed;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: $bg-panel;
+  color: $text-primary;
+  border: 1px solid $border-soft;
   border-radius: 6px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   font-family: "Roboto", sans-serif;
   font-size: 12px;
+  line-height: 1.4;
   pointer-events: auto;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 
   &__title {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
-    margin: 0 0 8px;
+    margin: 0 0 6px;
     padding-bottom: 6px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid $border-soft;
   }
 
   &__meta {
-    color: #9aa0a6;
+    color: $text-muted;
     font-size: 11px;
     margin-bottom: 10px;
+
+    b { color: $text-primary; font-weight: 500; }
   }
 
-  &__line {
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 4px;
-    padding: 6px 8px;
-    margin-bottom: 8px;
+  &__hint {
+    color: $text-muted;
+    font-size: 11px;
+    font-style: italic;
+    padding: 8px 4px;
   }
 
-  &__line-header {
+  &__list {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-weight: 500;
-    margin-bottom: 4px;
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
+// ------------------------------------------------------------------
+// Line accordion row.
+// ------------------------------------------------------------------
+.trl-line {
+  background: $bg-row;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  overflow: hidden;
+  transition: background 0.1s ease, border-color 0.1s ease;
+
+  &:hover {
+    background: $bg-row-hover;
+    border-color: $border-soft;
   }
 
-  &__line-style {
+  &--expanded {
+    background: $bg-row-active;
+    border-color: $accent-soft;
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  &__chevron {
     font-size: 10px;
-    color: #9aa0a6;
+    color: $text-muted;
+    transition: transform 0.15s ease;
+    width: 10px;
+    display: inline-block;
+
+    &--open { transform: rotate(90deg); }
+  }
+
+  &__title {
+    flex: 1;
+    font-weight: 500;
+  }
+
+  &__style-tag {
+    font-size: 10px;
+    color: $text-muted;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  &__seg-count {
+    font-size: 10px;
+    color: $text-muted;
+    font-family: "Roboto Mono", monospace;
+    min-width: 28px;
+    text-align: right;
+  }
+
+  &__body {
+    padding: 4px 10px 10px;
+    border-top: 1px solid $border-soft;
+  }
+
+  &__style-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+  }
+
+  &__style-label {
+    font-size: 10px;
+    color: $text-muted;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    min-width: 38px;
   }
+}
 
-  &__segment {
+// ------------------------------------------------------------------
+// In-world segment popover — floats above each segment of the expanded line.
+// Position is set inline via top/left from screen-space coords published by C#.
+// transform: translate(-50%, -100%) anchors the bubble's bottom-center above
+// the world-space anchor so it doesn't cover the segment itself.
+// ------------------------------------------------------------------
+.trl-popover {
+  position: fixed;
+  transform: translate(-50%, -120%);
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(18, 22, 30, 0.92);
+  border: 1px solid $border-mid;
+  border-radius: 4px;
+  pointer-events: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  z-index: 999998;
+
+  &__btn {
+    width: 22px;
+    height: 22px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 4px 8px;
-    margin: 2px 0;
-    border-radius: 3px;
-    cursor: pointer;
-    transition: background 0.12s ease;
-
-    &:hover {
-      background: rgba(255, 255, 255, 0.08);
-    }
-
-    &--hidden {
-      opacity: 0.45;
-    }
-  }
-
-  &__segment-info {
-    font-family: "Roboto Mono", monospace;
-    font-size: 11px;
-  }
-
-  &__toggle-btn {
+    justify-content: center;
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: inherit;
-    padding: 2px 8px;
+    color: $text-primary;
+    border: 1px solid transparent;
     border-radius: 3px;
     font-size: 11px;
+    font-weight: 600;
     cursor: pointer;
     pointer-events: auto;
-    transition: background 0.12s ease;
+    transition: background 0.1s ease, border-color 0.1s ease;
 
     &:hover {
-      background: rgba(255, 255, 255, 0.12);
+      background: $bg-row-hover;
+      border-color: $border-mid;
     }
+  }
+}
+
+// ------------------------------------------------------------------
+// Native select element, restyled to match the panel aesthetic.
+// ------------------------------------------------------------------
+.trl-select {
+  flex: 1;
+  background: rgba(8, 12, 18, 0.85);
+  color: $text-primary;
+  border: 1px solid $border-mid;
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  pointer-events: auto;
+  // Custom chevron — vanilla CS2 doesn't strip the native one nicely, so we hide
+  // it via appearance:none and draw our own via background-image.
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, $text-muted 50%),
+                    linear-gradient(135deg, $text-muted 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 22px;
+
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.35);
+  }
+
+  &:focus {
+    outline: none;
+    border-color: $accent;
+  }
+
+  option {
+    background: #181c24;
+    color: $text-primary;
+  }
+}
+
+// ------------------------------------------------------------------
+// Segment row inside an expanded line.
+// ------------------------------------------------------------------
+.trl-segment {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.1s ease, opacity 0.1s ease;
+
+  &:hover { background: $bg-row-hover; }
+
+  &--hidden {
+    opacity: 0.4;
+  }
+
+  &__info {
+    font-family: "Roboto Mono", monospace;
+  }
+
+  &__indicator {
+    width: 18px;
+    text-align: center;
+    color: $text-muted;
+  }
+}
+
+// ------------------------------------------------------------------
+// Buttons.
+// ------------------------------------------------------------------
+.trl-btn {
+  background: transparent;
+  color: inherit;
+  border: 1px solid $border-mid;
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+
+  &:hover {
+    background: $bg-row-hover;
+    border-color: rgba(255, 255, 255, 0.35);
+  }
+
+  &--style {
+    flex: 1 1 auto;
+    font-size: 10px;
+    min-width: 64px;
+  }
+
+  &--active {
+    background: $accent-soft;
+    border-color: $accent;
+    color: #fff;
+
+    &:hover { background: $accent-soft; }
+  }
+
+  &--danger {
+    color: $danger;
+    margin-top: 6px;
+    width: 100%;
   }
 }

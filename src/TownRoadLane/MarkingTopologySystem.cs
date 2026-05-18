@@ -172,24 +172,31 @@ namespace TownRoadLane
                 EnforceMinSegmentLength(boundaries[i], beziers[i], kMinSegmentLengthM);
             }
 
-            // Build the new flat segments list.
+            // Build the new flat segments list. Each new segment inherits visibility AND style
+            // from the OLD segment whose [tStart, tEnd] contains the new midpoint — that way
+            // a per-segment override survives a re-split when a fresh intersecting line is added.
+            // When no old segment matches (first build for this line) fall back to the parent
+            // MarkingLine's style.
             var newSegments = new List<MarkingSegment>(lineCount * 2);
             for (int i = 0; i < lineCount; i++)
             {
                 var bs = boundaries[i];
                 var oldSegs = oldSegmentsByLine[i];
+                int lineDefaultStyle = linesSnapshot[i].style;
                 for (int s = 0; s < bs.Count - 1; s++)
                 {
                     float tStart = bs[s];
                     float tEnd = bs[s + 1];
                     float tMid = (tStart + tEnd) * 0.5f;
                     bool visible = LookupInheritedVisibility(oldSegs, tMid, defaultVisible: true);
+                    int style = LookupInheritedStyle(oldSegs, tMid, defaultStyle: lineDefaultStyle);
                     newSegments.Add(new MarkingSegment
                     {
                         lineIndex = i,
                         tStart = tStart,
                         tEnd = tEnd,
                         visible = visible,
+                        style = style,
                     });
                 }
             }
@@ -227,6 +234,18 @@ namespace TownRoadLane
                 if (t >= oldSegs[i].tStart && t <= oldSegs[i].tEnd) return oldSegs[i].visible;
             }
             return defaultVisible;
+        }
+
+        /// <summary>Same pattern as <see cref="LookupInheritedVisibility"/> for the per-segment
+        /// style override. New segments inherit from whichever old segment contained their
+        /// midpoint; truly-new segments take the parent line's default style.</summary>
+        private static int LookupInheritedStyle(List<MarkingSegment> oldSegs, float t, int defaultStyle)
+        {
+            for (int i = 0; i < oldSegs.Count; i++)
+            {
+                if (t >= oldSegs[i].tStart && t <= oldSegs[i].tEnd) return oldSegs[i].style;
+            }
+            return defaultStyle;
         }
 
         private static void DedupeSortedInPlace(List<float> values, float epsilon)

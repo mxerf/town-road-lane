@@ -17,6 +17,9 @@ const OUTPUT_DIR = "./dist/";
 const banner = `\n * Cities: Skylines II UI Module\n * Id: ${MOD.id}\n * Author: ${MOD.author}\n * Version: ${MOD.version}\n`;
 
 module.exports = {
+  // cohtml's JS runtime doesn't expose readable stack traces — every error
+  // points at "JS :15:23" regardless of mode, so dev mode buys us nothing.
+  // Keep production for the size + speed.
   mode: "production",
   stats: "none",
   entry: { [MOD.id]: "./src/index.tsx" },

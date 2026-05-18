@@ -32,7 +32,13 @@ namespace TownRoadLane
         // boundary look unchanged to the user until they explicitly hide a piece.
         public bool  visible;
 
-        private const int kVersion = 1;
+        // Visual style for THIS segment. Defaults from the parent MarkingLine.style at creation,
+        // then can be overridden per-segment via the UI popover. Schema v2 — old saves missing
+        // this field deserialise with style=0 (Solid), which lines up with the v3 MarkingLine
+        // default and so reads as "no change" for users coming from v1.
+        public int   style;
+
+        private const int kVersion = 2;
 
         public void Serialize<TWriter>(TWriter writer) where TWriter : IWriter
         {
@@ -41,15 +47,18 @@ namespace TownRoadLane
             writer.Write(tStart);
             writer.Write(tEnd);
             writer.Write(visible);
+            writer.Write(style);
         }
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
         {
-            reader.Read(out int _); // version; only v1 today
+            reader.Read(out int version);
             reader.Read(out lineIndex);
             reader.Read(out tStart);
             reader.Read(out tEnd);
             reader.Read(out visible);
+            // v1 had no style field — default to Solid (=0) so old segments render unchanged.
+            if (version >= 2) reader.Read(out style); else style = 0;
         }
     }
 }

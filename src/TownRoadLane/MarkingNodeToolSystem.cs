@@ -63,6 +63,21 @@ namespace TownRoadLane
         private MarkingStyle _currentStyle = MarkingStyle.Solid;
         private ProxyAction _cycleStyleAction;
 
+        // Stage 5d reverse hover-bridge: when the user clicks somewhere in NodeSelected state
+        // that ISN'T an endpoint dot, we hit-test against committed lines and surface the
+        // closest one's index to React via a bumped "tick" counter. Counter is what React
+        // watches — same lineIndex twice in a row still triggers an effect because the tick
+        // increments. -1 lineIndex means "user clicked outside any line, collapse all".
+        private int _lastClickedLine = -1;
+        private int _lastClickedTick;
+
+        // Stage 5d in-game hover: result of HitTestLines on every tick while in NodeSelected.
+        // Drives the overlay highlight (cursor → line). Differs from _uiHoveredLineIndex
+        // (which is the UI-driven hover) — they're separate so a user hovering the UI doesn't
+        // override their in-game hover. Both are pushed into MarkingOverlaySystem for joint
+        // rendering — first non-negative wins.
+        private int _hoveredLineInGame = -1;
+
         public State ToolState => _state;
         public Entity SelectedNode => _selectedNode;
         public Entity HoveredNode => _hoveredNode;
@@ -71,6 +86,9 @@ namespace TownRoadLane
         public int HoveredEndpointIndex => _hoverIdx;
         public float3 CursorWorldPos => _cursorWorldPos;
         public MarkingStyle CurrentStyle => _currentStyle;
+        public int LastClickedLine => _lastClickedLine;
+        public int LastClickedTick => _lastClickedTick;
+        public int HoveredLineInGame => _hoveredLineInGame;
 
         public override PrefabBase GetPrefab() => null;
         public override bool TrySetPrefab(PrefabBase prefab) => false;
@@ -120,6 +138,9 @@ namespace TownRoadLane
             _hoverIdx = -1;
             _lastLoggedHoverIdx = -2;
             _hoveredNode = Entity.Null;
+            _lastClickedLine = -1; // new node selection should not auto-expand a stale row
+            _lastClickedTick++;
+            _hoveredLineInGame = -1;
         }
 
         public override void InitializeRaycast()
@@ -140,6 +161,14 @@ namespace TownRoadLane
             _cursorWorldPos = hitSomething ? hit.m_HitPosition : float3.zero;
             _hoveredNode = (hitSomething && EntityManager.HasComponent<Node>(hitEntity)) ? hitEntity : Entity.Null;
             _hoverIdx = (_state != State.Default && hitSomething) ? FindHoveredEndpoint(_cursorWorldPos) : -1;
+
+            // In-game line hover: cursor near a committed line (and not already on a dot) →
+            // highlight that line. Skipped in SourceSelected because the cursor is busy aiming
+            // at a target dot — would feel noisy. Cheap: HitTestLines is O(lines × samples)
+            // with both factors tiny in practice.
+            _hoveredLineInGame = (_state == State.NodeSelected && _hoverIdx < 0 && hitSomething)
+                ? HitTestLines(_cursorWorldPos)
+                : -1;
 
             // Heartbeat every ~120 frames (~2 sec @60fps) — confirms tool is actually running and
             // raycast is hitting things. Without this we can't tell "tool not ticking" apart from
@@ -233,9 +262,19 @@ namespace TownRoadLane
                         // Click on a different node — switch selection.
                         SelectNode(hitEntity);
                     }
+                    else if (hitSomething)
+                    {
+                        // Stage 5d reverse hover-bridge: no dot hit, no other node — try a
+                        // distance-to-curve hit-test against committed lines. If a line is
+                        // close to the cursor, expand its accordion row in the React panel.
+                        int clickedLine = HitTestLines(_cursorWorldPos);
+                        _lastClickedLine = clickedLine;
+                        _lastClickedTick++;
+                        log.Info($"tool: click on line #{clickedLine} (or -1 = empty space)");
+                    }
                     else
                     {
-                        log.Info("tool: click in NodeSelected — no dot hovered, ignored");
+                        log.Info("tool: click in NodeSelected — no dot/raycast, ignored");
                     }
                 }
                 else if (_state == State.SourceSelected)
@@ -286,6 +325,42 @@ namespace TownRoadLane
                 // Compare in XZ plane only — terrain height varies, the dot sits at lane height.
                 float sq = d.x * d.x + d.z * d.z;
                 if (sq < bestSq) { bestSq = sq; best = i; }
+            }
+            return best;
+        }
+
+        // Hit-test radius (XZ, world units²) for the reverse hover-bridge — the cursor needs to
+        // land within ~2m of a line's painted geometry for it to count as a click on that line.
+        private const float kLinePickRadiusSq = 2.0f * 2.0f;
+        // Number of evenly-spaced t samples taken along each Bezier to approximate distance.
+        // 12 samples → ~1m resolution on a 10-12m line; cheap enough for per-click hit-test.
+        private const int   kLineSampleCount  = 12;
+
+        /// <summary>Pick the index of the MarkingLine whose Bezier passes closest to the cursor,
+        /// or -1 if no line is within <see cref="kLinePickRadiusSq"/>. Sampling-based — not
+        /// analytic, but the lines are short and the radius is generous so accuracy is fine for
+        /// UI hit-test purposes.</summary>
+        private int HitTestLines(float3 cursor)
+        {
+            if (_selectedNode == Entity.Null) return -1;
+            if (!EntityManager.HasBuffer<MarkingLine>(_selectedNode)) return -1;
+            var lines = EntityManager.GetBuffer<MarkingLine>(_selectedNode, isReadOnly: true);
+            if (lines.Length == 0) return -1;
+
+            int best = -1;
+            float bestSq = kLinePickRadiusSq;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (!MarkingCurveBuilder.TryBuild(_endpoints, lines[i], out var bez)) continue;
+                for (int s = 0; s <= kLineSampleCount; s++)
+                {
+                    float t = (float)s / kLineSampleCount;
+                    float3 p = Colossal.Mathematics.MathUtils.Position(bez, t);
+                    float dx = p.x - cursor.x;
+                    float dz = p.z - cursor.z;
+                    float sq = dx * dx + dz * dz;
+                    if (sq < bestSq) { bestSq = sq; best = i; }
+                }
             }
             return best;
         }

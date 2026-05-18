@@ -7,6 +7,7 @@ using Game.Tools;
 using Game.UI;
 using Unity.Entities;
 using Unity.Mathematics;
+using UnityEngine;
 
 namespace TownRoadLane
 {
@@ -47,6 +48,13 @@ namespace TownRoadLane
         private DefaultToolSystem _defaultTool;
         private ToolSystem _toolSystem;
 
+        // Stage 5d hover-bridge: which line is currently hovered in the React panel. -1 = none.
+        // Read by MarkingOverlaySystem to draw that line thicker/brighter so the user can
+        // visually correlate UI row ↔ on-road line. Republished into the state JSON so React
+        // can be the source of truth (single dispatcher) and overlay just reads it back.
+        private int _uiHoveredLineIndex = -1;
+        public int UIHoveredLineIndex => _uiHoveredLineIndex;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -61,10 +69,14 @@ namespace TownRoadLane
                 "TownRoadLane", "ToggleSegment", OnToggleSegment));
             AddBinding(new TriggerBinding<int, int>(
                 "TownRoadLane", "SetLineStyle", OnSetLineStyle));
+            AddBinding(new TriggerBinding<int, int, int>(
+                "TownRoadLane", "SetSegmentStyle", OnSetSegmentStyle));
             AddBinding(new TriggerBinding<int>(
                 "TownRoadLane", "DeleteLine", OnDeleteLine));
             AddBinding(new TriggerBinding(
                 "TownRoadLane", "ActivateTool", OnActivateTool));
+            AddBinding(new TriggerBinding<int>(
+                "TownRoadLane", "SetHoveredLine", OnSetHoveredLine));
 
             log.Info("TownRoadLaneUISystem: bindings registered");
         }
@@ -85,10 +97,15 @@ namespace TownRoadLane
             int currentStyle = (int)(_tool?.CurrentStyle ?? MarkingStyle.Solid);
 
             var sb = new StringBuilder(512);
+            int clickedLine = _tool?.LastClickedLine ?? -1;
+            int clickedTick = _tool?.LastClickedTick ?? 0;
+
             sb.Append("{");
             sb.Append("\"isActive\":").Append(isActive ? "true" : "false").Append(",");
             sb.Append("\"selectedNodeIndex\":").Append(nodeIdx).Append(",");
             sb.Append("\"currentStyle\":").Append(currentStyle).Append(",");
+            sb.Append("\"lastClickedLine\":").Append(clickedLine).Append(",");
+            sb.Append("\"lastClickedTick\":").Append(clickedTick).Append(",");
             sb.Append("\"lines\":[");
 
             if (isActive && _tool.SelectedNode != Entity.Null
@@ -114,6 +131,10 @@ namespace TownRoadLane
 
                     bool bezOk = MarkingCurveBuilder.TryBuild(endpoints, line, out var fullBez);
                     int segCount = 0;
+                    // Camera for world→screen projection. Captured once per line — if null
+                    // (paused / unloaded), screenX/Y default to -1 and React hides the popover.
+                    var cam = Camera.main;
+                    int screenH = Screen.height; // for flipping Y (Unity screen has 0 at bottom, CSS at top)
                     if (segs.IsCreated)
                     {
                         int perLineCounter = 0;
@@ -124,10 +145,23 @@ namespace TownRoadLane
                             if (segCount > 0) sb.Append(",");
 
                             float lengthM = 0f;
+                            float screenX = -1f, screenY = -1f;
                             if (bezOk)
                             {
                                 var cut = MathUtils.Cut(fullBez, new float2(seg.tStart, seg.tEnd));
                                 lengthM = MathUtils.Length(cut);
+                                // Midpoint world position of the segment — anchor for the popover.
+                                var midWorld = MathUtils.Position(fullBez, (seg.tStart + seg.tEnd) * 0.5f);
+                                if (cam != null)
+                                {
+                                    var screen = cam.WorldToScreenPoint(midWorld);
+                                    // z > 0 = in front of camera. Off-screen / behind camera → skip.
+                                    if (screen.z > 0f)
+                                    {
+                                        screenX = screen.x;
+                                        screenY = screenH - screen.y; // Unity → CSS Y flip
+                                    }
+                                }
                             }
 
                             sb.Append("{\"lineIndex\":").Append(i)
@@ -135,7 +169,10 @@ namespace TownRoadLane
                                 .Append(",\"tStart\":").Append(seg.tStart.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture))
                                 .Append(",\"tEnd\":").Append(seg.tEnd.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture))
                                 .Append(",\"visible\":").Append(seg.visible ? "true" : "false")
+                                .Append(",\"style\":").Append(seg.style)
                                 .Append(",\"lengthM\":").Append(lengthM.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))
+                                .Append(",\"screenX\":").Append(screenX.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))
+                                .Append(",\"screenY\":").Append(screenY.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))
                                 .Append("}");
                             perLineCounter++;
                             segCount++;
@@ -150,6 +187,14 @@ namespace TownRoadLane
         }
 
         // --- Commands ---
+
+        /// <summary>UI hover-bridge: React notifies us which line row the user is hovering over
+        /// in the panel. Stored as plain int — no validation; -1 (or any out-of-range value)
+        /// means "no hover" and overlay falls back to normal rendering. Cheap, no buffer needed.</summary>
+        private void OnSetHoveredLine(int lineIndex)
+        {
+            _uiHoveredLineIndex = lineIndex;
+        }
 
         /// <summary>Toolbar-button command: toggle our tool active/inactive. Same semantics as
         /// the Ctrl+M hotkey path — flip activeTool between ours and DefaultToolSystem.</summary>
@@ -194,6 +239,35 @@ namespace TownRoadLane
             log.Warn($"ToggleSegment: line#{lineIndex} seg#{segmentIndexPerLine} not found");
         }
 
+        /// <summary>Override the style of a single segment. Same walk-and-count strategy as
+        /// <see cref="OnToggleSegment"/> — the per-line counter maps the React-side segmentIndex
+        /// to the flat buffer position. Other segments of the line keep their previous style.</summary>
+        private void OnSetSegmentStyle(int lineIndex, int segmentIndexPerLine, int style)
+        {
+            var node = _tool?.SelectedNode ?? Entity.Null;
+            if (node == Entity.Null) { log.Warn("SetSegmentStyle ignored — no node selected"); return; }
+            if (!EntityManager.HasBuffer<MarkingSegment>(node)) return;
+
+            var segs = EntityManager.GetBuffer<MarkingSegment>(node);
+            int perLineCounter = 0;
+            for (int s = 0; s < segs.Length; s++)
+            {
+                var seg = segs[s];
+                if (seg.lineIndex != lineIndex) continue;
+                if (perLineCounter == segmentIndexPerLine)
+                {
+                    seg.style = style;
+                    segs[s] = seg;
+                    if (!EntityManager.HasComponent<Updated>(node))
+                        EntityManager.AddComponent<Updated>(node);
+                    log.Info($"UI: set line#{lineIndex} seg#{segmentIndexPerLine} style → {(MarkingStyle)style}");
+                    return;
+                }
+                perLineCounter++;
+            }
+            log.Warn($"SetSegmentStyle: line#{lineIndex} seg#{segmentIndexPerLine} not found");
+        }
+
         private void OnSetLineStyle(int lineIndex, int style)
         {
             var node = _tool?.SelectedNode ?? Entity.Null;
@@ -205,10 +279,21 @@ namespace TownRoadLane
             var ln = lines[lineIndex];
             ln.style = style;
             lines[lineIndex] = ln;
-            // Wipe segments — topology will rebuild with new style. The boundaries don't change
-            // (style is visual-only), but emission re-targets segments to the new prefab archetype.
+            // Sweep every existing segment of this line over to the new style. Topology won't
+            // re-split here (boundaries are unaffected by style), so we don't wipe segments;
+            // we just rewrite the per-segment style field in-place. Emission picks up the new
+            // value next tick via the Updated marker below.
             if (EntityManager.HasBuffer<MarkingSegment>(node))
-                EntityManager.GetBuffer<MarkingSegment>(node).Clear();
+            {
+                var segs = EntityManager.GetBuffer<MarkingSegment>(node);
+                for (int s = 0; s < segs.Length; s++)
+                {
+                    if (segs[s].lineIndex != lineIndex) continue;
+                    var seg = segs[s];
+                    seg.style = style;
+                    segs[s] = seg;
+                }
+            }
             // Bust the topology hash so MarkingTopologySystem re-emits on next tick. Without
             // this the hash equality short-circuits because lineIndex+endpoints didn't change.
             if (EntityManager.HasComponent<MarkingTopologyState>(node))

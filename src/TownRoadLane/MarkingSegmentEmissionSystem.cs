@@ -108,7 +108,9 @@ namespace TownRoadLane
                     if (seg.lineIndex < 0 || seg.lineIndex >= lines.Length) continue;
                     int segIdx = perLineCounter.TryGetValue(seg.lineIndex, out var c) ? c : 0;
                     perLineCounter[seg.lineIndex] = segIdx + 1;
-                    var style = (MarkingStyle)lines[seg.lineIndex].style;
+                    // Style now lives ON the segment (Stage 5d) — let each piece of a line
+                    // pick its own visual independent of the line-level default.
+                    var style = (MarkingStyle)seg.style;
                     int passes = style.DrawPasses();
                     for (int p = 0; p < passes; p++)
                         wanted.Add((node, seg.lineIndex, segIdx, p));
@@ -186,10 +188,11 @@ namespace TownRoadLane
                             if (seg.lineIndex < 0 || seg.lineIndex >= lineCount) continue;
                             if (!bezValid[seg.lineIndex]) continue;
 
-                            // Per-segment prefab lookup via the line's style. Lazy-resolve into
-                            // the cache so the FIRST line of a given style pays for the archetype
-                            // lookup and every later segment in the same style is a dictionary hit.
-                            var style = (MarkingStyle)lines[seg.lineIndex].style;
+                            // Per-segment prefab lookup. Style is owned by the segment itself
+                            // (Stage 5d) — different pieces of one line may render differently.
+                            // Lazy-resolve into the cache: FIRST segment of each style pays for
+                            // the archetype lookup, every later one is a dictionary hit.
+                            var style = (MarkingStyle)seg.style;
                             if (!prefabByStyle.TryGetValue(style, out var pair))
                             {
                                 if (!TryResolveStylePrefab(style, isNA, out pair))

@@ -111,6 +111,11 @@ namespace TownRoadLane
             new() { style = MarkingStyle.G87Solid,  isNA = true,  sourcePrefabName = "NA Car Bay Line", cloneName = "TownRoadLane NA City G87 Solid Line",  fallbackMesh = kG87SolidMesh,  hostOnCityLanes = false },
             new() { style = MarkingStyle.G87Dashed, isNA = false, sourcePrefabName = "EU Car Bay Line", cloneName = "TownRoadLane EU City G87 Dashed Line", fallbackMesh = kG87DashedMesh, hostOnCityLanes = false },
             new() { style = MarkingStyle.G87Dashed, isNA = true,  sourcePrefabName = "NA Car Bay Line", cloneName = "TownRoadLane NA City G87 Dashed Line", fallbackMesh = kG87DashedMesh, hostOnCityLanes = false },
+            // Double Solid — single vanilla mesh "White Double Solid Line Mesh" cloned onto the
+            // standard Car Bay Line archetype. Two parallel lines come from the mesh itself, not
+            // from spawning two entities, so the emission pipeline stays simple.
+            new() { style = MarkingStyle.DoubleSolid, isNA = false, sourcePrefabName = "EU Car Bay Line", cloneName = "TownRoadLane EU City Double Solid Line", fallbackMesh = "White Double Solid Line Mesh", hostOnCityLanes = false },
+            new() { style = MarkingStyle.DoubleSolid, isNA = true,  sourcePrefabName = "NA Car Bay Line", cloneName = "TownRoadLane NA City Double Solid Line", fallbackMesh = "White Double Solid Line Mesh", hostOnCityLanes = false },
         };
 
         private PrefabSystem m_PrefabSystem;

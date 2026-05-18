@@ -11,7 +11,15 @@ export interface SegmentVM {
   tStart: number;
   tEnd: number;
   visible: boolean;
+  // Per-segment style (Stage 5d) — defaults from MarkingLine.style at creation but the user
+  // can override individual pieces via the popover.
+  style: number;
   lengthM: number;        // chord length of the segment in metres (approximated)
+  // Screen-space midpoint anchor for the per-segment popover (Stage 5d). CSS pixels,
+  // origin top-left. -1 when the segment is behind the camera or off-screen — UI hides
+  // the popover in that case.
+  screenX: number;
+  screenY: number;
 }
 
 export interface LineVM {
@@ -24,6 +32,12 @@ export interface ToolStateVM {
   isActive: boolean;       // tool currently the active tool
   selectedNodeIndex: number; // -1 when no node selected
   currentStyle: number;    // enum value
+  // Reverse hover-bridge: lineIndex of the line the user clicked on in the game world
+  // (NodeSelected state, not a dot click — proximity to the line's Bezier). React watches
+  // lastClickedTick (monotonic, bumped on every click even if the same line) and
+  // auto-expands the matching accordion row.
+  lastClickedLine: number;
+  lastClickedTick: number;
   lines: LineVM[];
 }
 
@@ -31,6 +45,8 @@ const EMPTY: ToolStateVM = {
   isActive: false,
   selectedNodeIndex: -1,
   currentStyle: 0,
+  lastClickedLine: -1,
+  lastClickedTick: 0,
   lines: [],
 };
 
@@ -40,7 +56,37 @@ export const useToolState = (): ToolStateVM => {
   const json = useValue(STATE_BINDING);
   try {
     if (!json || json === "{}") return EMPTY;
-    return JSON.parse(json) as ToolStateVM;
+    const raw = JSON.parse(json) as Partial<ToolStateVM>;
+    // Defensive normalisation — every C# tick rebuilds the state JSON, and any
+    // missing/null fields would crash deeper in the component tree (e.g. the
+    // expandedLine effect reads state.lines.length). Coerce to known shapes here
+    // so consumers can trust ToolStateVM invariants.
+    return {
+      isActive: Boolean(raw.isActive),
+      selectedNodeIndex: typeof raw.selectedNodeIndex === "number" ? raw.selectedNodeIndex : -1,
+      currentStyle: typeof raw.currentStyle === "number" ? raw.currentStyle : 0,
+      lastClickedLine: typeof raw.lastClickedLine === "number" ? raw.lastClickedLine : -1,
+      lastClickedTick: typeof raw.lastClickedTick === "number" ? raw.lastClickedTick : 0,
+      lines: Array.isArray(raw.lines)
+        ? raw.lines.map((l: any) => ({
+            lineIndex: typeof l?.lineIndex === "number" ? l.lineIndex : -1,
+            style: typeof l?.style === "number" ? l.style : 0,
+            segments: Array.isArray(l?.segments)
+              ? l.segments.map((s: any) => ({
+                  lineIndex: typeof s?.lineIndex === "number" ? s.lineIndex : -1,
+                  segmentIndex: typeof s?.segmentIndex === "number" ? s.segmentIndex : 0,
+                  tStart: typeof s?.tStart === "number" ? s.tStart : 0,
+                  tEnd: typeof s?.tEnd === "number" ? s.tEnd : 1,
+                  visible: Boolean(s?.visible),
+                  style: typeof s?.style === "number" ? s.style : 0,
+                  lengthM: typeof s?.lengthM === "number" ? s.lengthM : 0,
+                  screenX: typeof s?.screenX === "number" ? s.screenX : -1,
+                  screenY: typeof s?.screenY === "number" ? s.screenY : -1,
+                }))
+              : [],
+          }))
+        : [],
+    };
   } catch (e) {
     console.error("TownRoadLane UI: bad state JSON:", e);
     return EMPTY;
@@ -57,6 +103,12 @@ export const cmdSetLineStyle = (lineIndex: number, style: number) => {
   trigger("TownRoadLane", "SetLineStyle", lineIndex, style);
 };
 
+// Per-segment style override (Stage 5d). Same arg layout as cmdToggleSegment,
+// plus the new style value. The line-level default style stays unchanged.
+export const cmdSetSegmentStyle = (lineIndex: number, segmentIndex: number, style: number) => {
+  trigger("TownRoadLane", "SetSegmentStyle", lineIndex, segmentIndex, style);
+};
+
 export const cmdDeleteLine = (lineIndex: number) => {
   trigger("TownRoadLane", "DeleteLine", lineIndex);
 };
@@ -65,4 +117,11 @@ export const cmdDeleteLine = (lineIndex: number) => {
 // button. Triggered from the toolbar button in GameTopLeft.
 export const cmdActivateTool = () => {
   trigger("TownRoadLane", "ActivateTool");
+};
+
+// Tell C# which line row the user is currently hovering over in the panel.
+// MarkingOverlaySystem reads this and draws that line on the road thicker +
+// brighter so the user can correlate UI row ↔ physical line. Pass -1 on leave.
+export const cmdSetHoveredLine = (lineIndex: number) => {
+  trigger("TownRoadLane", "SetHoveredLine", lineIndex);
 };
