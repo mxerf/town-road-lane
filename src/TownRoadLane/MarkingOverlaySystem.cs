@@ -185,10 +185,17 @@ namespace TownRoadLane
             //    boundaries so the user can see where lines cross — this is service info
             //    independent of hover.
             //
-            //    Hover source: UIHoveredLineIndex (React panel hover) takes priority over
-            //    HoveredLineInGame (cursor over line in world). Either source highlights.
+            //    Hover sources (in priority order):
+            //      1. UIHoveredSegmentLine/Index — per-segment hover from React popover (C3).
+            //         When set, only that ONE segment lights up; the rest of the line stays
+            //         in default rendering.
+            //      2. UIHoveredLineIndex — React panel row hover; lights all segments of the line.
+            //      3. HoveredLineInGame — cursor over line in world; same effect as (2).
             int uiHoveredLine = _uiSystem?.UIHoveredLineIndex ?? -1;
             if (uiHoveredLine < 0) uiHoveredLine = _tool?.HoveredLineInGame ?? -1;
+            int hoveredSegLine = _uiSystem?.UIHoveredSegmentLineIndex ?? -1;
+            int hoveredSegIdx  = _uiSystem?.UIHoveredSegmentIndex ?? -1;
+
             var node = _tool.SelectedNode;
             if (node != Entity.Null && EntityManager.HasBuffer<MarkingLine>(node) && EntityManager.HasBuffer<MarkingSegment>(node))
             {
@@ -198,11 +205,17 @@ namespace TownRoadLane
                 for (int l = 0; l < lineCount; l++)
                 {
                     if (!MarkingCurveBuilder.TryBuild(endpoints, lines[l], out var full)) continue;
-                    bool isHighlighted = (l == uiHoveredLine);
+                    bool isLineHighlighted = (l == uiHoveredLine);
+                    // Per-line counter — matches the segmentIndex React publishes (dense
+                    // 0..K-1 per line, not the flat buffer index).
+                    int perLineCounter = -1;
                     for (int s = 0; s < segs.Length; s++)
                     {
                         var seg = segs[s];
                         if (seg.lineIndex != l) continue;
+                        perLineCounter++;
+                        bool isThisSegmentHovered = (l == hoveredSegLine && perLineCounter == hoveredSegIdx);
+                        bool isHighlighted = isLineHighlighted || isThisSegmentHovered;
 
                         // Pick what (if anything) to draw for this segment.
                         bool draw = false;
@@ -212,7 +225,9 @@ namespace TownRoadLane
                         {
                             draw = true;
                             color = seg.visible ? kColHighlightedCurve : kColHighlightedHidden;
-                            width = kHighlightedPairCurveWidth;
+                            // Per-segment hover gets an extra-thick line so it stands out even
+                            // when the rest of the line is also highlighted.
+                            width = isThisSegmentHovered ? kHighlightedPairCurveWidth * 1.8f : kHighlightedPairCurveWidth;
                         }
                         else if (!seg.visible)
                         {
@@ -258,11 +273,20 @@ namespace TownRoadLane
                 }
             }
 
-            // 3. Endpoint dots. Compact ring shape, per-edge tinting:
-            //    - normal: thin dark outline + edge-palette fill (each road approach gets
-            //              its own colour so the user can tell sibling dots apart)
-            //    - source: bright white solid (anchor for the drag in SourceSelected state)
-            //    - hover:  same edge colour but brighter + slightly larger ring
+            // 3. Endpoint dots (C1):
+            //    - normal idle: thin dark outline + edge-palette fill, with a gentle
+            //      pulse on diameter (~6% breathing) so the dots read as alive and
+            //      clickable rather than as static decoration.
+            //    - source: bright white solid (anchor for the drag in SourceSelected
+            //      state), wrapped in a wider white "selected" ring at lower alpha so
+            //      it's instantly distinguishable from a regular dot.
+            //    - hover:  same edge colour but brighter + slightly larger ring.
+            //
+            //    Pulse is keyed off Time.time so all dots breathe in sync — looks
+            //    intentional and less noisy than per-dot phase offsets.
+            // Use UnityEngine.Time explicitly — ComponentSystemBase.Time is a different
+            // (now-deprecated) thing that resolves first due to inheritance.
+            float pulse = 1f + 0.06f * math.sin((float)UnityEngine.Time.timeAsDouble * 2.4f);
             for (int i = 0; i < endpoints.Count; i++)
             {
                 var ep = endpoints[i];
@@ -276,6 +300,16 @@ namespace TownRoadLane
                 {
                     fill = kColDotFillSource;
                     outline = kColDotOutlineSrc;
+                    // Outer "you have selected this point" ring — faint white halo,
+                    // bigger than the dot. Drawn first so the dot sits on top.
+                    buf.DrawCircle(
+                        outlineColor: new Color(1f, 1f, 1f, 0.55f),
+                        fillColor: kColTransparent,
+                        outlineWidth: 0.10f,
+                        styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                        direction: new float2(0f, 1f),
+                        position: ep.position,
+                        diameter: kDotDiameter * 2.2f);
                 }
                 else if (i == hoverIdx)
                 {
@@ -286,6 +320,9 @@ namespace TownRoadLane
                 else
                 {
                     fill = edgeColor;
+                    // Apply the pulse only on idle dots — hover/source already have
+                    // their own size emphasis, no need to add wobble on top.
+                    diameter *= pulse;
                 }
 
                 buf.DrawCircle(

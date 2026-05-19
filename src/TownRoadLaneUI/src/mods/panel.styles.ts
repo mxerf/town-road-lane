@@ -199,9 +199,18 @@ export const LineSegCount = styled.span`
   font-variant-numeric: tabular-nums;
 `;
 
-export const LineBody = styled.div`
-  padding: ${T.space1} ${T.space2} ${T.space2};
-  border-top: 1rem solid ${T.colorBorderSoft};
+// LineBody is always mounted to allow max-height transition (you can't animate
+// from "absent" to "present"). $open toggles the collapsed state. max-height
+// is set to a generous overshoot — content rarely exceeds ~1500rem (50+
+// segments) and overshoot doesn't visually matter when the body is open.
+// border-top + padding are only drawn when open to avoid a 1rem strip showing
+// through when collapsed.
+export const LineBody = styled.div<{ $open?: boolean }>`
+  overflow: hidden;
+  max-height: ${(p) => (p.$open ? "3000rem" : "0")};
+  padding: ${(p) => (p.$open ? `${T.space1} ${T.space2} ${T.space2}` : `0 ${T.space2}`)};
+  border-top: ${(p) => (p.$open ? `1rem solid ${T.colorBorderSoft}` : "0 solid transparent")};
+  transition: max-height ${T.transitionNormal}, padding ${T.transitionNormal}, border-top-width ${T.transitionNormal};
 `;
 
 export const StyleRow = styled.div`
@@ -262,6 +271,10 @@ export const PopoverBtn = styled.button<{ $active?: boolean }>`
 
 // ── Segment row inside expanded line ───────────────────────────────────
 
+// Hidden state (C5): in addition to dimming, paint a red left border + tint so
+// the "this segment is suppressed" signal is unambiguous — opacity alone is
+// easy to miss in a long list. Using border-left instead of full border keeps
+// the row alignment with visible siblings.
 export const SegmentRow = styled.div<{ $hidden?: boolean }>`
   display: flex;
   justify-content: space-between;
@@ -269,13 +282,15 @@ export const SegmentRow = styled.div<{ $hidden?: boolean }>`
   padding: ${T.space1} ${T.space2};
   margin: 2rem 0;
   border-radius: ${T.radiusSm};
+  border-left: 3rem solid ${(p) => (p.$hidden ? T.colorDanger : "transparent")};
+  background: ${(p) => (p.$hidden ? T.colorDangerSoft : "transparent")};
   cursor: pointer;
   font-size: ${T.fontSizeSm};
-  opacity: ${(p) => (p.$hidden ? 0.45 : 1)};
-  transition: background ${T.transitionFast}, opacity ${T.transitionFast};
+  opacity: ${(p) => (p.$hidden ? 0.7 : 1)};
+  transition: background ${T.transitionFast}, opacity ${T.transitionFast}, border-color ${T.transitionFast};
 
   &:hover {
-    background: ${T.colorRowBgHover};
+    background: ${(p) => (p.$hidden ? T.colorDangerSoft : T.colorRowBgHover)};
   }
 `;
 

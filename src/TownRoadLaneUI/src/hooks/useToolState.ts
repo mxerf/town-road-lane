@@ -132,3 +132,11 @@ export const cmdActivateTool = () => {
 export const cmdSetHoveredLine = (lineIndex: number) => {
   trigger("TownRoadLane", "SetHoveredLine", lineIndex);
 };
+
+// Per-segment hover (C3). Same idea as cmdSetHoveredLine but scoped to a
+// specific segment of a specific line — overlay highlights ONLY that segment
+// (brighter, slightly thicker) rather than the whole line. Pass (-1, -1) on
+// leave. Used by SegmentPopover hover handlers.
+export const cmdSetHoveredSegment = (lineIndex: number, segmentIndex: number) => {
+  trigger("TownRoadLane", "SetHoveredSegment", lineIndex, segmentIndex);
+};

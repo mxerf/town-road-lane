@@ -7,11 +7,13 @@ import {
   cmdSetSegmentStyle,
   cmdDeleteLine,
   cmdSetHoveredLine,
+  cmdSetHoveredSegment,
   LineVM,
   SegmentVM,
 } from "../hooks/useToolState";
 import { ChevronRight, Eye, EyeOff, Trash, Cycle } from "../components/icons";
 import { Dropdown, DropdownOption } from "../components/Dropdown";
+import { TooltipProvider, Tooltip } from "../components/Tooltip";
 import { useT } from "../i18n";
 import type { StringKey } from "../i18n";
 import { tokens as T } from "../styles/tokens";
@@ -91,16 +93,30 @@ const styleLabel = (t: ReturnType<typeof useT>, style: number): string =>
 // this into GameTopRight, so the boundary protects the game UI from our bugs.
 export const TownRoadLanePanel = () => (
   <PanelErrorBoundary>
-    <TownRoadLanePanelInner />
+    <TooltipProvider>
+      <TownRoadLanePanelInner />
+    </TooltipProvider>
   </PanelErrorBoundary>
 );
 
 // Floating in-world popover anchored at a segment's midpoint. Buttons mirror
-// the accordion controls (toggle visibility, cycle style) so users can edit
-// without rolling open the side panel. Hidden when screen coords are negative
-// (segment behind camera / off-screen).
+// the accordion controls (toggle visibility, cycle style) plus a delete-line
+// button (C6, two-press confirm to avoid mistaken loss of work). Hidden when
+// screen coords are negative (segment behind camera / off-screen).
+const POPOVER_DELETE_CONFIRM_MS = 2500;
+
 const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   const t = useT();
+  // Two-press delete state, local to each popover. First click flips on; second
+  // click within the window dispatches. Resets on timeout or when the segment
+  // changes (popovers re-render with new keys when the line is rebuilt).
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const id = window.setTimeout(() => setConfirmingDelete(false), POPOVER_DELETE_CONFIRM_MS);
+    return () => window.clearTimeout(id);
+  }, [confirmingDelete]);
+
   if (seg.screenX < 0 || seg.screenY < 0) return null;
   // Portal into document.body — our panel mounts inside GameTopRight which
   // likely has CSS transform/will-change set up by CS2, creating a containing
@@ -110,26 +126,72 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   return createPortal(
     <PopoverRoot
       style={{ left: seg.screenX, top: seg.screenY }}
-      onMouseEnter={() => cmdSetHoveredLine(seg.lineIndex)}
-      onMouseLeave={() => cmdSetHoveredLine(-1)}
+      onMouseEnter={() => {
+        // Per-segment hover (C3): light up THIS segment specifically, not the
+        // whole line. The popover's anchored to one segment, so the UX should
+        // narrow attention to that segment alone.
+        cmdSetHoveredSegment(seg.lineIndex, seg.segmentIndex);
+      }}
+      onMouseLeave={() => {
+        cmdSetHoveredSegment(-1, -1);
+        // Cancel pending delete if the user moves away — avoids the confirm
+        // state lingering after the user gave up.
+        setConfirmingDelete(false);
+      }}
     >
-      <PopoverBtn
-        // $active when the segment is hidden — telegraphs the toggle state at
-        // a glance without forcing the user to interpret the icon.
-        $active={!seg.visible}
-        title={seg.visible ? t("segment.hide.tooltip") : t("segment.show.tooltip")}
-        onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
+      <Tooltip
+        content={seg.visible ? t("segment.hide.tooltip") : t("segment.show.tooltip")}
       >
-        {seg.visible ? <Eye size={14} /> : <EyeOff size={14} />}
-      </PopoverBtn>
-      <PopoverBtn
-        title={t("segment.cycleStyle.tooltip", { style: styleLabel(t, seg.style) })}
-        onClick={() =>
-          cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, (seg.style + 1) % STYLE_VALUES.length)
+        <PopoverBtn
+          // $active when the segment is hidden — telegraphs the toggle state at
+          // a glance without forcing the user to interpret the icon.
+          $active={!seg.visible}
+          onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
+        >
+          {seg.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+        </PopoverBtn>
+      </Tooltip>
+      <Tooltip
+        content={t("segment.cycleStyle.tooltip", { style: styleLabel(t, seg.style) })}
+      >
+        <PopoverBtn
+          onClick={() =>
+            cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, (seg.style + 1) % STYLE_VALUES.length)
+          }
+        >
+          <Cycle size={14} />
+        </PopoverBtn>
+      </Tooltip>
+      <Tooltip
+        content={
+          confirmingDelete ? t("line.delete.confirm.btn") : t("line.delete")
         }
       >
-        <Cycle size={14} />
-      </PopoverBtn>
+        <PopoverBtn
+          // $active = red-tinted confirm state. Same visual language as the
+          // panel's inline DeleteLineButton confirm row.
+          $active={confirmingDelete}
+          style={
+            confirmingDelete
+              ? {
+                  background: T.colorDangerSoft,
+                  borderColor: T.colorDanger,
+                  color: T.colorDanger,
+                }
+              : undefined
+          }
+          onClick={() => {
+            if (confirmingDelete) {
+              cmdDeleteLine(seg.lineIndex);
+              setConfirmingDelete(false);
+            } else {
+              setConfirmingDelete(true);
+            }
+          }}
+        >
+          <Trash size={14} color={confirmingDelete ? T.colorDanger : undefined} />
+        </PopoverBtn>
+      </Tooltip>
     </PopoverRoot>,
     document.body,
   );
@@ -329,19 +391,17 @@ const LineRow = ({
           {t("line.segCount", { visible: visibleCount, total: line.segments.length })}
         </LineSegCount>
       </LineHeader>
-      {isExpanded && (
-        <LineBody>
-          <StyleSelector line={line} />
-          {line.segments.map((seg) => (
-            <SegmentRowComponent key={`${seg.lineIndex}-${seg.segmentIndex}`} seg={seg} />
-          ))}
-          <DeleteLineButton
-            lineIndex={line.lineIndex}
-            keyboardConfirming={isPendingDelete}
-            onKeyboardCancel={onCancelPendingDelete}
-          />
-        </LineBody>
-      )}
+      <LineBody $open={isExpanded}>
+        <StyleSelector line={line} />
+        {line.segments.map((seg) => (
+          <SegmentRowComponent key={`${seg.lineIndex}-${seg.segmentIndex}`} seg={seg} />
+        ))}
+        <DeleteLineButton
+          lineIndex={line.lineIndex}
+          keyboardConfirming={isPendingDelete}
+          onKeyboardCancel={onCancelPendingDelete}
+        />
+      </LineBody>
     </LineRowOuter>
   );
 };

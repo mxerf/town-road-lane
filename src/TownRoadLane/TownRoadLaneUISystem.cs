@@ -57,6 +57,15 @@ namespace TownRoadLane
         private int _uiHoveredLineIndex = -1;
         public int UIHoveredLineIndex => _uiHoveredLineIndex;
 
+        // Phase C3: per-segment hover. Set by React when the cursor is over a segment popover.
+        // When >= 0, MarkingOverlaySystem highlights only this specific segment (brighter
+        // than the rest of its line) so popover hover correlates with a single in-world
+        // segment rather than the whole line.
+        private int _uiHoveredSegmentLine = -1;
+        private int _uiHoveredSegmentIndex = -1;
+        public int UIHoveredSegmentLineIndex => _uiHoveredSegmentLine;
+        public int UIHoveredSegmentIndex => _uiHoveredSegmentIndex;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -87,6 +96,8 @@ namespace TownRoadLane
                 "TownRoadLane", "ActivateTool", OnActivateTool));
             AddBinding(new TriggerBinding<int>(
                 "TownRoadLane", "SetHoveredLine", OnSetHoveredLine));
+            AddBinding(new TriggerBinding<int, int>(
+                "TownRoadLane", "SetHoveredSegment", OnSetHoveredSegment));
 
             log.Info("TownRoadLaneUISystem: bindings registered");
         }
@@ -225,6 +236,15 @@ namespace TownRoadLane
         private void OnSetHoveredLine(int lineIndex)
         {
             _uiHoveredLineIndex = lineIndex;
+        }
+
+        /// <summary>Phase C3 — per-segment hover bridge. React calls this when the cursor enters
+        /// a segment popover, so we can highlight only that segment in the overlay (rather than
+        /// the whole line). Pass (-1, -1) to clear.</summary>
+        private void OnSetHoveredSegment(int lineIndex, int segmentIndex)
+        {
+            _uiHoveredSegmentLine = lineIndex;
+            _uiHoveredSegmentIndex = segmentIndex;
         }
 
         /// <summary>Toolbar-button command: toggle our tool active/inactive. Same semantics as
