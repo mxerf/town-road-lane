@@ -114,6 +114,9 @@ namespace TownRoadLane
             // intentionally not registered any more — its TRLPairLink entities get GC'd by
             // MarkingSegmentEmissionSystem on first tick after migration.
             updateSystem.UpdateAt<MarkingSegmentEmissionSystem>(SystemUpdatePhase.Modification1);
+            // Phase 6c: per-node MarkingArea → vanilla Game.Areas.Area emitter. Same Modification1
+            // phase as the line emitter (independent buffers; no ordering required between them).
+            updateSystem.UpdateAt<MarkingAreaEmissionSystem>(SystemUpdatePhase.Modification1);
 
             // Stage 5d: React panel bridge. UISystemBase wants UIUpdate phase.
             updateSystem.UpdateAt<TownRoadLaneUISystem>(SystemUpdatePhase.UIUpdate);

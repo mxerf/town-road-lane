@@ -610,9 +610,10 @@ namespace TownRoadLane
             return first.kind == c.kind && first.refIndex == c.refIndex;
         }
 
-        /// <summary>Close the polygon (3+ vertices, last-click matched first). For 6b this only
-        /// logs the contour — actual MarkingArea persistence + vanilla Area spawn happens in 6c.
-        /// </summary>
+        /// <summary>Close the polygon (3+ vertices, last-click matched first). Phase 6c: commit
+        /// the contour to the host node's <see cref="MarkingArea"/> + <see cref="MarkingAreaVertex"/>
+        /// buffers. <c>MarkingAreaEmissionSystem</c> picks it up next frame and spawns the
+        /// vanilla Area entity.</summary>
         private void AreaClose()
         {
             // Fill in the LAST→FIRST edge kind from the last placed vertex back to the start.
@@ -622,9 +623,38 @@ namespace TownRoadLane
             last.edgeToNext = ClassifyEdge(lastCand, firstCand);
             _areaPolygon[_areaPolygon.Count - 1] = last;
 
-            log.Info($"area: closed with {_areaPolygon.Count} vertices on node #{_selectedNode.Index} — TODO 6c: spawn Area entity");
-            // Stage 6c will replace the line below with an actual spawn. For now we just exit the
-            // mode and clear so the user can build another polygon.
+            // Commit to per-node buffers. Create them on demand — most nodes never get an area.
+            if (!EntityManager.HasBuffer<MarkingArea>(_selectedNode))
+                EntityManager.AddBuffer<MarkingArea>(_selectedNode);
+            if (!EntityManager.HasBuffer<MarkingAreaVertex>(_selectedNode))
+                EntityManager.AddBuffer<MarkingAreaVertex>(_selectedNode);
+
+            var areas = EntityManager.GetBuffer<MarkingArea>(_selectedNode);
+            var verts = EntityManager.GetBuffer<MarkingAreaVertex>(_selectedNode);
+            int firstVertex = verts.Length;
+            for (int i = 0; i < _areaPolygon.Count; i++)
+            {
+                var pv = _areaPolygon[i];
+                verts.Add(new MarkingAreaVertex
+                {
+                    kind = (byte)pv.kind,
+                    refIndex = pv.refIndex,
+                    edgeToNext = (byte)pv.edgeToNext,
+                });
+            }
+            areas.Add(new MarkingArea
+            {
+                styleId = 0,                // default Solid for now; 6d adds picker
+                visible = true,
+                firstVertex = firstVertex,
+                vertexCount = _areaPolygon.Count,
+            });
+
+            // Mark the node Updated so MarkingAreaEmissionSystem sees the change next frame.
+            if (!EntityManager.HasComponent<Updated>(_selectedNode))
+                EntityManager.AddComponent<Updated>(_selectedNode);
+
+            log.Info($"area: closed with {_areaPolygon.Count} vertices on node #{_selectedNode.Index} — buffer now has {areas.Length} area(s)");
             _areaPolygon.Clear();
             _areaHover = AreaCandidate.None;
             _state = State.NodeSelected;
