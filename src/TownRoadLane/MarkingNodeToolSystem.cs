@@ -126,6 +126,11 @@ namespace TownRoadLane
 
         // Phase 6b: hotkey resolver. Activated only while the tool is running.
         private ProxyAction _enterAreaAction;
+        // Phase 6d: cycle style of the next area to be closed (default U). Persistent across
+        // AreaSelecting / NodeSelected — same UX as CycleMarkingStyle for lines.
+        private ProxyAction _cycleAreaStyleAction;
+        private int _currentAreaStyle = 0;
+        public int CurrentAreaStyle => _currentAreaStyle;
 
         // Stage 5d reverse hover-bridge: when the user clicks somewhere in NodeSelected state
         // that ISN'T an endpoint dot, we hit-test against committed lines and surface the
@@ -170,8 +175,9 @@ namespace TownRoadLane
             {
                 _cycleStyleAction = Mod.Settings.GetAction(Setting.CycleMarkingStyle);
                 _enterAreaAction = Mod.Settings.GetAction(Setting.EnterAreaMode);
+                _cycleAreaStyleAction = Mod.Settings.GetAction(Setting.CycleAreaStyle);
             }
-            log.Info($"MarkingNodeToolSystem: OnCreate — toolID='{toolID}' registered with ToolSystem.tools (count={m_ToolSystem.tools.Count}), cycleStyleAction={(_cycleStyleAction != null ? "OK" : "NULL")}, enterAreaAction={(_enterAreaAction != null ? "OK" : "NULL")}");
+            log.Info($"MarkingNodeToolSystem: OnCreate — toolID='{toolID}' registered with ToolSystem.tools (count={m_ToolSystem.tools.Count}), cycleStyleAction={(_cycleStyleAction != null ? "OK" : "NULL")}, enterAreaAction={(_enterAreaAction != null ? "OK" : "NULL")}, cycleAreaStyleAction={(_cycleAreaStyleAction != null ? "OK" : "NULL")}");
         }
 
         protected override void OnStartRunning()
@@ -189,6 +195,7 @@ namespace TownRoadLane
             cancelAction.shouldBeEnabled = true;
             if (_cycleStyleAction != null) _cycleStyleAction.shouldBeEnabled = true;
             if (_enterAreaAction != null) _enterAreaAction.shouldBeEnabled = true;
+            if (_cycleAreaStyleAction != null) _cycleAreaStyleAction.shouldBeEnabled = true;
             log.Info($"MarkingNodeToolSystem: activated, actions enabled (apply={applyAction != null}, cancel={cancelAction != null}, cycleStyle={_cycleStyleAction != null})");
         }
 
@@ -197,6 +204,7 @@ namespace TownRoadLane
             log.Info($"MarkingNodeToolSystem: deactivated (state was {_state}, selectedNode #{_selectedNode.Index})");
             if (_cycleStyleAction != null) _cycleStyleAction.shouldBeEnabled = false;
             if (_enterAreaAction != null) _enterAreaAction.shouldBeEnabled = false;
+            if (_cycleAreaStyleAction != null) _cycleAreaStyleAction.shouldBeEnabled = false;
             ResetSelection();
             base.OnStopRunning();
         }
@@ -280,6 +288,14 @@ namespace TownRoadLane
             {
                 _currentStyle = NextStyle(_currentStyle);
                 log.Info($"tool: cycled style → {_currentStyle}");
+            }
+
+            // Phase 6d: cycle area style. Applies to the NEXT polygon the user closes — same
+            // pattern as line styles. Range 0..MarkingAreaEmissionSystem.kStyleCount-1.
+            if (_cycleAreaStyleAction != null && _cycleAreaStyleAction.WasPerformedThisFrame())
+            {
+                _currentAreaStyle = (_currentAreaStyle + 1) % MarkingAreaEmissionSystem.kStyleCount;
+                log.Info($"tool: cycled area style → {_currentAreaStyle}");
             }
 
             // Phase 6b: enter / leave area polygon mode (default A). NodeSelected → AreaSelecting,
@@ -644,7 +660,7 @@ namespace TownRoadLane
             }
             areas.Add(new MarkingArea
             {
-                styleId = 0,                // default Solid for now; 6d adds picker
+                styleId = _currentAreaStyle,
                 visible = true,
                 firstVertex = firstVertex,
                 vertexCount = _areaPolygon.Count,

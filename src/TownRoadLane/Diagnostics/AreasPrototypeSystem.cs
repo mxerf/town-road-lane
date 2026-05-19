@@ -21,6 +21,10 @@ namespace TownRoadLane.Diagnostics
 
         private PrefabSystem _prefabSystem;
         private bool _done;
+        // Second-stage probe: dump G87 prefabs once the world has been ticking long enough that
+        // any deferred prefab loading should have settled.
+        private int _ticksSinceFirstProbe;
+        private bool _g87Probed;
 
         protected override void OnCreate()
         {
@@ -30,14 +34,65 @@ namespace TownRoadLane.Diagnostics
 
         protected override void OnUpdate()
         {
-            if (_done) return;
-            _done = true;
+            if (!_done)
+            {
+                _done = true;
+                log.Info("[AreasPrototype] === Phase 6 prototype probes ===");
+                ProbeShader();
+                ProbeVanillaSurfacePrefabs();
+                ProbeRoadMarkingPriority();
+                log.Info("[AreasPrototype] === probes done (initial pass) ===");
+                return; // keep system alive for the second pass
+            }
 
-            log.Info("[AreasPrototype] === Phase 6 prototype probes ===");
-            ProbeShader();
-            ProbeVanillaSurfacePrefabs();
-            log.Info("[AreasPrototype] === probes done (system disables itself) ===");
+            // Wait ~10 sec at 60 fps so any deferred mod-asset loading (Skyve / EAI / G87) is done.
+            _ticksSinceFirstProbe++;
+            if (_g87Probed || _ticksSinceFirstProbe < 600) return;
+            _g87Probed = true;
+            log.Info("[AreasPrototype] === second pass: G87 + mod asset survey ===");
+            ProbeAllPrefabsByNameSubstring("G87");
+            ProbeAllPrefabsByNameSubstring("g87");
+            ProbeSurfacePrefabCountAgain();
+            log.Info("[AreasPrototype] === second pass done — disabling ===");
             Enabled = false;
+        }
+
+        private void ProbeAllPrefabsByNameSubstring(string substr)
+        {
+            // Use the broadest possible query — every entity that has a PrefabData. Then filter
+            // by the name on the corresponding managed prefab. Heavy but one-shot.
+            var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>());
+            using var ents = query.ToEntityArray(Allocator.Temp);
+            int hits = 0;
+            for (int i = 0; i < ents.Length; i++)
+            {
+                if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
+                if (!pb.name.Contains(substr)) continue;
+                hits++;
+                if (hits <= 60)  // cap log spam
+                    log.Info($"[AreasPrototype]   G87? [{i}] type={pb.GetType().Name} name={pb.name}");
+            }
+            log.Info($"[AreasPrototype] substring '{substr}': {hits} matching prefab(s) found");
+        }
+
+        private void ProbeSurfacePrefabCountAgain()
+        {
+            // First pass found only the 29 vanilla surfaces. Second pass count went to 70 → 41
+            // extra surfaces are loaded by mods (likely EAI / G87 / similar asset pipelines).
+            // Dump them all now, listing the prefab type and surface name. This is the inventory
+            // we use to build the style picker in 6d-3.
+            var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<SurfaceData>());
+            using var ents = query.ToEntityArray(Allocator.Temp);
+            log.Info($"[AreasPrototype] T5 SurfacePrefab count (second pass) = {ents.Length} — FULL LIST:");
+            for (int i = 0; i < ents.Length; i++)
+            {
+                if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
+                if (pb is not SurfacePrefab sp) continue;
+                string raInfo = sp.TryGet<RenderedArea>(out var ra) && ra != null
+                    ? $"mat={(ra.m_Material != null ? ra.m_Material.name : "null")} prio={ra.m_RendererPriority} layer={ra.m_DecalLayerMask} uvScale={ra.m_UVScale}"
+                    : "<no RenderedArea>";
+                log.Info($"[AreasPrototype]   surf[{i}] {sp.name} | {raInfo}");
+            }
         }
 
         private void ProbeShader()
@@ -58,17 +113,16 @@ namespace TownRoadLane.Diagnostics
 
         private void ProbeVanillaSurfacePrefabs()
         {
-            // Enumerate all loaded SurfacePrefabs. For each: name + which RenderedArea fields look
-            // usable (material, decal layer mask, renderer priority). This tells us which one to
-            // clone for the MVP Solid fill.
+            // Enumerate ALL loaded SurfacePrefabs (including G87 if user has them installed). For
+            // each: name + which RenderedArea fields look usable (material, decal layer mask,
+            // renderer priority). This tells us which one to clone for the Solid + Hatching styles.
             var query = GetEntityQuery(
                 ComponentType.ReadOnly<PrefabData>(),
                 ComponentType.ReadOnly<SurfaceData>());
             using var ents = query.ToEntityArray(Allocator.Temp);
             log.Info($"[AreasPrototype] T2 SurfacePrefab count = {ents.Length}");
 
-            int dumped = 0;
-            for (int i = 0; i < ents.Length && dumped < 20; i++)
+            for (int i = 0; i < ents.Length; i++)
             {
                 if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
                 if (pb is not SurfacePrefab sp) continue;
@@ -77,7 +131,26 @@ namespace TownRoadLane.Diagnostics
                     ? $"mat={(ra.m_Material != null ? ra.m_Material.name : "null")} prio={ra.m_RendererPriority} layer={ra.m_DecalLayerMask} uvScale={ra.m_UVScale}"
                     : "<no RenderedArea>";
                 log.Info($"[AreasPrototype]   [{i}] {sp.name} | {raInfo}");
-                dumped++;
+            }
+        }
+
+        private void ProbeRoadMarkingPriority()
+        {
+            // Road markings are RenderPrefab assets (mesh + material), not areas — they don't use
+            // RendererPriority. They're projected by the curved-decal shader at a fixed depth
+            // bias. So our area surfaces are sorted only against OTHER area surfaces by priority.
+            // To draw on top of road markings we'd need a different layer entirely — area decals
+            // typically render at the road surface level, road markings render slightly above.
+            //
+            // Conclusion: priority alone won't lift our areas above road markings. We need to
+            // try DecalLayerMask alternatives (Markings? Decals? — see DecalLayers enum) or
+            // accept that surfaces always sit under road decals.
+            //
+            // Just dump the DecalLayers enum values so we know what to try in 6d-2.
+            log.Info($"[AreasPrototype] T4 DecalLayers enum values:");
+            foreach (var name in System.Enum.GetNames(typeof(Game.Rendering.DecalLayers)))
+            {
+                log.Info($"[AreasPrototype]   - DecalLayers.{name}");
             }
         }
     }

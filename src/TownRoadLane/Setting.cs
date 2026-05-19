@@ -22,6 +22,7 @@ namespace TownRoadLane
     [SettingsUIKeyboardAction(ToggleMarkingTool, Usages.kDefaultUsage, Usages.kEditorUsage, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(CycleMarkingStyle, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(EnterAreaMode, Usages.kToolUsage)]
+    [SettingsUIKeyboardAction(CycleAreaStyle, Usages.kToolUsage)]
     public class Setting : ModSetting
     {
         public const string kSection = "Main";
@@ -42,6 +43,11 @@ namespace TownRoadLane
         // Phase 6b: enter polygon-area selection mode from NodeSelected. Default A. Tool-scoped
         // so the key doesn't conflict outside the marking tool.
         public const string EnterAreaMode = "EnterAreaMode";
+
+        // Phase 6d: cycle the style of the NEXT area the user closes. Mirrors CycleMarkingStyle
+        // for line drawing. Default U (close to Y but different finger so the two cycles don't
+        // get tangled during AreaSelecting).
+        public const string CycleAreaStyle = "CycleAreaStyle";
 
         public Setting(IMod mod) : base(mod) { }
 
@@ -104,6 +110,10 @@ namespace TownRoadLane
         [SettingsUISection(kSection, kKeybindGroup)]
         [SettingsUIKeyboardBinding(BindingKeyboard.A, EnterAreaMode)]
         public ProxyBinding EnterAreaModeBinding { get; set; }
+
+        [SettingsUISection(kSection, kKeybindGroup)]
+        [SettingsUIKeyboardBinding(BindingKeyboard.U, CycleAreaStyle)]
+        public ProxyBinding CycleAreaStyleBinding { get; set; }
 
         public bool IsEdgeDisabled() => !EdgeLineEnabled;
         public bool IsParkingDisabled() => !ParkingMarkingsEnabled;
@@ -256,6 +266,10 @@ namespace TownRoadLane
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EnterAreaModeBinding)), "Start area polygon (hotkey)" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.EnterAreaModeBinding)),
                     "With a node selected, starts the polygon-area mode: click anchor dots to build a filled region. Press the same key again or Esc to cancel. Default A." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.CycleAreaStyleBinding)), "Cycle area style (hotkey)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.CycleAreaStyleBinding)),
+                    "While the marking tool is active, cycles the fill style for the NEXT area you close (Solid → Junction Box → White Stripes → Yellow Stripes → Green Bike → Red Bus → back). Default U. G87 styles fall back to Solid when G87 isn't installed." },
 
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid), "White solid" },
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolidThick), "White solid (thick)" },

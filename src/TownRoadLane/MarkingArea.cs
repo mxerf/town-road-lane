@@ -84,14 +84,22 @@ namespace TownRoadLane
     }
 
     /// <summary>
-    /// Phase 6c: link from a host NetNode to the live vanilla Area entity its MarkingArea has
-    /// spawned. Parallel to <see cref="MarkingArea"/> — one entry per area, same index. Used by
-    /// MarkingAreaEmissionSystem to recognise "already spawned, don't re-spawn" and to clean up
-    /// when an entry disappears from the MarkingArea buffer.
+    /// Phase 6c+: tag attached to every vanilla Game.Areas.Area entity that
+    /// <see cref="MarkingAreaEmissionSystem"/> created. Mirrors the
+    /// <see cref="TRLSegmentLink"/> pattern: identity = (node, areaIndex), and emission diffs
+    /// "what should exist" (entries in the MarkingArea buffer on host nodes) against
+    /// "what does exist" (entities tagged with this).
+    ///
+    /// Previous design (per-host-node DynamicBuffer<TRLAreaLink> holding the spawned entity)
+    /// hit the deferred-ECB trap — the spawn-time Entity reference is a placeholder that's
+    /// invalid after Playback, so EntityManager.Exists(...) returned false next tick and we
+    /// re-spawned every frame. Switching identity to a component on the area entity itself
+    /// makes the diff lookup-based (find tagged entities, match by key), no entity-pointer
+    /// chase across ECB boundaries.
     /// </summary>
-    [InternalBufferCapacity(0)]
-    public struct TRLAreaLink : IBufferElementData
+    public struct TRLAreaLink : IComponentData
     {
-        public Entity areaEntity;
+        public Entity node;
+        public int areaIndex;
     }
 }

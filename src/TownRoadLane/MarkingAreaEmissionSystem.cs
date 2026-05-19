@@ -13,44 +13,64 @@ using GameAreas = Game.Areas;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Phase 6c: per-node MarkingArea → vanilla Game.Areas.Area emitter. Mirrors
-    /// <see cref="MarkingSegmentEmissionSystem"/> at a higher granularity (one entity per area,
-    /// not per segment) since vanilla AreaRenderSystem handles fill rendering on its own once
-    /// the entity carries the right archetype + Node buffer.
+    /// Per-node MarkingArea → vanilla Game.Areas.Area emitter. Mirrors
+    /// <see cref="MarkingSegmentEmissionSystem"/>: builds the "wanted" set of (host node,
+    /// area index) keys from MarkingArea buffers, then diffs against the set of already-spawned
+    /// area entities (tagged with <see cref="TRLAreaLink"/>). Adds whatever's missing, deletes
+    /// whatever's stale.
+    ///
+    /// Why the diff-by-tag pattern instead of "store the spawned Entity in a buffer on the host
+    /// node": ECB.CreateEntity returns a deferred placeholder Entity. The real Entity only
+    /// exists after Playback. Stashing the placeholder in a buffer means
+    /// EntityManager.Exists(...) returns false next tick → we re-spawn every frame → infinite
+    /// loop + FPS death. Tagging the spawned entity itself dodges the deferred-entity trap.
     ///
     /// Spawn template (validated by Area Bucket — see project-areas-feature memory):
-    ///
     ///   Entity area = ecb.CreateEntity(surfacePrefabAreaData.m_Archetype);
     ///   ecb.SetComponent(area, new PrefabRef(surfacePrefab));
     ///   ecb.AddComponent(area, new Owner(hostNode));        // cascades delete when node dies
     ///   ecb.AddComponent(area, new Area(AreaFlags.Complete));
+    ///   ecb.AddComponent(area, new TRLAreaLink { node, areaIndex });
     ///   var nodeBuf = ecb.AddBuffer&lt;Node&gt;(area);
     ///   foreach (float3 v in sampledPolygon) nodeBuf.Add(new Node(v, float.MinValue));
     ///
     /// Vanilla Game.Areas.GeometrySystem auto-triangulates when AreaFlags.Complete is set and
     /// Triangle buffer is empty — we don't fill it ourselves.
-    ///
-    /// MVP scope (6c):
-    ///   • Straight-chord sampling only — sub-bezier sampling for LineBezier edges deferred to 6d.
-    ///   • Single vanilla "Concrete Surface 01" prefab for all areas — style picker deferred to 6d.
     /// </summary>
     public partial class MarkingAreaEmissionSystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;
 
         private EntityQuery _nodesWithAreas;
+        private EntityQuery _ourAreas;
         private PrefabSystem _prefabSystem;
         private TerrainSystem _terrainSystem;
 
-        // Resolved lazily on first use — PrefabSystem may not have the prefab loaded when this
-        // system's OnCreate runs (vanilla prefabs are loaded during PrefabUpdate). Cached after
-        // the first successful resolve.
-        private SurfacePrefab _solidSurfacePrefab;
-        private Entity _solidSurfacePrefabEntity;
+        // Phase 6d: style → SurfacePrefab name catalogue. styleId 0 stays "Solid Concrete" so
+        // existing 6c areas keep rendering unchanged. G87 entries are best-effort — if the user
+        // doesn't have G87 installed those slots fall back to the solid concrete prefab.
+        //
+        // Inventory verified by AreasPrototypeSystem dump 2026-05-19:
+        //   - "Concrete Surface 01" : vanilla, prio=-97 layer=Terrain
+        //   - "G87 UK Road Markings Misc G87 UK Junction Box Surface" : prio=4
+        //     layer=Terrain,Roads,Buildings,Other — renders OVER road markings
+        //   - G87 stripe surfaces use layer=Roads + prio=-10 → render on roads but UNDER markings
+        //   - G87 bike/bus lane surfaces use layer=Terrain[,Roads] + prio=-5
+        private static readonly string[] kStyleSurfaceNames = new[]
+        {
+            "Concrete Surface 01",                                                                              // 0 Solid
+            "G87 UK Road Markings Misc G87 UK Junction Box Surface",                                             // 1 Junction Box (over markings)
+            "G87 Road Markings SC Misc G87 Stripes 1to1 30cm Surface",                                           // 2 White Stripes dense
+            "G87 Road Markings SC Misc G87 Stripes 2to1 60cm Surface",                                           // 3 White Stripes sparse
+            "G87 Road Markings SC Misc G87 Stripes 1to1 30cm Yellow Surface",                                    // 4 Yellow Stripes dense
+            "G87 UK Road Markings Misc G87 CS2 Green Bike Lane UM Surface",                                      // 5 Green bike
+            "G87 UK Road Markings Misc G87 CS2 Red Bus Lane UM Surface",                                         // 6 Red bus
+        };
+        public const int kStyleCount = 7;
+        public const int kStyleSolidConcrete = 0;
 
-        // Vanilla concrete surface — see AreasPrototypeSystem dump: prio=-97, uvScale=0.2, layer=Terrain.
-        // Solid grey concrete fill, the closest vanilla match to a safety-island texture.
-        private const string kSolidSurfacePrefabName = "Concrete Surface 01";
+        // Resolved lazily — G87 surfaces show up ~10 s after game load. Entity.Null = retry next tick.
+        private Entity[] _stylePrefabEntities = new Entity[kStyleCount];
 
         private int _heartbeatTicks;
 
@@ -64,143 +84,187 @@ namespace TownRoadLane
                 All = new[] { ComponentType.ReadOnly<MarkingArea>(), ComponentType.ReadOnly<Game.Net.Node>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
             });
+            _ourAreas = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<TRLAreaLink>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>() },
+            });
         }
 
         protected override void OnUpdate()
         {
             _heartbeatTicks++;
-            if (_heartbeatTicks % 240 == 1)
-                log.Info($"[area-emission] heartbeat tick={_heartbeatTicks} nodesWithAreas={_nodesWithAreas.CalculateEntityCount()} prefabResolved={(_solidSurfacePrefabEntity != Entity.Null)}");
 
-            // Lazy-resolve the surface prefab. PrefabSystem may not have it yet on the first few
-            // ticks after game load — just retry next tick.
-            if (_solidSurfacePrefabEntity == Entity.Null && !TryResolveSolidSurfacePrefab()) return;
+            TryResolveAllStyles();
+            Entity solidEntity = _stylePrefabEntities[kStyleSolidConcrete];
+            if (solidEntity == Entity.Null) return;
 
-            // Need the prefab's pre-built area archetype. AreaInitializeSystem fills this in once
-            // the prefab is registered (see decomp/Game.Prefabs/AreaInitializeSystem.cs:266).
-            if (!EntityManager.HasComponent<AreaData>(_solidSurfacePrefabEntity))
+            if (!EntityManager.HasComponent<AreaData>(solidEntity)) return;
+            var solidAreaData = EntityManager.GetComponentData<AreaData>(solidEntity);
+            if (!solidAreaData.m_Archetype.Valid) return;
+
+            // 1. Build wanted set: (node, areaIndex) for every visible area with >= 3 vertices.
+            //    Track expected styleId so we can detect style changes (respawn if the user
+            //    cycles the style of an existing area — Phase 6d will wire this up, but the
+            //    book-keeping is cheap to add now).
+            var wanted = new HashSet<(Entity, int)>();
+            var wantedStyle = new Dictionary<(Entity, int), int>();
+            using (var nodes = _nodesWithAreas.ToEntityArray(Allocator.Temp))
             {
-                if (_heartbeatTicks % 60 == 1) log.Info("[area-emission] surface prefab entity exists but AreaData not ready yet");
-                return;
-            }
-            var areaData = EntityManager.GetComponentData<AreaData>(_solidSurfacePrefabEntity);
-            if (!areaData.m_Archetype.Valid)
-            {
-                if (_heartbeatTicks % 60 == 1) log.Info("[area-emission] AreaData.m_Archetype not Valid yet");
-                return;
+                for (int n = 0; n < nodes.Length; n++)
+                {
+                    var node = nodes[n];
+                    if (!EntityManager.HasBuffer<MarkingArea>(node)) continue;
+                    var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
+                    for (int a = 0; a < areas.Length; a++)
+                    {
+                        var ad = areas[a];
+                        if (!ad.visible) continue;
+                        if (ad.vertexCount < 3) continue;
+                        var key = (node, a);
+                        wanted.Add(key);
+                        wantedStyle[key] = ad.styleId;
+                    }
+                }
             }
 
-            // `using var` would block the `ref ecb` argument below — keep manual Dispose.
             var ecb = new EntityCommandBuffer(Allocator.Temp);
-            using var nodes = _nodesWithAreas.ToEntityArray(Allocator.Temp);
 
-            int spawned = 0;
-            for (int n = 0; n < nodes.Length; n++)
+            // 2. Diff existing area entities against wanted.
+            int deleted = 0;
+            using (var existing = _ourAreas.ToEntityArray(Allocator.Temp))
             {
-                ReconcileNode(nodes[n], areaData.m_Archetype, ref ecb, ref spawned);
+                var seen = new HashSet<(Entity, int)>();
+                for (int i = 0; i < existing.Length; i++)
+                {
+                    var e = existing[i];
+                    var link = EntityManager.GetComponentData<TRLAreaLink>(e);
+                    var key = (link.node, link.areaIndex);
+                    // Stale if: not wanted, or duplicate of one we already kept, or its style
+                    // changed since spawn (style is the PrefabRef which we can read off the
+                    // entity itself).
+                    bool keep = wanted.Contains(key) && !seen.Contains(key);
+                    if (keep && wantedStyle.TryGetValue(key, out var wantStyleId))
+                    {
+                        // Compare current PrefabRef against the wanted style's prefab. Cheap: a
+                        // single component read + entity comparison.
+                        if (EntityManager.HasComponent<PrefabRef>(e))
+                        {
+                            var curPrefab = EntityManager.GetComponentData<PrefabRef>(e).m_Prefab;
+                            var wantPrefab = ResolveStylePrefabEntity(wantStyleId, solidEntity);
+                            if (curPrefab != wantPrefab) keep = false;  // style changed → respawn
+                        }
+                    }
+                    if (!keep)
+                    {
+                        ecb.AddComponent<Deleted>(e);
+                        deleted++;
+                        continue;
+                    }
+                    seen.Add(key);
+                    wanted.Remove(key);
+                }
+            }
+
+            // 3. Spawn anything left in wanted.
+            int spawned = 0;
+            if (wanted.Count > 0)
+            {
+                // Re-extract endpoints/corners per host node — but only for the nodes that
+                // actually need a spawn this tick (most ticks: zero).
+                var nodesNeedingSpawn = new Dictionary<Entity, (List<MarkingEndpoint> ep, List<MarkingCornerAnchor> co)>();
+                foreach (var (node, areaIdx) in wanted)
+                {
+                    if (nodesNeedingSpawn.ContainsKey(node)) continue;
+                    nodesNeedingSpawn[node] = (
+                        MarkingEndpointExtractor.Extract(EntityManager, node),
+                        MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node));
+                }
+
+                var terrainHeights = _terrainSystem.GetHeightData(waitForPending: false);
+                foreach (var (node, areaIdx) in wanted)
+                {
+                    var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
+                    if (areaIdx < 0 || areaIdx >= areas.Length) continue;
+                    var ad = areas[areaIdx];
+                    if (!EntityManager.HasBuffer<MarkingAreaVertex>(node)) continue;
+                    var verts = EntityManager.GetBuffer<MarkingAreaVertex>(node, isReadOnly: true);
+
+                    var (endpoints, corners) = nodesNeedingSpawn[node];
+                    var positions = new List<float3>(ad.vertexCount);
+                    bool resolved = true;
+                    for (int v = 0; v < ad.vertexCount; v++)
+                    {
+                        var vert = verts[ad.firstVertex + v];
+                        if (!TryResolvePosition(vert, endpoints, corners, out var p))
+                        {
+                            resolved = false;
+                            break;
+                        }
+                        positions.Add(p);
+                    }
+                    if (!resolved)
+                    {
+                        log.Info($"[area-emission] node #{node.Index} area #{areaIdx}: unresolved vertex (topology changed?), skipping");
+                        continue;
+                    }
+
+                    TryGetStyleForEmission(ad.styleId, solidEntity, solidAreaData.m_Archetype, out var prefabForArea, out var archetypeForArea);
+                    SpawnAreaEntity(archetypeForArea, prefabForArea, node, areaIdx, positions, ref terrainHeights, ref ecb);
+                    spawned++;
+                }
             }
 
             ecb.Playback(EntityManager);
             ecb.Dispose();
-            if (spawned > 0) log.Info($"[area-emission] spawned {spawned} area entit(ies)");
+
+            if (_heartbeatTicks % 240 == 1 || spawned > 0 || deleted > 0)
+            {
+                int resolved = 0;
+                for (int i = 0; i < kStyleCount; i++) if (_stylePrefabEntities[i] != Entity.Null) resolved++;
+                log.Info($"[area-emission] tick={_heartbeatTicks} nodesWithAreas={_nodesWithAreas.CalculateEntityCount()} stylesResolved={resolved}/{kStyleCount} spawned={spawned} deleted={deleted}");
+            }
         }
 
-        private bool TryResolveSolidSurfacePrefab()
+        private void TryResolveAllStyles()
         {
-            // Enumerate all SurfacePrefabs (cheap — there were 29 in the prototype dump) until we
-            // find the one whose name matches kSolidSurfacePrefabName. Hashed lookup via PrefabID
-            // would also work but requires the exact PrefabID type for SurfacePrefab — name match
-            // is good enough for one-shot resolve.
+            bool anyMissing = false;
+            for (int i = 0; i < kStyleCount; i++) if (_stylePrefabEntities[i] == Entity.Null) { anyMissing = true; break; }
+            if (!anyMissing) return;
+
             var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<SurfaceData>());
             using var ents = query.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < ents.Length; i++)
             {
                 if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
-                if (pb is SurfacePrefab sp && sp.name == kSolidSurfacePrefabName)
+                if (pb is not SurfacePrefab sp) continue;
+                for (int s = 0; s < kStyleCount; s++)
                 {
-                    _solidSurfacePrefab = sp;
-                    _solidSurfacePrefabEntity = ents[i];
-                    log.Info($"[area-emission] resolved SurfacePrefab '{sp.name}' entity #{ents[i].Index}");
-                    return true;
+                    if (_stylePrefabEntities[s] != Entity.Null) continue;
+                    if (sp.name == kStyleSurfaceNames[s])
+                    {
+                        _stylePrefabEntities[s] = ents[i];
+                        log.Info($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}");
+                    }
                 }
             }
-            if (_heartbeatTicks % 60 == 1)
-                log.Info($"[area-emission] SurfacePrefab '{kSolidSurfacePrefabName}' not yet loaded (have {ents.Length} surfaces)");
-            return false;
         }
 
-        private void ReconcileNode(Entity node, EntityArchetype archetype, ref EntityCommandBuffer ecb, ref int spawned)
+        private Entity ResolveStylePrefabEntity(int styleId, Entity solidFallback)
         {
-            var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
-            if (areas.Length == 0) return;
-            if (!EntityManager.HasBuffer<MarkingAreaVertex>(node)) return;
-            var verts = EntityManager.GetBuffer<MarkingAreaVertex>(node, isReadOnly: true);
+            int s = (styleId >= 0 && styleId < kStyleCount) ? styleId : kStyleSolidConcrete;
+            var e = _stylePrefabEntities[s];
+            return e != Entity.Null ? e : solidFallback;
+        }
 
-            // TRLAreaLink buffer is parallel with MarkingArea (same index = same area). Create if
-            // missing; size up to match areas.Length so the for-loop below stays simple.
-            if (!EntityManager.HasBuffer<TRLAreaLink>(node))
-                EntityManager.AddBuffer<TRLAreaLink>(node);
-            var links = EntityManager.GetBuffer<TRLAreaLink>(node);
-            while (links.Length < areas.Length) links.Add(new TRLAreaLink { areaEntity = Entity.Null });
-            // Trim if user deleted areas (Phase 6d will hook up a delete UI; defensive trim here).
-            while (links.Length > areas.Length)
+        private void TryGetStyleForEmission(int styleId, Entity solidEntity, EntityArchetype solidArchetype, out Entity prefabEntity, out EntityArchetype archetype)
+        {
+            prefabEntity = ResolveStylePrefabEntity(styleId, solidEntity);
+            archetype = solidArchetype;
+            if (EntityManager.HasComponent<AreaData>(prefabEntity))
             {
-                var stale = links[links.Length - 1].areaEntity;
-                if (stale != Entity.Null && EntityManager.Exists(stale))
-                    ecb.AddComponent<Deleted>(stale);
-                links.RemoveAt(links.Length - 1);
-            }
-
-            // Endpoints + corners change every node-edit tick — re-extract on each emission pass.
-            // This is the same call SelectNode makes; cheap enough for the area count (~10 max).
-            var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
-            var corners = MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node);
-
-            for (int a = 0; a < areas.Length; a++)
-            {
-                var areaDef = areas[a];
-                var link = links[a];
-
-                // Already spawned + entity still alive = no-op. Phase 6d will compare
-                // (visible / styleId / vertex content hash) and respawn on change; for the MVP
-                // we never edit areas in-place, so existence is enough.
-                if (link.areaEntity != Entity.Null && EntityManager.Exists(link.areaEntity))
-                {
-                    if (!areaDef.visible)
-                    {
-                        ecb.AddComponent<Deleted>(link.areaEntity);
-                        link.areaEntity = Entity.Null;
-                        links[a] = link;
-                    }
-                    continue;
-                }
-                if (!areaDef.visible) continue;
-                if (areaDef.vertexCount < 3) continue;
-
-                // Resolve vertex positions through the live endpoint / corner lists.
-                var positions = new List<float3>(areaDef.vertexCount);
-                bool resolved = true;
-                for (int v = 0; v < areaDef.vertexCount; v++)
-                {
-                    var vert = verts[areaDef.firstVertex + v];
-                    if (!TryResolvePosition(vert, endpoints, corners, out var p))
-                    {
-                        resolved = false;
-                        break;
-                    }
-                    positions.Add(p);
-                }
-                if (!resolved)
-                {
-                    log.Info($"[area-emission] node #{node.Index} area #{a}: unresolved vertex (topology changed?), skipping");
-                    continue;
-                }
-
-                Entity newArea = SpawnAreaEntity(archetype, node, positions, ref ecb);
-                link.areaEntity = newArea;
-                links[a] = link;
-                spawned++;
-                log.Info($"[area-emission] spawned area #{a} on node #{node.Index} ({positions.Count} vertices)");
+                var ad = EntityManager.GetComponentData<AreaData>(prefabEntity);
+                if (ad.m_Archetype.Valid) archetype = ad.m_Archetype;
             }
         }
 
@@ -222,16 +286,16 @@ namespace TownRoadLane
             return false;
         }
 
-        private Entity SpawnAreaEntity(EntityArchetype archetype, Entity hostNode, List<float3> positions, ref EntityCommandBuffer ecb)
+        private void SpawnAreaEntity(EntityArchetype archetype, Entity prefabEntity, Entity hostNode, int areaIndex,
+                                      List<float3> positions, ref Game.Simulation.TerrainHeightData terrainHeights,
+                                      ref EntityCommandBuffer ecb)
         {
             Entity e = ecb.CreateEntity(archetype);
-            ecb.SetComponent(e, new PrefabRef(_solidSurfacePrefabEntity));
+            ecb.SetComponent(e, new PrefabRef(prefabEntity));
             ecb.AddComponent(e, new Owner(hostNode));
             ecb.AddComponent(e, new GameAreas.Area(GameAreas.AreaFlags.Complete));
+            ecb.AddComponent(e, new TRLAreaLink { node = hostNode, areaIndex = areaIndex });
 
-            // Vanilla AreaUtils.AdjustPosition snaps Y to terrain height. Using float.MinValue as
-            // a sentinel for unknown elevation matches what GenerateAreasSystem produces.
-            var terrainHeights = _terrainSystem.GetHeightData(waitForPending: false);
             var nodeBuf = ecb.AddBuffer<GameAreas.Node>(e);
             for (int i = 0; i < positions.Count; i++)
             {
@@ -239,7 +303,6 @@ namespace TownRoadLane
                 node = GameAreas.AreaUtils.AdjustPosition(node, ref terrainHeights);
                 nodeBuf.Add(node);
             }
-            return e;
         }
     }
 }
