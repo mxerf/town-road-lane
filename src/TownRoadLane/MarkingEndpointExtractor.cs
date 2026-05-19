@@ -24,6 +24,26 @@ namespace TownRoadLane
     }
 
     /// <summary>
+    /// Phase 6a — corner anchor sitting at an intersection corner (where the kerb of one road
+    /// meets the kerb of the adjacent road around the node). Derived from outer kerbs (gap=0
+    /// and gap=N) of every ConnectedEdge by deduplicating near-coincident kerbs from neighbour
+    /// edges into a single shared anchor.
+    ///
+    /// Use case: polygon area tool needs anchors at intersection corners so users can fill
+    /// safety islands / yellow box junctions that touch the road edges. Lane endpoints don't
+    /// cover this — they sit on the carriageway, not at the kerb between two roads.
+    /// </summary>
+    public struct MarkingCornerAnchor
+    {
+        public float3 position;  // world-space position of the corner
+        // The two edges whose kerbs meet here, sorted ascending by Entity.Index. -1 (Entity.Null)
+        // for edgeB when the corner is a standalone outer kerb (e.g. a dead-end node) with no
+        // neighbour to dedupe against.
+        public Entity edgeA;
+        public Entity edgeB;
+    }
+
+    /// <summary>
     /// Reads endpoints from the edge's PREFAB COMPOSITION (NetCompositionLane buffer on the
     /// composition entity referenced by Composition.m_StartNode / m_EndNode). This is
     /// direction-agnostic — composition lanes describe the static lateral layout of the
@@ -49,6 +69,141 @@ namespace TownRoadLane
         public static List<MarkingEndpoint> Extract(EntityManager em, Entity node)
         {
             return Extract(em, node, log: false);
+        }
+
+        // Maximum world-space distance for two raw curb points of different edges to be merged
+        // into a single shared corner. Bumped to 3m to cover roads with wide shoulders /
+        // generous fillet radii — still well under the typical inter-corner distance of an X
+        // junction (lanes are 3.5m and a corner pair sits at least one road-width apart), so
+        // we won't accidentally merge two distinct corners of the same intersection.
+        private const float kCornerDedupRadiusM = 3.0f;
+
+        // Pull merged corner points toward the node centre by this fraction of (node→raw-corner)
+        // distance. EdgeGeometry curb points sit at the sharp mathematical kerb-line intersection
+        // — that's slightly outside the actual rounded fillet visible on the road. Pulling 35%
+        // toward the node lands the anchor approximately on the fillet curve for typical road
+        // widths (4-12m fillet radii produce 6-14m sharp-point distance from node centre, so
+        // 35% pull = 2-5m inward, comfortably on the fillet). Visually preferable for safety
+        // islands + pedestrian zones where the user expects the dot to sit ON the curb, not
+        // floating outside it. For yellow-box-junction "вафля" this trims the polygon a bit
+        // inside the intersection, which actually matches Russian PDD spec (вафля рисуется не
+        // вплотную к краям).
+        private const float kCornerInwardPullFraction = 0.35f;
+
+        /// <summary>
+        /// Phase 6a: returns the unique corner points around a node — one per "where the kerb of
+        /// edge A meets the kerb of edge B".
+        ///
+        /// Important: these are TRUE curb corners (boundary between road surface and footpath /
+        /// grass / building plot), NOT the edge of the outermost car-driveable lane. They live
+        /// directly on <c>EdgeGeometry.m_Start.m_Left.a</c> / <c>.m_Right.a</c> (or .d for the
+        /// end-cap), which CS2 builds to include parking lanes, sidewalks, shoulders — anything
+        /// the road prefab declares as part of its cross-section. Going through
+        /// NetCompositionLane (like <see cref="Extract"/> does) would only give car-lane kerbs,
+        /// which sit several metres inside the real curb on roads with parking or wide footpaths.
+        ///
+        /// For each ConnectedEdge we take 2 points (left-at-node + right-at-node) and then
+        /// dedupe near-coincident pairs from neighbour edges within <see cref="kCornerDedupRadiusM"/>.
+        /// A node with K connected edges yields K corners on a well-formed junction (T=3, X=4).
+        /// Dead-end nodes (1 edge) yield 2 isolated corners with edgeB=Entity.Null.
+        /// </summary>
+        public static List<MarkingCornerAnchor> ExtractCornerAnchors(EntityManager em, Entity node)
+        {
+            var corners = new List<MarkingCornerAnchor>(8);
+            if (node == Entity.Null) return corners;
+            if (!em.HasBuffer<ConnectedEdge>(node)) return corners;
+            if (!em.HasComponent<Node>(node)) return corners;
+
+            float3 nodeCentre = em.GetComponentData<Node>(node).m_Position;
+            var connected = em.GetBuffer<ConnectedEdge>(node, isReadOnly: true);
+
+            // Collect the 2 raw kerb corner points for each connected edge from EdgeGeometry.
+            var kerbList = new List<(Entity edge, float3 pos)>(connected.Length * 2);
+            for (int i = 0; i < connected.Length; i++)
+            {
+                var edgeEntity = connected[i].m_Edge;
+                if (!em.HasComponent<Edge>(edgeEntity)) continue;
+                if (!em.HasComponent<EdgeGeometry>(edgeEntity)) continue;
+
+                var edge = em.GetComponentData<Edge>(edgeEntity);
+                bool nodeIsStart = edge.m_Start == node;
+                bool nodeIsEnd   = edge.m_End == node;
+                if (!nodeIsStart && !nodeIsEnd) continue;
+
+                var geom = em.GetComponentData<EdgeGeometry>(edgeEntity);
+                // For the node-side cap take both kerbs. Bezier4x3 .a = start point, .d = end
+                // point; m_Start segment heads from .a (at the start node) into the edge, while
+                // m_End segment ends at .d (at the end node).
+                float3 leftPt, rightPt;
+                if (nodeIsStart)
+                {
+                    leftPt  = geom.m_Start.m_Left.a;
+                    rightPt = geom.m_Start.m_Right.a;
+                }
+                else
+                {
+                    leftPt  = geom.m_End.m_Left.d;
+                    rightPt = geom.m_End.m_Right.d;
+                }
+                kerbList.Add((edgeEntity, leftPt));
+                kerbList.Add((edgeEntity, rightPt));
+            }
+
+            // Greedy O(n²) pairwise merge — n is tiny (max ~8 kerbs on a 4-way junction).
+            // Each kerb either merges with one already-claimed neighbour or stands alone.
+            var consumed = new bool[kerbList.Count];
+            float r2 = kCornerDedupRadiusM * kCornerDedupRadiusM;
+            for (int i = 0; i < kerbList.Count; i++)
+            {
+                if (consumed[i]) continue;
+                var a = kerbList[i];
+                int matchIdx = -1;
+                float bestD2 = r2;
+                for (int j = i + 1; j < kerbList.Count; j++)
+                {
+                    if (consumed[j]) continue;
+                    var b = kerbList[j];
+                    if (b.edge == a.edge) continue;  // can't merge two kerbs of the same edge
+                    float d2 = math.lengthsq(a.pos - b.pos);
+                    if (d2 < bestD2) { bestD2 = d2; matchIdx = j; }
+                }
+
+                float3 rawPos;
+                Entity eA, eB;
+                if (matchIdx >= 0)
+                {
+                    var b = kerbList[matchIdx];
+                    consumed[matchIdx] = true;
+                    rawPos = (a.pos + b.pos) * 0.5f;
+                    // Sort edges by Index so identical corners hash the same regardless of edge
+                    // iteration order — useful when downstream code wants to dedupe across ticks.
+                    eA = a.edge; eB = b.edge;
+                    if (eA.Index > eB.Index) (eA, eB) = (eB, eA);
+                }
+                else
+                {
+                    // Lone kerb — keep it (dead-end / unmatched).
+                    rawPos = a.pos;
+                    eA = a.edge;
+                    eB = Entity.Null;
+                }
+
+                // Pull inward along (node → raw) by a fraction so the anchor lands on the actual
+                // rounded fillet curb rather than the sharp mathematical outer-intersection point.
+                // Y stays at the raw point's height — pulling Y toward node centre would dip below
+                // the road if node sits on a slope summit.
+                float3 inward = rawPos - nodeCentre;
+                float3 pulledPos = rawPos - inward * kCornerInwardPullFraction;
+                pulledPos.y = rawPos.y;
+                corners.Add(new MarkingCornerAnchor
+                {
+                    position = pulledPos,
+                    edgeA = eA,
+                    edgeB = eB,
+                });
+            }
+
+            return corners;
         }
 
         public static List<MarkingEndpoint> Extract(EntityManager em, Entity node, bool log)

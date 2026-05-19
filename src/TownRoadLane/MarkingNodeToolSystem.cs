@@ -50,6 +50,10 @@ namespace TownRoadLane
         private State _state;
         private Entity _selectedNode;
         private List<MarkingEndpoint> _endpoints = new List<MarkingEndpoint>();
+        // Phase 6a: corner anchors at intersection kerb meeting points. Independent from
+        // _endpoints — corners are area-tool fodder, not part of line construction. Refreshed
+        // by SelectNode alongside _endpoints.
+        private List<MarkingCornerAnchor> _cornerAnchors = new List<MarkingCornerAnchor>();
         private int _sourceIdx = -1;
         private int _hoverIdx  = -1;
         private int _lastLoggedHoverIdx = -2; // -2 = "never logged"; -1 = "no hover"
@@ -82,6 +86,7 @@ namespace TownRoadLane
         public Entity SelectedNode => _selectedNode;
         public Entity HoveredNode => _hoveredNode;
         public IReadOnlyList<MarkingEndpoint> Endpoints => _endpoints;
+        public IReadOnlyList<MarkingCornerAnchor> CornerAnchors => _cornerAnchors;
         public int SourceEndpointIndex => _sourceIdx;
         public int HoveredEndpointIndex => _hoverIdx;
         public float3 CursorWorldPos => _cursorWorldPos;
@@ -134,6 +139,7 @@ namespace TownRoadLane
             _state = State.Default;
             _selectedNode = Entity.Null;
             _endpoints.Clear();
+            _cornerAnchors.Clear();
             _sourceIdx = -1;
             _hoverIdx = -1;
             _lastLoggedHoverIdx = -2;
@@ -304,6 +310,9 @@ namespace TownRoadLane
             // Verbose extract — writes a per-edge / per-lane breakdown so we can debug missing
             // endpoints without re-deploying. Cheap (only fires on node click).
             _endpoints = MarkingEndpointExtractor.Extract(EntityManager, node, log: true);
+            // Phase 6a: corner anchors for the polygon area tool. Cheap (re-walks the same
+            // ConnectedEdges as Extract) and only runs on node click.
+            _cornerAnchors = MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node);
             _sourceIdx = -1;
             _state = State.NodeSelected;
             int existingLines = EntityManager.HasBuffer<MarkingLine>(node)
@@ -312,7 +321,7 @@ namespace TownRoadLane
             int existingSegs = EntityManager.HasBuffer<MarkingSegment>(node)
                 ? EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true).Length
                 : 0;
-            log.Info($"tool: selected node #{node.Index} — {_endpoints.Count} endpoint(s), {existingLines} line(s), {existingSegs} segment(s)");
+            log.Info($"tool: selected node #{node.Index} — {_endpoints.Count} endpoint(s), {_cornerAnchors.Count} corner(s), {existingLines} line(s), {existingSegs} segment(s)");
         }
 
         private int FindHoveredEndpoint(float3 cursor)

@@ -116,6 +116,17 @@ namespace TownRoadLane
         private const float kIntersectionMarkerWidth = 0.10f;
         private static readonly Color kColIntersection = new Color(1.00f, 0.30f, 0.30f, 0.75f);
 
+        // --- Corner anchors (Phase 6a) ---
+        // Sit at intersection corners where kerbs of neighbour edges meet. Visually distinct
+        // from lane endpoints: square-ish (diamond from rotated outline) silhouette is hard
+        // in OverlayRenderSystem, so we use a smaller white ring with a darker outline — it
+        // reads as "infrastructure point, not a line attach point". Only visible to the user
+        // for now; the polygon area tool (6b) will make them clickable.
+        private const float kCornerDotDiameter      = 0.55f;
+        private const float kCornerDotOutlineWidth  = 0.10f;
+        private static readonly Color kColCornerFill    = new Color(0.95f, 0.95f, 0.95f, 0.55f);
+        private static readonly Color kColCornerOutline = new Color(0.15f, 0.20f, 0.25f, 0.90f);
+
         // --- Node rings (overlay on the selectable / configured nodes) ---
         // Sit beneath the dot layer — slightly bigger than the actual node so they read as
         // an outer halo, not as a hit-test target competing with the dots.
@@ -333,6 +344,26 @@ namespace TownRoadLane
                     direction: new float2(0f, 1f),
                     position: ep.position,
                     diameter: diameter);
+            }
+
+            // 4. Corner anchors (Phase 6a). Currently render-only — not clickable yet. Live
+            //    underneath lane endpoints visually (smaller, lower contrast) so they don't
+            //    compete for attention while the user is building lines, but are visible enough
+            //    to confirm extraction is working.
+            var corners = _tool.CornerAnchors;
+            if (corners != null)
+            {
+                for (int i = 0; i < corners.Count; i++)
+                {
+                    buf.DrawCircle(
+                        outlineColor: kColCornerOutline,
+                        fillColor: kColCornerFill,
+                        outlineWidth: kCornerDotOutlineWidth,
+                        styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                        direction: new float2(0f, 1f),
+                        position: corners[i].position,
+                        diameter: kCornerDotDiameter);
+                }
             }
 
             _overlayRenderSystem.AddBufferWriter(our);

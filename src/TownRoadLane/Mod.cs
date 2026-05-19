@@ -43,6 +43,9 @@ namespace TownRoadLane
 
             // Read-only structural dump, useful when something changes between game patches.
             updateSystem.UpdateAt<RoadPrefabDumpSystem>(SystemUpdatePhase.PrefabUpdate);
+            // Phase 6 prototype: one-shot probes for Shader.Find + vanilla SurfacePrefab inventory.
+            // Self-disables after first run. Remove from registration once Phase 6 is wired.
+            updateSystem.UpdateAt<AreasPrototypeSystem>(SystemUpdatePhase.PrefabUpdate);
             // ParkingPairDumpSystem is kept in the tree for phase 4 endpoint-extraction debugging.
             // Re-register when needed: updateSystem.UpdateAt<ParkingPairDumpSystem>(SystemUpdatePhase.GameSimulation);
 
