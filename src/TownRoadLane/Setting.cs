@@ -21,6 +21,7 @@ namespace TownRoadLane
     [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup, kReapplyGroup, kKeybindGroup)]
     [SettingsUIKeyboardAction(ToggleMarkingTool, Usages.kDefaultUsage, Usages.kEditorUsage, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(CycleMarkingStyle, Usages.kToolUsage)]
+    [SettingsUIKeyboardAction(EnterAreaMode, Usages.kToolUsage)]
     public class Setting : ModSetting
     {
         public const string kSection = "Main";
@@ -37,6 +38,10 @@ namespace TownRoadLane
         // Single key (default Y), kept under Usages.kToolUsage so the binding only listens while
         // the tool is the active tool — won't interfere with vanilla shortcuts otherwise.
         public const string CycleMarkingStyle = "CycleMarkingStyle";
+
+        // Phase 6b: enter polygon-area selection mode from NodeSelected. Default A. Tool-scoped
+        // so the key doesn't conflict outside the marking tool.
+        public const string EnterAreaMode = "EnterAreaMode";
 
         public Setting(IMod mod) : base(mod) { }
 
@@ -95,6 +100,10 @@ namespace TownRoadLane
         [SettingsUISection(kSection, kKeybindGroup)]
         [SettingsUIKeyboardBinding(BindingKeyboard.Y, CycleMarkingStyle)]
         public ProxyBinding CycleMarkingStyleBinding { get; set; }
+
+        [SettingsUISection(kSection, kKeybindGroup)]
+        [SettingsUIKeyboardBinding(BindingKeyboard.A, EnterAreaMode)]
+        public ProxyBinding EnterAreaModeBinding { get; set; }
 
         public bool IsEdgeDisabled() => !EdgeLineEnabled;
         public bool IsParkingDisabled() => !ParkingMarkingsEnabled;
@@ -243,6 +252,10 @@ namespace TownRoadLane
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.CycleMarkingStyleBinding)), "Cycle marking style (hotkey)" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.CycleMarkingStyleBinding)),
                     "While the marking tool is active, cycles through Solid → Dashed → … The chosen style is used for the NEXT line you draw. Default Y. The colour of the endpoint dots reflects the current style." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EnterAreaModeBinding)), "Start area polygon (hotkey)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EnterAreaModeBinding)),
+                    "With a node selected, starts the polygon-area mode: click anchor dots to build a filled region. Press the same key again or Esc to cancel. Default A." },
 
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid), "White solid" },
                 { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolidThick), "White solid (thick)" },

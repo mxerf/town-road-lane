@@ -127,6 +127,34 @@ namespace TownRoadLane
         private static readonly Color kColCornerFill    = new Color(0.95f, 0.95f, 0.95f, 0.55f);
         private static readonly Color kColCornerOutline = new Color(0.15f, 0.20f, 0.25f, 0.90f);
 
+        // --- Area-tool visuals (Phase 6b) ---
+        // Distinct palette from the line tool. IMT convention:
+        //   • available candidate dots = warm yellow (was IMT's red, but red here would clash
+        //     with our hidden-segment ghost). Yellow = "you can click this."
+        //   • placed contour edges    = solid white (the polygon-so-far, like a chalk outline)
+        //   • live preview edge       = thin white from last placed vertex to cursor
+        //   • preview-to-close (cursor over start vertex with ≥3 placed) = bright green
+        //   • start-vertex highlight  = bright outline ring, slightly larger
+        private const float kAreaCandDotDiameter      = 1.05f;
+        private const float kAreaCandDotOutlineWidth  = 0.12f;
+        private static readonly Color kColAreaCandFill         = new Color(1.00f, 0.85f, 0.20f, 0.85f);
+        private static readonly Color kColAreaCandOutline      = new Color(0.20f, 0.16f, 0.04f, 0.95f);
+        private static readonly Color kColAreaHoverFill        = new Color(1.00f, 0.95f, 0.45f, 1.00f);
+        private const float kAreaHoverDotDiameter     = 1.30f;
+        // Placed vertices: white with dark outline — stand out against the warm candidate set.
+        private const float kAreaPlacedDotDiameter    = 1.10f;
+        private static readonly Color kColAreaPlacedFill       = new Color(1.00f, 1.00f, 1.00f, 0.95f);
+        // Outline of the contour-so-far + the preview edge to cursor.
+        private const float kAreaContourWidth         = 0.16f;
+        private static readonly Color kColAreaContour          = new Color(1.00f, 1.00f, 1.00f, 0.90f);
+        private const float kAreaPreviewWidth         = 0.13f;
+        private static readonly Color kColAreaPreview          = new Color(1.00f, 1.00f, 1.00f, 0.55f);
+        // Closing-imminent preview (cursor over start vertex, ≥3 placed).
+        private static readonly Color kColAreaPreviewClose     = new Color(0.40f, 1.00f, 0.55f, 0.95f);
+        // Start-vertex closure ring — sits behind the start dot when close is possible.
+        private const float kAreaStartRingDiameter    = 1.70f;
+        private const float kAreaStartRingWidth       = 0.14f;
+
         // --- Node rings (overlay on the selectable / configured nodes) ---
         // Sit beneath the dot layer — slightly bigger than the actual node so they read as
         // an outer halo, not as a hit-test target competing with the dots.
@@ -170,6 +198,17 @@ namespace TownRoadLane
             if (_tool.ToolState == MarkingNodeToolSystem.State.Default && _tool.HoveredNode != Entity.Null)
             {
                 DrawNodeRing(buf, _tool.HoveredNode, kColNodeHoverRing, kNodeHoverDiameter, kNodeHoverOutlineWidth);
+            }
+
+            // Phase 6b: while collecting a polygon area, replace the line-tool overlay with a
+            // dedicated visualisation (candidate dots + contour). Done before the early-return
+            // on empty endpoints so an area with only corner anchors still draws.
+            if (_tool.ToolState == MarkingNodeToolSystem.State.AreaSelecting)
+            {
+                DrawAreaModeOverlay(buf);
+                _overlayRenderSystem.AddBufferWriter(our);
+                Dependency = our;
+                return;
             }
 
             var endpoints = _tool.Endpoints;
@@ -377,6 +416,134 @@ namespace TownRoadLane
         /// </summary>
         private static Bezier4x3 BuildSmoothCurve(float3 a, float2 ta, float3 b, float2 tb)
             => MarkingCurveBuilder.Build(a, ta, b, tb);
+
+        /// <summary>
+        /// Phase 6b: overlay while the user is collecting vertices for an area polygon.
+        /// Layers (back to front):
+        ///   1. Candidate dots (lane endpoints + corner anchors) — warm yellow, all clickable.
+        ///   2. Already-placed contour edges — solid white chord between consecutive vertices.
+        ///      (Curved edges of kind LineBezier are still rendered as a chord here — sampling
+        ///      to the line's Bezier happens at emission time in 6c; for the 6b preview a
+        ///      straight chord is good enough and keeps the overlay cheap.)
+        ///   3. Preview edge from the last placed vertex to the cursor (or hovered candidate).
+        ///      Bright green if closing on the start vertex is possible, white otherwise.
+        ///   4. Placed vertices — white filled dots (drawn on top of the contour so they read as
+        ///      "vertex you placed here").
+        ///   5. Start-vertex closure ring — bright halo around the first vertex once 3+ are
+        ///      placed, hinting that a click on it will close the polygon.
+        ///   6. Hovered candidate — brighter fill + larger ring on top of everything.
+        /// </summary>
+        private void DrawAreaModeOverlay(OverlayRenderSystem.Buffer buf)
+        {
+            var endpoints = _tool.Endpoints;
+            var corners = _tool.CornerAnchors;
+            var polygon = _tool.AreaPolygon;
+            var hover = _tool.AreaHover;
+            float3 cursor = _tool.CursorWorldPos;
+
+            // 1. Candidate dots — all selectable anchors. Dimmer when no contour yet (so we don't
+            //    blanket the screen with yellow on first entry); same brightness once the user
+            //    has placed at least one vertex.
+            for (int i = 0; i < endpoints.Count; i++)
+            {
+                buf.DrawCircle(
+                    outlineColor: kColAreaCandOutline,
+                    fillColor: kColAreaCandFill,
+                    outlineWidth: kAreaCandDotOutlineWidth,
+                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    direction: new float2(0f, 1f),
+                    position: endpoints[i].position,
+                    diameter: kAreaCandDotDiameter);
+            }
+            for (int i = 0; i < corners.Count; i++)
+            {
+                buf.DrawCircle(
+                    outlineColor: kColAreaCandOutline,
+                    fillColor: kColAreaCandFill,
+                    outlineWidth: kAreaCandDotOutlineWidth,
+                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    direction: new float2(0f, 1f),
+                    position: corners[i].position,
+                    diameter: kAreaCandDotDiameter);
+            }
+
+            // 2. Contour edges (placed vertices' chain).
+            for (int i = 1; i < polygon.Count; i++)
+            {
+                buf.DrawLine(kColAreaContour,
+                    new Line3.Segment(polygon[i - 1].position, polygon[i].position),
+                    kAreaContourWidth);
+            }
+
+            // 3. Preview edge from last placed vertex to cursor / hovered candidate.
+            if (polygon.Count > 0)
+            {
+                var lastPos = polygon[polygon.Count - 1].position;
+                float3 targetPos;
+                bool closingImminent = false;
+                if (hover.IsValid && _tool.TryGetAreaAnchorPos(hover, out var hovPos))
+                {
+                    targetPos = hovPos;
+                    // Closure preview: cursor is over the first vertex and we have ≥3 placed.
+                    if (polygon.Count >= 3
+                        && hover.kind == polygon[0].kind
+                        && hover.refIndex == polygon[0].refIndex)
+                    {
+                        closingImminent = true;
+                    }
+                }
+                else
+                {
+                    targetPos = cursor;
+                }
+                if (math.lengthsq(targetPos - lastPos) > 0.01f)
+                {
+                    buf.DrawLine(
+                        closingImminent ? kColAreaPreviewClose : kColAreaPreview,
+                        new Line3.Segment(lastPos, targetPos),
+                        kAreaPreviewWidth);
+                }
+            }
+
+            // 4. Placed vertices — white filled dots on top of contour.
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                buf.DrawCircle(
+                    outlineColor: kColAreaCandOutline,
+                    fillColor: kColAreaPlacedFill,
+                    outlineWidth: kAreaCandDotOutlineWidth,
+                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    direction: new float2(0f, 1f),
+                    position: polygon[i].position,
+                    diameter: kAreaPlacedDotDiameter);
+            }
+
+            // 5. Start-vertex closure ring — bright halo around the first vertex once 3+ placed.
+            if (polygon.Count >= 3)
+            {
+                buf.DrawCircle(
+                    outlineColor: kColAreaPreviewClose,
+                    fillColor: kColTransparent,
+                    outlineWidth: kAreaStartRingWidth,
+                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    direction: new float2(0f, 1f),
+                    position: polygon[0].position,
+                    diameter: kAreaStartRingDiameter);
+            }
+
+            // 6. Hover emphasis — overlay a brighter, larger dot at the hovered candidate.
+            if (hover.IsValid && _tool.TryGetAreaAnchorPos(hover, out var hp))
+            {
+                buf.DrawCircle(
+                    outlineColor: kColAreaCandOutline,
+                    fillColor: kColAreaHoverFill,
+                    outlineWidth: kAreaCandDotOutlineWidth,
+                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    direction: new float2(0f, 1f),
+                    position: hp,
+                    diameter: kAreaHoverDotDiameter);
+            }
+        }
 
         /// <summary>Draw a small "+" shape at the intersection point. Projected on terrain so it
         /// stays visible on slopes.</summary>
