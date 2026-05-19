@@ -38,6 +38,11 @@ export interface ToolStateVM {
   // auto-expands the matching accordion row.
   lastClickedLine: number;
   lastClickedTick: number;
+  // Game→UI hover (Phase B5): index of the line the cursor is currently over in the
+  // world (-1 when nothing). React mirrors this to highlight the matching panel row,
+  // making the bridge symmetric — UI hover lights up the line in the world, and
+  // world hover lights up the row in the panel.
+  hoveredLineInGame: number;
   lines: LineVM[];
 }
 
@@ -47,6 +52,7 @@ const EMPTY: ToolStateVM = {
   currentStyle: 0,
   lastClickedLine: -1,
   lastClickedTick: 0,
+  hoveredLineInGame: -1,
   lines: [],
 };
 
@@ -67,6 +73,7 @@ export const useToolState = (): ToolStateVM => {
       currentStyle: typeof raw.currentStyle === "number" ? raw.currentStyle : 0,
       lastClickedLine: typeof raw.lastClickedLine === "number" ? raw.lastClickedLine : -1,
       lastClickedTick: typeof raw.lastClickedTick === "number" ? raw.lastClickedTick : 0,
+      hoveredLineInGame: typeof raw.hoveredLineInGame === "number" ? raw.hoveredLineInGame : -1,
       lines: Array.isArray(raw.lines)
         ? raw.lines.map((l: any) => ({
             lineIndex: typeof l?.lineIndex === "number" ? l.lineIndex : -1,

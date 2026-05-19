@@ -62,12 +62,25 @@ export const Panel = styled.div`
   box-shadow: ${T.shadowMd};
 `;
 
+// Sticky chrome — header + meta stay pinned at the panel top while the line
+// list scrolls underneath. The opaque background covers rows scrolling under
+// so the title stays readable. zIndex keeps it above the scrolled content
+// (cohtml needs an explicit stacking context anchor — position:sticky alone
+// is sometimes drawn under siblings).
+export const PanelStickyChrome = styled.div`
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: ${T.colorPanelBg};
+  padding-bottom: ${T.space2};
+  margin-bottom: ${T.space2};
+  border-bottom: 1rem solid ${T.colorBorderSoft};
+`;
+
 export const PanelTitle = styled.h3`
   font-size: ${T.fontSizeLg};
   font-weight: ${T.fontWeightBold};
   margin: 0 0 ${T.space1} 0;
-  padding-bottom: ${T.space1};
-  border-bottom: 1rem solid ${T.colorBorderSoft};
 `;
 
 export const PanelMeta = styled.div`
@@ -76,7 +89,6 @@ export const PanelMeta = styled.div`
   align-items: baseline;
   color: ${T.colorTextMuted};
   font-size: ${T.fontSizeSm};
-  margin-bottom: ${T.space2};
 
   > * {
     margin-right: ${T.space1};
@@ -120,9 +132,15 @@ export const PanelList = styled.div`
 
 // ── Line accordion row ─────────────────────────────────────────────────
 
-export const LineRowOuter = styled.div<{ $expanded?: boolean }>`
-  background: ${(p) => (p.$expanded ? T.colorRowBgActive : T.colorRowBg)};
-  border: 1rem solid ${(p) => (p.$expanded ? T.colorAccentSoft : "transparent")};
+// Game-hover state ($gameHovered) lights up the row when the cursor is over
+// the line in the world — same visual weight as the panel-hover state, so the
+// bridge feels symmetric. Expanded still wins visually (a stronger accent
+// border) so it stays distinct from a casual hover.
+export const LineRowOuter = styled.div<{ $expanded?: boolean; $gameHovered?: boolean }>`
+  background: ${(p) =>
+    p.$expanded ? T.colorRowBgActive : p.$gameHovered ? T.colorRowBgHover : T.colorRowBg};
+  border: 1rem solid ${(p) =>
+    p.$expanded ? T.colorAccentSoft : p.$gameHovered ? T.colorBorderSoft : "transparent"};
   border-radius: ${T.radiusMd};
   overflow: hidden;
   margin-bottom: ${T.space1};
@@ -202,28 +220,32 @@ export const PopoverRoot = styled.div`
   position: fixed;
   transform: translate(-50%, -120%);
   display: flex;
-  padding: 3rem;
-  background: rgba(18, 22, 30, 0.92);
+  padding: 4rem;
+  background: rgba(18, 22, 30, 0.95);
   border: 1rem solid ${T.colorBorderMid};
   border-radius: ${T.radiusMd};
   pointer-events: auto;
-  box-shadow: ${T.shadowSm};
+  box-shadow: ${T.shadowMd};
   z-index: 999998;
 `;
 
-export const PopoverBtn = styled.button`
-  width: 24rem;
-  height: 24rem;
+// Bigger hit target (24 → 30rem) + clearer hover (background + border swap +
+// accent colour on the icon). The icon size in the JSX call site bumps too
+// (12 → 14rem). Padding lives on PopoverRoot, not the btn, so the buttons sit
+// flush against each other for a tighter look.
+export const PopoverBtn = styled.button<{ $active?: boolean }>`
+  width: 30rem;
+  height: 30rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  color: ${T.colorTextPrimary};
-  border: 1rem solid transparent;
+  background: ${(p) => (p.$active ? T.colorAccentDim : "transparent")};
+  color: ${(p) => (p.$active ? T.colorAccent : T.colorTextPrimary)};
+  border: 1rem solid ${(p) => (p.$active ? T.colorAccentSoft : "transparent")};
   border-radius: ${T.radiusSm};
   cursor: pointer;
   pointer-events: auto;
-  margin-right: 2rem;
+  margin-right: 3rem;
   padding: 0;
   transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
 
@@ -271,6 +293,23 @@ export const SegmentIndicator = styled.span`
 `;
 
 // ── Buttons (generic) ──────────────────────────────────────────────────
+
+// Two-button row used by the inline delete-confirm pattern (B1). Cancel + the
+// confirm button share width 50/50 with a small gap. Keeps users from losing a
+// line to a single misclick — they have to confirm in the same gesture, but no
+// modal dialog (cohtml's overlay positioning is fiddly).
+export const ConfirmRow = styled.div`
+  display: flex;
+  margin-top: ${T.space2};
+
+  > * {
+    flex: 1;
+    margin-right: ${T.space1};
+  }
+  > *:last-child {
+    margin-right: 0;
+  }
+`;
 
 export const Btn = styled.button<{ $danger?: boolean; $full?: boolean }>`
   display: inline-flex;

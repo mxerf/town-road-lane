@@ -124,6 +124,11 @@ namespace TownRoadLane
             var sb = new StringBuilder(512);
             int clickedLine = _tool?.LastClickedLine ?? -1;
             int clickedTick = _tool?.LastClickedTick ?? 0;
+            // Game→UI hover bridge (Phase B5): which line the cursor is currently
+            // hovering in the world. React mirrors this to highlight the matching
+            // line row in the panel, so the panel ↔ world correlation works both
+            // ways. -1 = nothing hovered.
+            int gameHoveredLine = _tool?.HoveredLineInGame ?? -1;
 
             sb.Append("{");
             sb.Append("\"isActive\":").Append(isActive ? "true" : "false").Append(",");
@@ -131,6 +136,7 @@ namespace TownRoadLane
             sb.Append("\"currentStyle\":").Append(currentStyle).Append(",");
             sb.Append("\"lastClickedLine\":").Append(clickedLine).Append(",");
             sb.Append("\"lastClickedTick\":").Append(clickedTick).Append(",");
+            sb.Append("\"hoveredLineInGame\":").Append(gameHoveredLine).Append(",");
             sb.Append("\"lines\":[");
 
             if (isActive && _tool.SelectedNode != Entity.Null
