@@ -10,6 +10,34 @@ import {
   LineVM,
   SegmentVM,
 } from "../hooks/useToolState";
+import { ChevronRight, Eye, EyeOff, Trash, Cycle } from "../components/icons";
+import { Dropdown, DropdownOption } from "../components/Dropdown";
+import { useT } from "../i18n";
+import type { StringKey } from "../i18n";
+import { tokens as T } from "../styles/tokens";
+import {
+  Panel,
+  PanelTitle,
+  PanelMeta,
+  PanelMetaValue,
+  PanelMetaSep,
+  PanelHint,
+  PanelList,
+  LineRowOuter,
+  LineHeader,
+  LineChevron,
+  LineTitle,
+  LineStyleTag,
+  LineSegCount,
+  LineBody,
+  StyleRow,
+  PopoverRoot,
+  PopoverBtn,
+  SegmentRow,
+  SegmentInfo,
+  SegmentIndicator,
+  Btn,
+} from "./panel.styles";
 
 // Containment boundary — a JS exception inside the panel must not propagate to
 // the game's React root and tear the whole HUD down. Caught errors are logged
@@ -23,27 +51,39 @@ class PanelErrorBoundary extends Component<{ children: ReactNode }, { error: Err
   }
   render() {
     if (this.state.error) {
-      return (
-        <div className="trl-panel" style={{ borderColor: "#f47373" }}>
-          <h3 className="trl-panel__title">Panel error</h3>
-          <div className="trl-panel__hint">{this.state.error.message}</div>
-          <button className="trl-btn" onClick={() => this.setState({ error: null })}>Retry</button>
-        </div>
-      );
+      return <PanelErrorFallback error={this.state.error} onRetry={() => this.setState({ error: null })} />;
     }
     return this.props.children;
   }
 }
 
-// Style enum values must match TownRoadLane.MarkingStyle on the C# side.
-const STYLE_NAMES: Record<number, string> = {
-  0: "Solid",
-  1: "Dashed",
-  2: "G87 Solid",
-  3: "G87 Dashed",
-  4: "Double Solid",
+const PanelErrorFallback = ({ error, onRetry }: { error: Error; onRetry: () => void }) => {
+  const t = useT();
+  return (
+    <Panel style={{ borderColor: T.colorDanger }}>
+      <PanelTitle>{t("panel.error.title")}</PanelTitle>
+      <PanelHint>{error.message}</PanelHint>
+      <Btn onClick={onRetry}>{t("panel.error.retry")}</Btn>
+    </Panel>
+  );
 };
-const STYLE_VALUES = [0, 1, 2, 3, 4];
+
+// MarkingStyle enum on the C# side — numeric values must stay in sync.
+const STYLE_VALUES = [0, 1, 2, 3, 4] as const;
+type StyleValue = typeof STYLE_VALUES[number];
+
+// Lookup table: enum value → i18n string key. Keeps style label rendering
+// alongside the enum mapping rather than scattered across components.
+const STYLE_KEYS: Record<number, StringKey> = {
+  0: "style.solid",
+  1: "style.dashed",
+  2: "style.g87Solid",
+  3: "style.g87Dashed",
+  4: "style.doubleSolid",
+};
+
+const styleLabel = (t: ReturnType<typeof useT>, style: number): string =>
+  t(STYLE_KEYS[style] ?? "style.unknown");
 
 // Exported wrapper — boundary first, then real panel. moduleRegistry mounts
 // this into GameTopRight, so the boundary protects the game UI from our bugs.
@@ -54,11 +94,11 @@ export const TownRoadLanePanel = () => (
 );
 
 // Floating in-world popover anchored at a segment's midpoint. Buttons mirror
-// the accordion controls (toggle visibility, change style) so users can edit
+// the accordion controls (toggle visibility, cycle style) so users can edit
 // without rolling open the side panel. Hidden when screen coords are negative
 // (segment behind camera / off-screen).
 const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
-  // Diagnostic kept in commit history if needed: log seg pos / vis before render.
+  const t = useT();
   if (seg.screenX < 0 || seg.screenY < 0) return null;
   // Portal into document.body — our panel mounts inside GameTopRight which
   // likely has CSS transform/will-change set up by CS2, creating a containing
@@ -66,33 +106,33 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   // A body portal gives us the true viewport-relative coordinates the
   // Camera.WorldToScreenPoint values were computed against.
   return createPortal(
-    <div
-      className="trl-popover"
+    <PopoverRoot
       style={{ left: seg.screenX, top: seg.screenY }}
       onMouseEnter={() => cmdSetHoveredLine(seg.lineIndex)}
       onMouseLeave={() => cmdSetHoveredLine(-1)}
     >
-      <button
-        className="trl-popover__btn"
-        title={seg.visible ? "Hide segment" : "Show segment"}
+      <PopoverBtn
+        title={seg.visible ? t("segment.hide.tooltip") : t("segment.show.tooltip")}
         onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
       >
-        {seg.visible ? "○" : "●"}
-      </button>
-      <button
-        className="trl-popover__btn"
-        title={`Cycle style (current: ${STYLE_NAMES[seg.style] ?? "?"})`}
-        onClick={() => cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, (seg.style + 1) % STYLE_VALUES.length)}
+        {seg.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+      </PopoverBtn>
+      <PopoverBtn
+        title={t("segment.cycleStyle.tooltip", { style: styleLabel(t, seg.style) })}
+        onClick={() =>
+          cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, (seg.style + 1) % STYLE_VALUES.length)
+        }
       >
-        S
-      </button>
-    </div>,
+        <Cycle size={12} />
+      </PopoverBtn>
+    </PopoverRoot>,
     document.body,
   );
 };
 
 const TownRoadLanePanelInner = () => {
   const state = useToolState();
+  const t = useT();
   // Index of the currently-expanded line row. -1 = all collapsed.
   // Auto-snaps to a single-line selection so a fresh node opens immediately.
   const [expandedLine, setExpandedLine] = useState<number>(-1);
@@ -105,7 +145,6 @@ const TownRoadLanePanelInner = () => {
     } else if (state.lines.length === 1) {
       setExpandedLine(0);
     } else if (expandedLine >= state.lines.length) {
-      // Line got deleted — collapse so we don't show a stale row.
       setExpandedLine(-1);
     }
   }, [state.selectedNodeIndex, state.lines.length]);
@@ -117,33 +156,32 @@ const TownRoadLanePanelInner = () => {
     if (state.lastClickedLine >= 0 && state.lastClickedLine < state.lines.length) {
       setExpandedLine(state.lastClickedLine);
     } else if (state.lastClickedTick > 0 && state.lastClickedLine === -1) {
-      // Click on empty space inside the node — collapse everything.
       setExpandedLine(-1);
     }
   }, [state.lastClickedTick]);
 
   if (!state.isActive || state.selectedNodeIndex < 0) return null;
 
-  // Popovers render for the currently-expanded line — one per segment, anchored
-  // at the world-space midpoint. Wrapped in a fragment because they live in
-  // screen-absolute coordinates, outside the panel's layout flow.
   const popoverLine =
     expandedLine >= 0 && expandedLine < state.lines.length ? state.lines[expandedLine] : null;
 
   return (
     <>
-      <div className="trl-panel">
-        <h3 className="trl-panel__title">Node #{state.selectedNodeIndex}</h3>
-        <div className="trl-panel__meta">
-          {state.lines.length} line(s){" · "}default style:{" "}
-          <b>{STYLE_NAMES[state.currentStyle] ?? "?"}</b>
-        </div>
+      <Panel>
+        <PanelTitle>{t("panel.title", { n: state.selectedNodeIndex })}</PanelTitle>
+        <PanelMeta>
+          <span>{t("panel.meta.lines", { n: state.lines.length })}</span>
+          <PanelMetaSep />
+          <span>
+            {t("panel.meta.defaultStyle")} <PanelMetaValue>{styleLabel(t, state.currentStyle)}</PanelMetaValue>
+          </span>
+        </PanelMeta>
 
         {state.lines.length === 0 && (
-          <div className="trl-panel__hint">Click two endpoint dots to draw a line.</div>
+          <PanelHint>{t("panel.hint.empty")}</PanelHint>
         )}
 
-        <div className="trl-panel__list">
+        <PanelList>
           {state.lines.map((line) => (
             <LineRow
               key={line.lineIndex}
@@ -154,8 +192,8 @@ const TownRoadLanePanelInner = () => {
               }
             />
           ))}
-        </div>
-      </div>
+        </PanelList>
+      </Panel>
       {popoverLine?.segments.map((seg) => (
         <SegmentPopover
           key={`pop-${seg.lineIndex}-${seg.segmentIndex}`}
@@ -166,9 +204,6 @@ const TownRoadLanePanelInner = () => {
   );
 };
 
-// Single accordion row. Header is always visible (clickable to expand/collapse,
-// hover triggers in-game line highlight via SetHoveredLine bridge). Body with
-// segment list + style selector + delete is shown only when expanded.
 const LineRow = ({
   line,
   isExpanded,
@@ -178,67 +213,72 @@ const LineRow = ({
   isExpanded: boolean;
   onToggleExpand: () => void;
 }) => {
+  const t = useT();
   const visibleCount = line.segments.filter((s) => s.visible).length;
   return (
-    <div
-      className={`trl-line${isExpanded ? " trl-line--expanded" : ""}`}
+    <LineRowOuter
+      $expanded={isExpanded}
       onMouseEnter={() => cmdSetHoveredLine(line.lineIndex)}
       onMouseLeave={() => cmdSetHoveredLine(-1)}
     >
-      <div className="trl-line__header" onClick={onToggleExpand}>
-        <span className={`trl-line__chevron${isExpanded ? " trl-line__chevron--open" : ""}`}>
-          ▸
-        </span>
-        <span className="trl-line__title">Line #{line.lineIndex}</span>
-        <span className="trl-line__style-tag">{STYLE_NAMES[line.style] ?? "?"}</span>
-        <span className="trl-line__seg-count">
-          {visibleCount}/{line.segments.length}
-        </span>
-      </div>
+      <LineHeader onClick={onToggleExpand}>
+        <LineChevron $open={isExpanded}>
+          <ChevronRight size={10} />
+        </LineChevron>
+        <LineTitle>{t("line.title", { n: line.lineIndex })}</LineTitle>
+        <LineStyleTag>{styleLabel(t, line.style)}</LineStyleTag>
+        <LineSegCount>
+          {t("line.segCount", { visible: visibleCount, total: line.segments.length })}
+        </LineSegCount>
+      </LineHeader>
       {isExpanded && (
-        <div className="trl-line__body">
+        <LineBody>
           <StyleSelector line={line} />
           {line.segments.map((seg) => (
-            <SegmentRow key={`${seg.lineIndex}-${seg.segmentIndex}`} seg={seg} />
+            <SegmentRowComponent key={`${seg.lineIndex}-${seg.segmentIndex}`} seg={seg} />
           ))}
-          <button
-            className="trl-btn trl-btn--danger"
-            onClick={() => cmdDeleteLine(line.lineIndex)}
-          >
-            Delete line
-          </button>
-        </div>
+          <Btn $danger $full onClick={() => cmdDeleteLine(line.lineIndex)}>
+            <Trash size={12} color={T.colorDanger} />
+            <span>{t("line.delete")}</span>
+          </Btn>
+        </LineBody>
       )}
-    </div>
+    </LineRowOuter>
   );
 };
 
-// Temporarily reverted from a native <select> to button row — cohtml's
-// embedded JS runtime appears to choke on <select>/<option> rendering with a
-// non-actionable "Cannot read properties of undefined (reading 'length')"
-// error. Buttons render fine and the panel stays alive.
-const StyleSelector = ({ line }: { line: LineVM }) => (
-  <div className="trl-line__style-row">
-    {STYLE_VALUES.map((s) => (
-      <button
-        key={s}
-        className={`trl-btn trl-btn--style${s === line.style ? " trl-btn--active" : ""}`}
-        onClick={() => s !== line.style && cmdSetLineStyle(line.lineIndex, s)}
-      >
-        {STYLE_NAMES[s]}
-      </button>
-    ))}
-  </div>
-);
+// Custom cohtml-safe Dropdown (see components/Dropdown.tsx). Options re-build
+// on each render so they pick up locale changes (cheap — 5 entries).
+const StyleSelector = ({ line }: { line: LineVM }) => {
+  const t = useT();
+  const options: DropdownOption<StyleValue>[] = STYLE_VALUES.map((s) => ({
+    value: s,
+    label: styleLabel(t, s),
+  }));
+  return (
+    <StyleRow>
+      <Dropdown
+        value={line.style as StyleValue}
+        options={options}
+        onChange={(s) => cmdSetLineStyle(line.lineIndex, s)}
+      />
+    </StyleRow>
+  );
+};
 
-const SegmentRow = ({ seg }: { seg: SegmentVM }) => (
-  <div
-    className={`trl-segment${seg.visible ? "" : " trl-segment--hidden"}`}
-    onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
-  >
-    <span className="trl-segment__info">
-      seg {seg.segmentIndex} · {seg.lengthM.toFixed(1)}m
-    </span>
-    <span className="trl-segment__indicator">{seg.visible ? "✓" : "✕"}</span>
-  </div>
-);
+const SegmentRowComponent = ({ seg }: { seg: SegmentVM }) => {
+  const t = useT();
+  return (
+    <SegmentRow
+      $hidden={!seg.visible}
+      onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
+    >
+      <SegmentInfo>
+        {t("segment.label", { n: seg.segmentIndex })} · {t("segment.length", { m: seg.lengthM.toFixed(1) })}
+      </SegmentInfo>
+      <SegmentIndicator>
+        {seg.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+      </SegmentIndicator>
+    </SegmentRow>
+  );
+};

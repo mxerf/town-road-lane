@@ -34,30 +34,37 @@ namespace TownRoadLane
         private EntityQuery _nodesWithPairsQuery;
 
         // ============================================================================
-        // Overlay design — Stage 5d polish pass.
+        // Overlay design — Phase A polish pass.
         //
-        // Goals:
-        //   1. Don't obscure the road markings the user is editing — preview curves and
-        //      committed-segment overlays use thin lines + low opacity so existing paint
-        //      stays visible underneath.
-        //   2. Endpoint dots read as "clickable target" not as "huge fluorescent blob".
-        //      Thin outline rings + filled hollow centres mimic UI affordance shapes.
-        //   3. Style-aware tinting on dots — current-style choice telegraphed through
-        //      the dot fill colour, not a separate UI element.
+        // Core principle: the user is here to see and judge the actual painted road
+        // markings. Anything we draw on top competes with that. So:
+        //
+        //   - Default-state committed lines render NOTHING over the road itself. The
+        //     endpoint dots + intersection markers already say "a line lives here";
+        //     a fat green curve on top is service info that buries the result.
+        //   - Hidden segments are the exception — without a marker the user has no
+        //     way to know a segment is hidden. We keep a thin red ghost there.
+        //   - Hover (UI panel row OR cursor over a line in the world) gets a calm
+        //     cyan accent: thin enough to peek through the paint, bright enough to
+        //     spot at a glance. No thick yellow blanket like before.
+        //   - Drag preview during line creation stays as before — that pass already
+        //     used the right "chalk guide" visual language.
         // ============================================================================
 
-        // --- Committed segment curves (drawn on top of real markings) ---
-        // Thin enough that real paint underneath remains readable; opacity moderate so
-        // visible vs hidden segments still distinguish at a glance.
-        private const float kPairCurveWidth = 0.18f;
-        private static readonly Color kColPairCurve     = new Color(0.45f, 1.00f, 0.55f, 0.65f);
+        // --- Committed segments (default state) ---
+        // Visible segments render no overlay curve at all — the road paint speaks for
+        // itself. Only hidden segments get a marker, since without it the user can't
+        // tell what's missing.
+        private const float kHiddenSegmentWidth = 0.14f;
         private static readonly Color kColHiddenSegment = new Color(1.00f, 0.35f, 0.35f, 0.30f);
 
-        // --- UI hover-bridge highlight ---
-        // Same family as kColPairCurve but cranked to full alpha + thicker so the user can
-        // spot the line being hovered in the panel without confusing it with the rest.
-        private const float kHighlightedPairCurveWidth = 0.45f;
-        private static readonly Color kColHighlightedCurve = new Color(1.00f, 0.90f, 0.25f, 0.95f);
+        // --- Hover highlight (UI panel hover OR in-game cursor over line) ---
+        // Thin cyan trace — readable as "this is the line you're focused on" without
+        // burying the real markings. Replaces the old fat-yellow highlight that
+        // doubled as the line's own visualisation.
+        private const float kHighlightedPairCurveWidth = 0.08f;
+        private static readonly Color kColHighlightedCurve = new Color(0.40f, 0.90f, 1.00f, 0.85f);
+        private static readonly Color kColHighlightedHidden = new Color(1.00f, 0.55f, 0.55f, 0.65f);
 
         // --- Drag preview (during line creation) ---
         // Very thin, mostly transparent white — like a chalk guide line. Lets the road
@@ -66,19 +73,44 @@ namespace TownRoadLane
         private static readonly Color kColPreviewCurve = new Color(1.00f, 1.00f, 1.00f, 0.55f);
 
         // --- Endpoint dots ---
-        // Smaller diameter than 5b (was 1.6m), thin outline. The fill is mostly transparent
-        // so the dot reads as a ring with a soft tint rather than a solid disc.
-        private const float kDotDiameter        = 1.10f;
-        private const float kDotOutlineWidth    = 0.10f;
-        private static readonly Color kColDotOutline      = new Color(0.08f, 0.10f, 0.14f, 0.85f);
-        private static readonly Color kColDotFillSolid    = new Color(1.00f, 0.65f, 0.20f, 0.55f);
-        private static readonly Color kColDotFillDashed   = new Color(0.45f, 0.85f, 1.00f, 0.55f);
+        // Compact (was 1.10m → now 0.75m). Per-edge tinting: every road approach
+        // gets its own colour from a small qualitative palette, so visually the
+        // user can tell at a glance which dots belong to which approach without
+        // having to trace tangent directions. Style is no longer encoded in dot
+        // colour — the StyleSelector dropdown is the source of truth for that.
+        private const float kDotDiameter        = 0.75f;
+        private const float kDotOutlineWidth    = 0.08f;
+        private static readonly Color kColDotOutline      = new Color(0.06f, 0.08f, 0.12f, 0.90f);
         // Source dot (selected as origin for the new line) — bright white, fully filled.
         private static readonly Color kColDotFillSource   = new Color(1.00f, 1.00f, 1.00f, 0.95f);
         private static readonly Color kColDotOutlineSrc   = new Color(0.10f, 0.10f, 0.10f, 1.00f);
-        // Hover-target dot (the dot the cursor is over right now) — bright, sized larger.
-        private const float kDotDiameterHover = 1.45f;
-        private const float kDotOutlineWidthHover = 0.14f;
+        // Hover-target dot (the dot the cursor is over right now) — bright, slightly bigger.
+        private const float kDotDiameterHover = 0.95f;
+        private const float kDotOutlineWidthHover = 0.11f;
+
+        // Per-edge palette. Qualitative tab10-ish set — high mutual contrast, none
+        // of them clash with the green/red/cyan overlay accents. Picked via a stable
+        // hash on edge.Index so the same edge always gets the same colour as the
+        // user pans around.
+        private static readonly Color[] kEdgePalette = new[]
+        {
+            new Color(1.00f, 0.55f, 0.20f, 0.85f), // orange
+            new Color(0.40f, 0.75f, 1.00f, 0.85f), // sky blue
+            new Color(0.55f, 0.95f, 0.55f, 0.85f), // mint green
+            new Color(1.00f, 0.40f, 0.75f, 0.85f), // pink
+            new Color(0.80f, 0.65f, 1.00f, 0.85f), // lavender
+            new Color(1.00f, 0.90f, 0.40f, 0.85f), // yellow
+            new Color(0.50f, 0.95f, 0.90f, 0.85f), // teal
+            new Color(0.95f, 0.65f, 0.50f, 0.85f), // salmon
+        };
+
+        private static Color EdgeDotColor(Entity edge)
+        {
+            // Unsigned modulo on Entity.Index — Entity.Index can be negative for some
+            // builds, so mask to positive before % palette length.
+            int idx = (edge.Index & 0x7fffffff) % kEdgePalette.Length;
+            return kEdgePalette[idx];
+        }
         // Intersection markers (the "+" shape at every Bezier crossing on the selected node).
         private const float kIntersectionMarkerSize  = 0.55f;
         private const float kIntersectionMarkerWidth = 0.10f;
@@ -141,14 +173,20 @@ namespace TownRoadLane
             int hoverIdx  = _tool.HoveredEndpointIndex;
 
             // 1. Committed lines + intersection markers (bottom layer). For each MarkingLine,
-            //    build the full Bezier then walk MarkingSegment entries and draw visible segments
-            //    in solid green, hidden segments as dashed red ghost (so the user can see what
-            //    Stage 5d will let them un-hide). Intersection markers (red crosses) sit at every
-            //    boundary that isn't 0 or 1.
-            //    Stage 5d hover-bridge: highlight the line that's either
-            //      - hovered in the React panel (UIHoveredLineIndex), or
-            //      - hovered by the cursor in the game world (HoveredLineInGame).
-            //    UI hover wins when both are set; otherwise either source highlights.
+            //    build the full Bezier then walk MarkingSegment entries and decide what to
+            //    render. The matrix is:
+            //
+            //      visible × not hovered → nothing (let the real road paint speak)
+            //      visible × hovered     → thin cyan trace (hover affordance)
+            //      hidden  × not hovered → thin red ghost (otherwise invisible state)
+            //      hidden  × hovered     → red ghost, slightly brighter
+            //
+            //    Intersection markers (red crosses) always render at internal segment
+            //    boundaries so the user can see where lines cross — this is service info
+            //    independent of hover.
+            //
+            //    Hover source: UIHoveredLineIndex (React panel hover) takes priority over
+            //    HoveredLineInGame (cursor over line in world). Either source highlights.
             int uiHoveredLine = _uiSystem?.UIHoveredLineIndex ?? -1;
             if (uiHoveredLine < 0) uiHoveredLine = _tool?.HoveredLineInGame ?? -1;
             var node = _tool.SelectedNode;
@@ -156,7 +194,6 @@ namespace TownRoadLane
             {
                 var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
                 var segs  = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
-                // Build full Bezier per line once.
                 int lineCount = lines.Length;
                 for (int l = 0; l < lineCount; l++)
                 {
@@ -166,22 +203,32 @@ namespace TownRoadLane
                     {
                         var seg = segs[s];
                         if (seg.lineIndex != l) continue;
-                        var segBez = Colossal.Mathematics.MathUtils.Cut(full, new float2(seg.tStart, seg.tEnd));
-                        Color color;
-                        float width;
+
+                        // Pick what (if anything) to draw for this segment.
+                        bool draw = false;
+                        Color color = default;
+                        float width = 0f;
                         if (isHighlighted)
                         {
-                            color = seg.visible ? kColHighlightedCurve : new Color(kColHighlightedCurve.r, kColHighlightedCurve.g, kColHighlightedCurve.b, 0.45f);
+                            draw = true;
+                            color = seg.visible ? kColHighlightedCurve : kColHighlightedHidden;
                             width = kHighlightedPairCurveWidth;
                         }
-                        else
+                        else if (!seg.visible)
                         {
-                            color = seg.visible ? kColPairCurve : kColHiddenSegment;
-                            width = kPairCurveWidth;
+                            draw = true;
+                            color = kColHiddenSegment;
+                            width = kHiddenSegmentWidth;
                         }
-                        buf.DrawCurve(color, segBez, width);
-                        // Draw a small "X" at every internal boundary. Same X is emitted twice
-                        // (once for each adjacent segment); cheap, doesn't matter visually.
+
+                        if (draw)
+                        {
+                            var segBez = Colossal.Mathematics.MathUtils.Cut(full, new float2(seg.tStart, seg.tEnd));
+                            buf.DrawCurve(color, segBez, width);
+                        }
+
+                        // Intersection markers are always drawn — they're service info that
+                        // doesn't compete with the road paint, just sits at the crossing point.
                         if (seg.tStart > 0.001f && seg.tStart < 0.999f)
                             DrawIntersectionMarker(buf, Colossal.Mathematics.MathUtils.Position(full, seg.tStart));
                         if (seg.tEnd > 0.001f && seg.tEnd < 0.999f)
@@ -211,14 +258,15 @@ namespace TownRoadLane
                 }
             }
 
-            // 3. Endpoint dots. Compact ring shape:
-            //    - normal: thin dark outline + soft style-tinted fill (orange = Solid, blue = Dashed)
+            // 3. Endpoint dots. Compact ring shape, per-edge tinting:
+            //    - normal: thin dark outline + edge-palette fill (each road approach gets
+            //              its own colour so the user can tell sibling dots apart)
             //    - source: bright white solid (anchor for the drag in SourceSelected state)
-            //    - hover:  same style colour but brighter + larger ring (cursor target affordance)
-            var styleColor = StyleDotColor(_tool.CurrentStyle);
+            //    - hover:  same edge colour but brighter + slightly larger ring
             for (int i = 0; i < endpoints.Count; i++)
             {
                 var ep = endpoints[i];
+                Color edgeColor = EdgeDotColor(ep.edge);
                 Color fill;
                 Color outline = kColDotOutline;
                 float diameter = kDotDiameter;
@@ -231,13 +279,13 @@ namespace TownRoadLane
                 }
                 else if (i == hoverIdx)
                 {
-                    fill = new Color(styleColor.r, styleColor.g, styleColor.b, 0.85f);
+                    fill = new Color(edgeColor.r, edgeColor.g, edgeColor.b, 1.00f);
                     diameter = kDotDiameterHover;
                     outlineWidth = kDotOutlineWidthHover;
                 }
                 else
                 {
-                    fill = styleColor;
+                    fill = edgeColor;
                 }
 
                 buf.DrawCircle(
@@ -261,21 +309,6 @@ namespace TownRoadLane
         /// </summary>
         private static Bezier4x3 BuildSmoothCurve(float3 a, float2 ta, float3 b, float2 tb)
             => MarkingCurveBuilder.Build(a, ta, b, tb);
-
-        /// <summary>Pick the dot fill colour for the currently-selected style. New style values
-        /// land in <c>switch</c>; unrecognised ones fall back to the solid (orange) tint so
-        /// the UI doesn't go invisible when a future-version style isn't known yet. G87
-        /// variants use the same tint as their non-G87 counterparts — the visual difference
-        /// shows up in the actual painted line, not the picker affordance.</summary>
-        private static Color StyleDotColor(MarkingStyle style) => style switch
-        {
-            MarkingStyle.Solid       => kColDotFillSolid,
-            MarkingStyle.Dashed      => kColDotFillDashed,
-            MarkingStyle.G87Solid    => kColDotFillSolid,
-            MarkingStyle.G87Dashed   => kColDotFillDashed,
-            MarkingStyle.DoubleSolid => kColDotFillSolid,
-            _                        => kColDotFillSolid,
-        };
 
         /// <summary>Draw a small "+" shape at the intersection point. Projected on terrain so it
         /// stays visible on slopes.</summary>

@@ -2,7 +2,9 @@ using System.Text;
 using Colossal.Logging;
 using Colossal.Mathematics;
 using Colossal.UI.Binding;
+using Game;
 using Game.Common;
+using Game.SceneFlow;
 using Game.Tools;
 using Game.UI;
 using Unity.Entities;
@@ -65,6 +67,14 @@ namespace TownRoadLane
             AddBinding(_stateBinding = new GetterValueBinding<string>(
                 "TownRoadLane", "GetToolState", BuildStateJson));
 
+            // i18n locale binding — React reads this to pick which dictionary
+            // (en-US, ru-RU, ...) to render strings from. We re-publish on every
+            // tick; the binding only fires when the value actually changes, so
+            // this is cheap. Falls back to en-US if the locale manager isn't
+            // initialized yet (early load / unit-test contexts).
+            AddBinding(new GetterValueBinding<string>(
+                "TownRoadLane", "GetLocale", GetActiveLocale));
+
             AddBinding(new TriggerBinding<int, int>(
                 "TownRoadLane", "ToggleSegment", OnToggleSegment));
             AddBinding(new TriggerBinding<int, int>(
@@ -86,6 +96,21 @@ namespace TownRoadLane
             base.OnUpdate();
             // Republish state every tick — cheap, the binding only fires on JSON change.
             _stateBinding?.Update();
+        }
+
+        /// <summary>Pull the current game locale id from CS2's localization manager. Returns the
+        /// BCP-47-ish code the game uses (e.g. "en-US", "ru-RU"). React resolves unsupported
+        /// locales to en-US via i18n.resolveLocale, so we don't need to translate here.</summary>
+        private static string GetActiveLocale()
+        {
+            try
+            {
+                return GameManager.instance?.localizationManager?.activeLocaleId ?? "en-US";
+            }
+            catch
+            {
+                return "en-US";
+            }
         }
 
         // --- State publishing ---
