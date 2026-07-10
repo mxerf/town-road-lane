@@ -92,6 +92,10 @@ namespace TownRoadLane
                 "TownRoadLane", "SetSegmentStyle", OnSetSegmentStyle));
             AddBinding(new TriggerBinding<int>(
                 "TownRoadLane", "DeleteLine", OnDeleteLine));
+            AddBinding(new TriggerBinding<int, int>(
+                "TownRoadLane", "SetLineCurvature", OnSetLineCurvature));
+            AddBinding(new TriggerBinding(
+                "TownRoadLane", "ToggleVanillaMarkings", OnToggleVanillaMarkings));
             AddBinding(new TriggerBinding(
                 "TownRoadLane", "ActivateTool", OnActivateTool));
             AddBinding(new TriggerBinding<int>(
@@ -141,10 +145,19 @@ namespace TownRoadLane
             // ways. -1 = nothing hovered.
             int gameHoveredLine = _tool?.HoveredLineInGame ?? -1;
 
+            // Vanilla-marking override state on the selected node — drives the panel toggle.
+            bool vanillaHidden = false;
+            if (isActive && _tool.SelectedNode != Entity.Null
+                && EntityManager.HasComponent<MarkingOverride>(_tool.SelectedNode))
+            {
+                vanillaHidden = EntityManager.GetComponentData<MarkingOverride>(_tool.SelectedNode).HideAll;
+            }
+
             sb.Append("{");
             sb.Append("\"isActive\":").Append(isActive ? "true" : "false").Append(",");
             sb.Append("\"selectedNodeIndex\":").Append(nodeIdx).Append(",");
             sb.Append("\"currentStyle\":").Append(currentStyle).Append(",");
+            sb.Append("\"vanillaHidden\":").Append(vanillaHidden ? "true" : "false").Append(",");
             sb.Append("\"lastClickedLine\":").Append(clickedLine).Append(",");
             sb.Append("\"lastClickedTick\":").Append(clickedTick).Append(",");
             sb.Append("\"hoveredLineInGame\":").Append(gameHoveredLine).Append(",");
@@ -167,8 +180,12 @@ namespace TownRoadLane
                 {
                     if (i > 0) sb.Append(",");
                     var line = lines[i];
+                    // Curvature exposed to the UI as an integer percent of the stepper range
+                    // [0, kMaxPullFactor] — 50% = the 0.4 default pull.
+                    int curvPercent = (int)math.round(math.saturate(line.curvature / MarkingCurveBuilder.kMaxPullFactor) * 100f);
                     sb.Append("{\"lineIndex\":").Append(i)
                         .Append(",\"style\":").Append(line.style)
+                        .Append(",\"curv\":").Append(curvPercent)
                         .Append(",\"segments\":[");
 
                     bool bezOk = MarkingCurveBuilder.TryBuild(endpoints, line, out var fullBez);
@@ -352,6 +369,57 @@ namespace TownRoadLane
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
             log.Info($"UI: set line#{lineIndex} style → {(MarkingStyle)style}");
+        }
+
+        /// <summary>Set the Bezier pull factor of one line from the panel stepper. Percent is
+        /// the UI-side 0..100 value mapped onto [0, kMaxPullFactor] (50% = the 0.4 default).
+        /// The topology hash includes curvature, so marking the node Updated is enough — the
+        /// next tick re-splits intersections against the new curve and the vanilla-side sublane
+        /// wipe + emission respawn redraws the decals.</summary>
+        private void OnSetLineCurvature(int lineIndex, int percent)
+        {
+            var node = _tool?.SelectedNode ?? Entity.Null;
+            if (node == Entity.Null) { log.Warn("SetLineCurvature ignored — no node selected"); return; }
+            if (!EntityManager.HasBuffer<MarkingLine>(node)) return;
+
+            var lines = EntityManager.GetBuffer<MarkingLine>(node);
+            if (lineIndex < 0 || lineIndex >= lines.Length) return;
+            var ln = lines[lineIndex];
+            ln.curvature = math.saturate(percent / 100f) * MarkingCurveBuilder.kMaxPullFactor;
+            lines[lineIndex] = ln;
+            if (!EntityManager.HasComponent<Updated>(node))
+                EntityManager.AddComponent<Updated>(node);
+            log.Info($"UI: set line#{lineIndex} curvature → {percent}% (pull={ln.curvature:0.###})");
+        }
+
+        /// <summary>Toggle the "hide vanilla markings" override on the selected node. Sets or
+        /// removes <see cref="MarkingOverride"/>{All}; CustomSecondaryLaneSystem reads it and
+        /// skips (or resumes) vanilla marking generation on the next rebuild. Works with zero
+        /// user lines drawn — this is the standalone hide switch. Note: a node with user lines
+        /// already suppresses vanilla markings implicitly; the override simply makes that state
+        /// explicit and independent of the lines.</summary>
+        private void OnToggleVanillaMarkings()
+        {
+            var node = _tool?.SelectedNode ?? Entity.Null;
+            if (node == Entity.Null) { log.Warn("ToggleVanillaMarkings ignored — no node selected"); return; }
+
+            bool hidden = EntityManager.HasComponent<MarkingOverride>(node)
+                && EntityManager.GetComponentData<MarkingOverride>(node).HideAll;
+            if (hidden)
+            {
+                EntityManager.RemoveComponent<MarkingOverride>(node);
+            }
+            else if (EntityManager.HasComponent<MarkingOverride>(node))
+            {
+                EntityManager.SetComponentData(node, new MarkingOverride { hide = MarkingCategory.All });
+            }
+            else
+            {
+                EntityManager.AddComponentData(node, new MarkingOverride { hide = MarkingCategory.All });
+            }
+            if (!EntityManager.HasComponent<Updated>(node))
+                EntityManager.AddComponent<Updated>(node);
+            log.Info($"UI: vanilla markings on node#{node.Index} → {(hidden ? "shown" : "hidden")}");
         }
 
         private void OnDeleteLine(int lineIndex)

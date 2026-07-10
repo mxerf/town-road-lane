@@ -315,6 +315,8 @@ namespace TownRoadLane
                     h = (h ^ (uint)l.sourceGapIndex) * kPrime;
                     h = (h ^ (uint)l.targetEdge.Index) * kPrime;
                     h = (h ^ (uint)l.targetGapIndex) * kPrime;
+                    // Curvature moves the cut polyline — pieces must be recomputed.
+                    h = (h ^ math.asuint(l.curvature)) * kPrime;
                 }
             }
             return (int)h;

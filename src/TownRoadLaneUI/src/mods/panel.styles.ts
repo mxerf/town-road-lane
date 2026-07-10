@@ -223,6 +223,55 @@ export const StyleRow = styled.div`
   }
 `;
 
+// ── Curvature stepper (inside expanded line, below the style dropdown) ─
+
+export const CurvRow = styled.div`
+  display: flex;
+  align-items: center;
+  margin: 0 0 ${T.space2};
+`;
+
+export const CurvLabel = styled.span`
+  flex: 1;
+  font-size: ${T.fontSizeSm};
+  color: ${T.colorTextMuted};
+`;
+
+export const CurvBtn = styled.button`
+  width: 24rem;
+  height: 24rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: ${T.colorTextPrimary};
+  border: 1rem solid ${T.colorBorderMid};
+  border-radius: ${T.radiusSm};
+  font-size: ${T.fontSizeMd};
+  cursor: pointer;
+  pointer-events: auto;
+  padding: 0;
+  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
+
+  &:hover {
+    background: ${T.colorRowBgHover};
+    border-color: ${T.colorBorderStrong};
+    color: ${T.colorAccent};
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+`;
+
+export const CurvValue = styled.span`
+  min-width: 40rem;
+  text-align: center;
+  font-size: ${T.fontSizeSm};
+  color: ${T.colorTextPrimary};
+`;
+
 // ── Segment popover (floats in world space via portal) ─────────────────
 
 export const PopoverRoot = styled.div`

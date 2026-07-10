@@ -18,12 +18,21 @@ namespace TownRoadLane
     {
         // Control-point offset = chord * kPullFactor along each endpoint's inward tangent.
         // 0.55 ≈ quarter circle; 0.4 = softer arc, matches vanilla divider feel.
+        // Default for new lines and the drag preview; existing lines carry their own
+        // per-line factor in MarkingLine.curvature (0 = straight chord).
         public const float kPullFactor = 0.4f;
 
+        // Upper bound for the per-line factor — beyond ~0.8 the curve starts looping back on
+        // itself for short chords. UI maps its 0..100% stepper onto [0, kMaxPullFactor].
+        public const float kMaxPullFactor = 0.8f;
+
         public static Bezier4x3 Build(float3 a, float2 ta, float3 b, float2 tb)
+            => Build(a, ta, b, tb, kPullFactor);
+
+        public static Bezier4x3 Build(float3 a, float2 ta, float3 b, float2 tb, float pullFactor)
         {
             float chord = math.distance(a, b);
-            float pull = chord * kPullFactor;
+            float pull = chord * math.clamp(pullFactor, 0f, kMaxPullFactor);
             // MarkingEndpoint stores tangent pointing INTO the edge (away from the intersection).
             // The curve should leave the dot the other way — into the intersection. Negate.
             float3 ta3 = new float3(-ta.x, 0f, -ta.y);
@@ -43,7 +52,7 @@ namespace TownRoadLane
             var endpoints = MarkingEndpointExtractor.Extract(em, node);
             if (!TryFind(endpoints, line.sourceEdge, line.sourceGapIndex, out var src)) return false;
             if (!TryFind(endpoints, line.targetEdge, line.targetGapIndex, out var dst)) return false;
-            bez = Build(src, dst);
+            bez = Build(src.position, src.tangent, dst.position, dst.tangent, line.curvature);
             return true;
         }
 
@@ -57,7 +66,7 @@ namespace TownRoadLane
             if (endpoints == null) return false;
             if (!TryFind(endpoints, line.sourceEdge, line.sourceGapIndex, out var src)) return false;
             if (!TryFind(endpoints, line.targetEdge, line.targetGapIndex, out var dst)) return false;
-            bez = Build(src, dst);
+            bez = Build(src.position, src.tangent, dst.position, dst.tangent, line.curvature);
             return true;
         }
 

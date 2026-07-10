@@ -25,6 +25,9 @@ export interface SegmentVM {
 export interface LineVM {
   lineIndex: number;
   style: number;          // matches the MarkingStyle enum on C# side
+  // Curvature stepper value, integer percent 0..100. 0 = straight chord, 50 = the
+  // default arc (pull factor 0.4), 100 = maximum roundness (pull factor 0.8).
+  curv: number;
   segments: SegmentVM[];
 }
 
@@ -43,6 +46,9 @@ export interface ToolStateVM {
   // making the bridge symmetric — UI hover lights up the line in the world, and
   // world hover lights up the row in the panel.
   hoveredLineInGame: number;
+  // True when the selected node carries the MarkingOverride{All} component — vanilla
+  // markings on the node are suppressed regardless of user lines.
+  vanillaHidden: boolean;
   lines: LineVM[];
 }
 
@@ -53,6 +59,7 @@ const EMPTY: ToolStateVM = {
   lastClickedLine: -1,
   lastClickedTick: 0,
   hoveredLineInGame: -1,
+  vanillaHidden: false,
   lines: [],
 };
 
@@ -74,10 +81,12 @@ export const useToolState = (): ToolStateVM => {
       lastClickedLine: typeof raw.lastClickedLine === "number" ? raw.lastClickedLine : -1,
       lastClickedTick: typeof raw.lastClickedTick === "number" ? raw.lastClickedTick : 0,
       hoveredLineInGame: typeof raw.hoveredLineInGame === "number" ? raw.hoveredLineInGame : -1,
+      vanillaHidden: Boolean(raw.vanillaHidden),
       lines: Array.isArray(raw.lines)
         ? raw.lines.map((l: any) => ({
             lineIndex: typeof l?.lineIndex === "number" ? l.lineIndex : -1,
             style: typeof l?.style === "number" ? l.style : 0,
+            curv: typeof l?.curv === "number" ? l.curv : 50,
             segments: Array.isArray(l?.segments)
               ? l.segments.map((s: any) => ({
                   lineIndex: typeof s?.lineIndex === "number" ? s.lineIndex : -1,
@@ -118,6 +127,18 @@ export const cmdSetSegmentStyle = (lineIndex: number, segmentIndex: number, styl
 
 export const cmdDeleteLine = (lineIndex: number) => {
   trigger("TownRoadLane", "DeleteLine", lineIndex);
+};
+
+// Set the line's curvature from the panel stepper. percent ∈ [0, 100]; C# maps
+// it onto the Bezier pull-factor range [0, 0.8] (50% = the 0.4 default arc).
+export const cmdSetLineCurvature = (lineIndex: number, percent: number) => {
+  trigger("TownRoadLane", "SetLineCurvature", lineIndex, percent);
+};
+
+// Toggle the standalone "hide vanilla markings" override on the selected node.
+// Works with zero lines drawn — this is the pure hide switch.
+export const cmdToggleVanillaMarkings = () => {
+  trigger("TownRoadLane", "ToggleVanillaMarkings");
 };
 
 // Toggle the marking tool active/inactive — same as Ctrl+M or the settings

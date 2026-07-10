@@ -1,4 +1,5 @@
 using System;
+using Colossal.Serialization.Entities;
 using Unity.Entities;
 
 namespace TownRoadLane
@@ -35,7 +36,7 @@ namespace TownRoadLane
     /// Phase 1's "hide all markings" button sets <c>hide = MarkingCategory.All</c>. Phase 3 onward
     /// will give the upgrade tool the ability to toggle individual bits per segment.
     /// </summary>
-    public struct MarkingOverride : IComponentData
+    public struct MarkingOverride : IComponentData, ISerializable
     {
         public MarkingCategory hide;
 
@@ -44,5 +45,20 @@ namespace TownRoadLane
 
         /// <summary>Convenience predicate: is this category currently suppressed on the entity?</summary>
         public bool Hides(MarkingCategory cat) => (hide & cat) != 0;
+
+        private const int kVersion = 1;
+
+        public void Serialize<TWriter>(TWriter writer) where TWriter : IWriter
+        {
+            writer.Write(kVersion);
+            writer.Write((uint)hide);
+        }
+
+        public void Deserialize<TReader>(TReader reader) where TReader : IReader
+        {
+            reader.Read(out int _);
+            reader.Read(out uint h);
+            hide = (MarkingCategory)h;
+        }
     }
 }

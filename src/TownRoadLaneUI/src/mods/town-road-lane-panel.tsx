@@ -8,6 +8,8 @@ import {
   cmdDeleteLine,
   cmdSetHoveredLine,
   cmdSetHoveredSegment,
+  cmdSetLineCurvature,
+  cmdToggleVanillaMarkings,
   LineVM,
   SegmentVM,
 } from "../hooks/useToolState";
@@ -34,6 +36,10 @@ import {
   LineSegCount,
   LineBody,
   StyleRow,
+  CurvRow,
+  CurvLabel,
+  CurvBtn,
+  CurvValue,
   PopoverRoot,
   PopoverBtn,
   SegmentRow,
@@ -325,6 +331,12 @@ const TownRoadLanePanelInner = () => {
               {t("panel.meta.defaultStyle")} <PanelMetaValue>{styleLabel(t, state.currentStyle)}</PanelMetaValue>
             </span>
           </PanelMeta>
+          <Tooltip content={t("vanilla.tooltip")}>
+            <Btn $full onClick={cmdToggleVanillaMarkings}>
+              {state.vanillaHidden ? <EyeOff size={12} /> : <Eye size={12} />}
+              <span>{state.vanillaHidden ? t("vanilla.show") : t("vanilla.hide")}</span>
+            </Btn>
+          </Tooltip>
         </PanelStickyChrome>
 
         {state.lines.length === 0 && (
@@ -393,6 +405,7 @@ const LineRow = ({
       </LineHeader>
       <LineBody $open={isExpanded}>
         <StyleSelector line={line} />
+        <CurvatureStepper line={line} />
         {line.segments.map((seg) => (
           <SegmentRowComponent key={`${seg.lineIndex}-${seg.segmentIndex}`} seg={seg} />
         ))}
@@ -465,6 +478,32 @@ const DeleteLineButton = ({
         <span>{t("line.delete.confirm.btn")}</span>
       </Btn>
     </ConfirmRow>
+  );
+};
+
+// Curvature stepper — 10% steps over the C#-side pull-factor range [0, 0.8].
+// 0% = straight chord, 50% = default arc (0.4), 100% = maximum roundness.
+// Stepper buttons (not a slider): cohtml's <input type=range> styling is
+// unreliable, and 11 discrete positions are plenty for this control.
+const CURV_STEP = 10;
+
+const CurvatureStepper = ({ line }: { line: LineVM }) => {
+  const t = useT();
+  const set = (v: number) =>
+    cmdSetLineCurvature(line.lineIndex, Math.max(0, Math.min(100, v)));
+  return (
+    <CurvRow>
+      <Tooltip content={t("line.curvature.tooltip")}>
+        <CurvLabel>{t("line.curvature")}</CurvLabel>
+      </Tooltip>
+      <CurvBtn disabled={line.curv <= 0} onClick={() => set(line.curv - CURV_STEP)}>
+        -
+      </CurvBtn>
+      <CurvValue>{line.curv}%</CurvValue>
+      <CurvBtn disabled={line.curv >= 100} onClick={() => set(line.curv + CURV_STEP)}>
+        +
+      </CurvBtn>
+    </CurvRow>
   );
 };
 

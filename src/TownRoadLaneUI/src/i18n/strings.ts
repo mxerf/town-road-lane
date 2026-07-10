@@ -22,6 +22,11 @@ const enUS = {
   "panel.error.title":        "Panel error",
   "panel.error.retry":        "Retry",
 
+  // Vanilla markings toggle
+  "vanilla.hide":             "Hide vanilla markings",
+  "vanilla.show":             "Show vanilla markings",
+  "vanilla.tooltip":          "Suppress the game's own markings on this intersection. Nodes with drawn lines hide them automatically; this switch works without any lines.",
+
   // Line row
   "line.title":               "Line #{n}",
   "line.segCount":            "{visible}/{total}",
@@ -29,6 +34,8 @@ const enUS = {
   "line.delete.confirm":      "Delete line #{n}? This cannot be undone.",
   "line.delete.cancel":       "Cancel",
   "line.delete.confirm.btn":  "Delete",
+  "line.curvature":           "Curvature",
+  "line.curvature.tooltip":   "Bend of the line: 0% = straight, 50% = default arc, 100% = maximum roundness",
 
   // Segment row
   "segment.label":            "seg {n}",
@@ -61,6 +68,11 @@ const ruRU: LocaleDict = {
   "panel.error.title":        "Ошибка панели",
   "panel.error.retry":        "Повторить",
 
+  // Vanilla markings toggle
+  "vanilla.hide":             "Скрыть ванильную разметку",
+  "vanilla.show":             "Показать ванильную разметку",
+  "vanilla.tooltip":          "Убирает штатную разметку игры на этом перекрёстке. Узлы с нарисованными линиями скрывают её автоматически; этот переключатель работает и без линий.",
+
   // Line row
   "line.title":               "Линия #{n}",
   "line.segCount":            "{visible}/{total}",
@@ -68,6 +80,8 @@ const ruRU: LocaleDict = {
   "line.delete.confirm":      "Удалить линию #{n}? Действие нельзя отменить.",
   "line.delete.cancel":       "Отмена",
   "line.delete.confirm.btn":  "Удалить",
+  "line.curvature":           "Кривизна",
+  "line.curvature.tooltip":   "Изгиб линии: 0% — прямая, 50% — стандартная дуга, 100% — максимальное скругление",
 
   // Segment row
   "segment.label":            "сегм. {n}",

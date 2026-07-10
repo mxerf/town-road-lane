@@ -75,6 +75,7 @@ namespace TownRoadLane
                     targetEdge = p.targetEdge,
                     targetGapIndex = p.targetGapIndex,
                     style = 0,
+                    curvature = MarkingCurveBuilder.kPullFactor,
                 });
                 segments.Add(new MarkingSegment
                 {

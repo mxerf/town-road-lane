@@ -30,7 +30,12 @@ namespace TownRoadLane
         // Kept in v3 schema so future style work doesn't need another bump.
         public int    style;
 
-        private const int kVersion = 3;
+        // v4: Bezier pull factor for this line's curve — control-point offset as a fraction of
+        // the chord (see MarkingCurveBuilder). 0 = straight chord, 0.4 = default arc,
+        // 0.55 ≈ quarter circle. User-adjustable per line via the panel stepper.
+        public float  curvature;
+
+        private const int kVersion = 4;
 
         public void Serialize<TWriter>(TWriter writer) where TWriter : IWriter
         {
@@ -40,16 +45,21 @@ namespace TownRoadLane
             writer.Write(targetEdge);
             writer.Write(targetGapIndex);
             writer.Write(style);
+            writer.Write(curvature);
         }
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
         {
-            reader.Read(out int _); // version; only v3 today
+            reader.Read(out int version);
             reader.Read(out sourceEdge);
             reader.Read(out sourceGapIndex);
             reader.Read(out targetEdge);
             reader.Read(out targetGapIndex);
             reader.Read(out style);
+            // v3 lines predate per-line curvature — take the historical constant so old saves
+            // render identically.
+            if (version >= 4) reader.Read(out curvature);
+            else curvature = MarkingCurveBuilder.kPullFactor;
         }
     }
 }

@@ -719,6 +719,7 @@ namespace TownRoadLane
                 sourceEdge = src.edge, sourceGapIndex = src.gapIndex,
                 targetEdge = dst.edge, targetGapIndex = dst.gapIndex,
                 style = (int)_currentStyle,
+                curvature = MarkingCurveBuilder.kPullFactor,
             });
             if (!EntityManager.HasComponent<Updated>(_selectedNode))
                 EntityManager.AddComponent<Updated>(_selectedNode);

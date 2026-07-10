@@ -352,6 +352,9 @@ namespace TownRoadLane
                 h = (h ^ (uint)l.sourceGapIndex) * kPrime;
                 h = (h ^ (uint)l.targetEdge.Index) * kPrime;
                 h = (h ^ (uint)l.targetGapIndex) * kPrime;
+                // Curvature changes the Bezier, which moves every intersection t — must
+                // re-split when the user adjusts it.
+                h = (h ^ math.asuint(l.curvature)) * kPrime;
             }
             return (int)h;
         }
