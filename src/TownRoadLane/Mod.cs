@@ -114,6 +114,10 @@ namespace TownRoadLane
             // intentionally not registered any more — its TRLPairLink entities get GC'd by
             // MarkingSegmentEmissionSystem on first tick after migration.
             updateSystem.UpdateAt<MarkingSegmentEmissionSystem>(SystemUpdatePhase.Modification1);
+            // Phase 6e: split areas at every line intersection. Must run AFTER MarkingTopologySystem
+            // (line buffer up-to-date) and BEFORE MarkingAreaEmissionSystem (piece buffer must be
+            // fresh when emission diffs). [UpdateAfter]/[UpdateBefore] on the class enforces this.
+            updateSystem.UpdateAt<MarkingAreaTopologySystem>(SystemUpdatePhase.Modification1);
             // Phase 6c: per-node MarkingArea → vanilla Game.Areas.Area emitter. Same Modification1
             // phase as the line emitter (independent buffers; no ordering required between them).
             updateSystem.UpdateAt<MarkingAreaEmissionSystem>(SystemUpdatePhase.Modification1);

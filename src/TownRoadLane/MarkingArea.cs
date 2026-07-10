@@ -101,5 +101,9 @@ namespace TownRoadLane
     {
         public Entity node;
         public int areaIndex;
+        // Phase 6e: index of the piece this entity renders (after the area was split by every
+        // line that crosses it). Pieces are indexed densely 0..K-1 per area in the
+        // MarkingAreaPiece buffer on the host node. = 0 when no lines cross the area.
+        public int pieceIndex;
     }
 }

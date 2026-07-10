@@ -103,25 +103,30 @@ namespace TownRoadLane
             var solidAreaData = EntityManager.GetComponentData<AreaData>(solidEntity);
             if (!solidAreaData.m_Archetype.Valid) return;
 
-            // 1. Build wanted set: (node, areaIndex) for every visible area with >= 3 vertices.
-            //    Track expected styleId so we can detect style changes (respawn if the user
-            //    cycles the style of an existing area — Phase 6d will wire this up, but the
-            //    book-keeping is cheap to add now).
-            var wanted = new HashSet<(Entity, int)>();
-            var wantedStyle = new Dictionary<(Entity, int), int>();
+            // 1. Build wanted set: (node, areaIndex, pieceIndex) for every visible piece of every
+            //    visible area. Pieces come from MarkingAreaTopologySystem; their vertex positions
+            //    are pre-computed in MarkingAreaPieceVertex so emission doesn't have to re-resolve
+            //    lane endpoints / corners per tick.
+            var wanted = new HashSet<(Entity, int, int)>();
+            var wantedStyle = new Dictionary<(Entity, int, int), int>();
             using (var nodes = _nodesWithAreas.ToEntityArray(Allocator.Temp))
             {
                 for (int n = 0; n < nodes.Length; n++)
                 {
                     var node = nodes[n];
                     if (!EntityManager.HasBuffer<MarkingArea>(node)) continue;
+                    if (!EntityManager.HasBuffer<MarkingAreaPiece>(node)) continue;
                     var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
-                    for (int a = 0; a < areas.Length; a++)
+                    var pieces = EntityManager.GetBuffer<MarkingAreaPiece>(node, isReadOnly: true);
+                    for (int p = 0; p < pieces.Length; p++)
                     {
-                        var ad = areas[a];
+                        var pd = pieces[p];
+                        if (!pd.visible) continue;
+                        if (pd.vertexCount < 3) continue;
+                        if (pd.areaIndex < 0 || pd.areaIndex >= areas.Length) continue;
+                        var ad = areas[pd.areaIndex];
                         if (!ad.visible) continue;
-                        if (ad.vertexCount < 3) continue;
-                        var key = (node, a);
+                        var key = (node, pd.areaIndex, pd.pieceIndex);
                         wanted.Add(key);
                         wantedStyle[key] = ad.styleId;
                     }
@@ -134,20 +139,15 @@ namespace TownRoadLane
             int deleted = 0;
             using (var existing = _ourAreas.ToEntityArray(Allocator.Temp))
             {
-                var seen = new HashSet<(Entity, int)>();
+                var seen = new HashSet<(Entity, int, int)>();
                 for (int i = 0; i < existing.Length; i++)
                 {
                     var e = existing[i];
                     var link = EntityManager.GetComponentData<TRLAreaLink>(e);
-                    var key = (link.node, link.areaIndex);
-                    // Stale if: not wanted, or duplicate of one we already kept, or its style
-                    // changed since spawn (style is the PrefabRef which we can read off the
-                    // entity itself).
+                    var key = (link.node, link.areaIndex, link.pieceIndex);
                     bool keep = wanted.Contains(key) && !seen.Contains(key);
                     if (keep && wantedStyle.TryGetValue(key, out var wantStyleId))
                     {
-                        // Compare current PrefabRef against the wanted style's prefab. Cheap: a
-                        // single component read + entity comparison.
                         if (EntityManager.HasComponent<PrefabRef>(e))
                         {
                             var curPrefab = EntityManager.GetComponentData<PrefabRef>(e).m_Prefab;
@@ -166,51 +166,49 @@ namespace TownRoadLane
                 }
             }
 
-            // 3. Spawn anything left in wanted.
+            // 3. Spawn anything left in wanted. Vertex positions come straight from the
+            //    pre-computed MarkingAreaPieceVertex buffer — no per-tick endpoint resolution.
             int spawned = 0;
             if (wanted.Count > 0)
             {
-                // Re-extract endpoints/corners per host node — but only for the nodes that
-                // actually need a spawn this tick (most ticks: zero).
-                var nodesNeedingSpawn = new Dictionary<Entity, (List<MarkingEndpoint> ep, List<MarkingCornerAnchor> co)>();
-                foreach (var (node, areaIdx) in wanted)
-                {
-                    if (nodesNeedingSpawn.ContainsKey(node)) continue;
-                    nodesNeedingSpawn[node] = (
-                        MarkingEndpointExtractor.Extract(EntityManager, node),
-                        MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node));
-                }
-
                 var terrainHeights = _terrainSystem.GetHeightData(waitForPending: false);
-                foreach (var (node, areaIdx) in wanted)
+                foreach (var (node, areaIdx, pieceIdx) in wanted)
                 {
+                    if (!EntityManager.HasBuffer<MarkingArea>(node)) continue;
+                    if (!EntityManager.HasBuffer<MarkingAreaPiece>(node)) continue;
+                    if (!EntityManager.HasBuffer<MarkingAreaPieceVertex>(node)) continue;
                     var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
+                    var pieces = EntityManager.GetBuffer<MarkingAreaPiece>(node, isReadOnly: true);
+                    var pieceVerts = EntityManager.GetBuffer<MarkingAreaPieceVertex>(node, isReadOnly: true);
                     if (areaIdx < 0 || areaIdx >= areas.Length) continue;
-                    var ad = areas[areaIdx];
-                    if (!EntityManager.HasBuffer<MarkingAreaVertex>(node)) continue;
-                    var verts = EntityManager.GetBuffer<MarkingAreaVertex>(node, isReadOnly: true);
 
-                    var (endpoints, corners) = nodesNeedingSpawn[node];
-                    var positions = new List<float3>(ad.vertexCount);
-                    bool resolved = true;
-                    for (int v = 0; v < ad.vertexCount; v++)
+                    // Find the piece header in the buffer (pieces are not addressed by their
+                    // own index in the buffer — pieceIndex is the per-area dense counter).
+                    MarkingAreaPiece pd = default;
+                    bool found = false;
+                    for (int i = 0; i < pieces.Length; i++)
                     {
-                        var vert = verts[ad.firstVertex + v];
-                        if (!TryResolvePosition(vert, endpoints, corners, out var p))
+                        if (pieces[i].areaIndex == areaIdx && pieces[i].pieceIndex == pieceIdx)
                         {
-                            resolved = false;
+                            pd = pieces[i];
+                            found = true;
                             break;
                         }
-                        positions.Add(p);
                     }
-                    if (!resolved)
-                    {
-                        log.Info($"[area-emission] node #{node.Index} area #{areaIdx}: unresolved vertex (topology changed?), skipping");
-                        continue;
-                    }
+                    if (!found) continue;
 
+                    var positions = new List<float3>(pd.vertexCount);
+                    for (int v = 0; v < pd.vertexCount; v++)
+                    {
+                        int idx = pd.firstVertex + v;
+                        if (idx < 0 || idx >= pieceVerts.Length) { positions.Clear(); break; }
+                        positions.Add(pieceVerts[idx].position);
+                    }
+                    if (positions.Count < 3) continue;
+
+                    var ad = areas[areaIdx];
                     TryGetStyleForEmission(ad.styleId, solidEntity, solidAreaData.m_Archetype, out var prefabForArea, out var archetypeForArea);
-                    SpawnAreaEntity(archetypeForArea, prefabForArea, node, areaIdx, positions, ref terrainHeights, ref ecb);
+                    SpawnAreaEntity(archetypeForArea, prefabForArea, node, areaIdx, pieceIdx, positions, ref terrainHeights, ref ecb);
                     spawned++;
                 }
             }
@@ -268,25 +266,7 @@ namespace TownRoadLane
             }
         }
 
-        private bool TryResolvePosition(MarkingAreaVertex v, List<MarkingEndpoint> endpoints, List<MarkingCornerAnchor> corners, out float3 pos)
-        {
-            pos = float3.zero;
-            if (v.kind == 0)  // LaneEndpoint
-            {
-                if (v.refIndex < 0 || v.refIndex >= endpoints.Count) return false;
-                pos = endpoints[v.refIndex].position;
-                return true;
-            }
-            else if (v.kind == 1)  // NodeCorner
-            {
-                if (v.refIndex < 0 || v.refIndex >= corners.Count) return false;
-                pos = corners[v.refIndex].position;
-                return true;
-            }
-            return false;
-        }
-
-        private void SpawnAreaEntity(EntityArchetype archetype, Entity prefabEntity, Entity hostNode, int areaIndex,
+        private void SpawnAreaEntity(EntityArchetype archetype, Entity prefabEntity, Entity hostNode, int areaIndex, int pieceIndex,
                                       List<float3> positions, ref Game.Simulation.TerrainHeightData terrainHeights,
                                       ref EntityCommandBuffer ecb)
         {
@@ -294,7 +274,7 @@ namespace TownRoadLane
             ecb.SetComponent(e, new PrefabRef(prefabEntity));
             ecb.AddComponent(e, new Owner(hostNode));
             ecb.AddComponent(e, new GameAreas.Area(GameAreas.AreaFlags.Complete));
-            ecb.AddComponent(e, new TRLAreaLink { node = hostNode, areaIndex = areaIndex });
+            ecb.AddComponent(e, new TRLAreaLink { node = hostNode, areaIndex = areaIndex, pieceIndex = pieceIndex });
 
             var nodeBuf = ecb.AddBuffer<GameAreas.Node>(e);
             for (int i = 0; i < positions.Count; i++)
