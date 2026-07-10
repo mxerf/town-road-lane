@@ -123,6 +123,26 @@ namespace TownRoadLane
                 }
             }
 
+            // Save/load guard: on the first tick after loading a save, Composition and
+            // EdgeGeometry are still zeroed (IEmptySerializable; refilled at Modification3/4,
+            // AFTER this Modification1 system runs). Endpoint extraction then yields nothing,
+            // every TryBuild fails, and rewriting the buffer would collapse each line to a
+            // single [0,1] segment — destroying the per-segment style/visibility the user saved.
+            // If any failed line still references a live-but-unready edge, defer the whole node:
+            // no writes, no hash update, retry next tick.
+            for (int i = 0; i < lineCount; i++)
+            {
+                if (bezierValid[i]) continue;
+                if (MarkingEndpointExtractor.IsEdgeAliveButUnready(EntityManager, linesSnapshot[i].sourceEdge)
+                    || MarkingEndpointExtractor.IsEdgeAliveButUnready(EntityManager, linesSnapshot[i].targetEdge))
+                {
+                    linesSnapshot.Dispose();
+                    beziers.Dispose();
+                    bezierValid.Dispose();
+                    return false;
+                }
+            }
+
             // Boundaries[i] = sorted unique t-values on line i where it splits.
             var boundaries = new List<List<float>>(lineCount);
             for (int i = 0; i < lineCount; i++)
@@ -180,6 +200,16 @@ namespace TownRoadLane
             var newSegments = new List<MarkingSegment>(lineCount * 2);
             for (int i = 0; i < lineCount; i++)
             {
+                // Line permanently unresolvable (edge demolished, or gapIndex gone after a road
+                // upgrade changed the lane layout). Its curve can't be built so nothing renders,
+                // but carry its old segments over verbatim instead of collapsing them — if the
+                // situation is somehow restored later, the user's per-segment edits are intact.
+                if (!bezierValid[i])
+                {
+                    var carried = oldSegmentsByLine[i];
+                    for (int c = 0; c < carried.Count; c++) newSegments.Add(carried[c]);
+                    continue;
+                }
                 var bs = boundaries[i];
                 var oldSegs = oldSegmentsByLine[i];
                 int lineDefaultStyle = linesSnapshot[i].style;

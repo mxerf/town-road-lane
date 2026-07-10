@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Colossal.Mathematics;
+using Game.Common;
 using Game.Net;
 using Game.Prefabs;
 using Unity.Entities;
@@ -9,11 +10,14 @@ namespace TownRoadLane
 {
     /// <summary>
     /// One attach point sitting BETWEEN two adjacent carriageway lanes (or on an outer kerb)
-    /// at a road edge's node end. For an edge with N car-driveable lanes at the node, the
-    /// extractor produces N+1 endpoints — one per lane-to-lane stitch + two outer kerbs.
+    /// at a road edge's node end. For an edge with N touching car-driveable lanes at the node,
+    /// the extractor produces N+1 endpoints — one per lane-to-lane stitch + two outer kerbs.
+    /// Lanes separated by a median (divider wider than kCarriagewayGapM) contribute two
+    /// endpoints at that boundary instead of one — one per carriageway edge.
     ///
-    /// Composition: gapIndex 0 = outer-left kerb, gapIndex N = outer-right kerb, gapIndex i
-    /// in between = stitch between lateral-position-sorted lanes (i-1) and (i).
+    /// gapIndex is a left-to-right running counter over the emitted endpoints (0 = outer-left
+    /// kerb, max = outer-right kerb). It is an opaque identity — stable for a given composition,
+    /// but renumbered if the road's lane layout changes.
     /// </summary>
     public struct MarkingEndpoint
     {
@@ -69,6 +73,52 @@ namespace TownRoadLane
         public static List<MarkingEndpoint> Extract(EntityManager em, Entity node)
         {
             return Extract(em, node, log: false);
+        }
+
+        // Two adjacent Road lanes whose inner edges sit further apart than this are treated as
+        // separate carriageways (median strip / raised divider / pure-tram reservation between
+        // them). Instead of one stitch endpoint at the middle of the divider we emit two — one
+        // on each carriageway's inner edge, where the physical marking actually belongs.
+        // Touching lanes have gap ≈ 0; the narrowest vanilla medians are well above 1m.
+        private const float kCarriagewayGapM = 0.75f;
+
+        /// <summary>
+        /// True when the edge's derived net state is filled in and endpoint extraction would see
+        /// real data. False right after loading a save: <c>Composition</c> and
+        /// <c>EdgeGeometry</c> are <c>IEmptySerializable</c> — they deserialize zeroed and are
+        /// only refilled by CompositionSelectSystem (Modification3) / GeometrySystem
+        /// (Modification4), i.e. AFTER our Modification1 systems have already run once.
+        ///
+        /// Any system that rewrites persistent buffers from extracted endpoints MUST defer while
+        /// a referenced edge is alive but not ready, or it destroys user data by recomputing
+        /// from a zero-endpoint state (the save/load style-loss bug).
+        /// </summary>
+        public static bool IsEdgeExtractionReady(EntityManager em, Entity edge)
+        {
+            if (edge == Entity.Null || !em.Exists(edge)) return false;
+            if (em.HasComponent<Deleted>(edge)) return false;
+            if (!em.HasComponent<Edge>(edge)) return false;
+            if (!em.HasComponent<Composition>(edge)) return false;
+            var comp = em.GetComponentData<Composition>(edge);
+            if (comp.m_Edge == Entity.Null || !em.HasBuffer<NetCompositionLane>(comp.m_Edge)) return false;
+            if (!em.HasComponent<EdgeGeometry>(edge)) return false;
+            // Zeroed EdgeGeometry (pre-Modification4 on the load tick) has both caps collapsed
+            // to the origin — left and right kerb coincide. Real roads always have width > 0.
+            var geom = em.GetComponentData<EdgeGeometry>(edge);
+            if (math.lengthsq(geom.m_Start.m_Right.a - geom.m_Start.m_Left.a) < 1e-6f
+                && math.lengthsq(geom.m_End.m_Right.d - geom.m_End.m_Left.d) < 1e-6f) return false;
+            return true;
+        }
+
+        /// <summary>True when the edge still exists as a road (not demolished) but
+        /// <see cref="IsEdgeExtractionReady"/> is false — the transient window during save
+        /// loading. Callers should retry next tick instead of recomputing.</summary>
+        public static bool IsEdgeAliveButUnready(EntityManager em, Entity edge)
+        {
+            if (edge == Entity.Null || !em.Exists(edge)) return false;
+            if (em.HasComponent<Deleted>(edge)) return false;
+            if (!em.HasComponent<Edge>(edge)) return false;
+            return !IsEdgeExtractionReady(em, edge);
         }
 
         // Maximum world-space distance for two raw curb points of different edges to be merged
@@ -320,19 +370,33 @@ namespace TownRoadLane
 
             // gap 0: left kerb. Lateral at first-lane's left edge = first.x - first.hw.
             float xLeftKerb = sorted[0].x - sorted[0].hw;
-            outList.Add(MakeEndpoint(edgeEntity, 0, xLeftKerb, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+            int gap = 0;
+            outList.Add(MakeEndpoint(edgeEntity, gap++, xLeftKerb, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
 
-            // Inner stitches.
+            // Inner stitches. Touching lanes share one stitch at their common edge; lanes
+            // separated by a median (divider strip, tram reservation — anything wider than
+            // kCarriagewayGapM) get one endpoint per carriageway edge instead, so the user
+            // draws from the edge of the actual lane rather than the middle of the divider.
             for (int i = 1; i < sorted.Count; i++)
             {
-                float xMid = (sorted[i - 1].x + sorted[i].x) * 0.5f;
-                outList.Add(MakeEndpoint(edgeEntity, i, xMid, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+                float prevRightEdge = sorted[i - 1].x + sorted[i - 1].hw;
+                float nextLeftEdge  = sorted[i].x - sorted[i].hw;
+                if (nextLeftEdge - prevRightEdge > kCarriagewayGapM)
+                {
+                    outList.Add(MakeEndpoint(edgeEntity, gap++, prevRightEdge, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+                    outList.Add(MakeEndpoint(edgeEntity, gap++, nextLeftEdge, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+                }
+                else
+                {
+                    float xMid = (sorted[i - 1].x + sorted[i].x) * 0.5f;
+                    outList.Add(MakeEndpoint(edgeEntity, gap++, xMid, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+                }
             }
 
-            // gap N: right kerb.
+            // Last gap: right kerb.
             int last = sorted.Count - 1;
             float xRightKerb = sorted[last].x + sorted[last].hw;
-            outList.Add(MakeEndpoint(edgeEntity, sorted.Count, xRightKerb, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+            outList.Add(MakeEndpoint(edgeEntity, gap, xRightKerb, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
         }
 
         /// <summary>Lerp from the left-cap point to the right-cap point at lateral-fraction t,
