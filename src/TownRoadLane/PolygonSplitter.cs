@@ -36,6 +36,11 @@ namespace TownRoadLane
         private const float kDuplicateHitDistSq = 1e-4f * 1e-4f;
         // Minimum area (world units²) of a result ring; smaller is discarded as a sliver.
         private const float kMinRingArea = 0.01f;
+        // Hard cap on recursion depth. Every legitimate recursion level strictly shrinks the
+        // ring area (see the real-split guard below), so genuine splits never get near this;
+        // it's a backstop against any degenerate geometry we haven't foreseen — better an
+        // unsplit area than a stack overflow (mono dies with an unrecoverable native crash).
+        private const int kMaxSplitDepth = 16;
 
         /// <summary>One intersection between a polygon edge and a cut segment.</summary>
         private struct Hit
@@ -54,9 +59,13 @@ namespace TownRoadLane
         /// unchanged.
         /// </summary>
         public static List<List<float3>> SplitByPolyline(List<float3> polygon, List<float3> cut)
+            => SplitByPolyline(polygon, cut, 0);
+
+        private static List<List<float3>> SplitByPolyline(List<float3> polygon, List<float3> cut, int depth)
         {
             var result = new List<List<float3>>();
-            if (polygon == null || polygon.Count < 3 || cut == null || cut.Count < 2)
+            if (polygon == null || polygon.Count < 3 || cut == null || cut.Count < 2
+                || depth >= kMaxSplitDepth)
             {
                 result.Add(polygon ?? new List<float3>());
                 return result;
@@ -110,29 +119,37 @@ namespace TownRoadLane
                 return result;
             }
 
-            // 4. Take the first pair (h0=entry, h1=exit). Build the two sub-polygons by walking
-            //    the polygon boundary in each direction + the cut between h0 and h1.
-            var left = BuildRing(polygon, cut, hits[0], hits[1], walkForward: true);
-            var right = BuildRing(polygon, cut, hits[0], hits[1], walkForward: false);
+            // 4. Find a hit pair that produces a REAL split: both rings must be smaller than
+            //    the input polygon by more than the sliver threshold. A cut that merely grazes
+            //    the boundary — the typical case being a cut line that IS one of the polygon's
+            //    own edges (area closed over the endpoints of the very lines that cut it) —
+            //    yields one ring ≈ the whole polygon plus a sliver. Recursing on that ring
+            //    would re-find the same hits forever: unbounded recursion, stack overflow,
+            //    and mono dies with a native crash. Skip such pairs; if no pair is productive,
+            //    return the polygon unsplit.
+            float polyArea = math.abs(SignedAreaXZ(polygon));
+            for (int h = 0; h + 1 < hits.Count; h += 2)
+            {
+                var left = BuildRing(polygon, cut, hits[h], hits[h + 1], walkForward: true);
+                var right = BuildRing(polygon, cut, hits[h], hits[h + 1], walkForward: false);
+                float leftArea = left.Count >= 3 ? math.abs(SignedAreaXZ(left)) : 0f;
+                float rightArea = right.Count >= 3 ? math.abs(SignedAreaXZ(right)) : 0f;
+                bool realSplit = leftArea >= kMinRingArea && rightArea >= kMinRingArea
+                              && leftArea <= polyArea - kMinRingArea
+                              && rightArea <= polyArea - kMinRingArea;
+                if (!realSplit) continue;
 
-            // 5. Recurse: each remaining pair of hits sits inside exactly one of the two
-            //    sub-polygons (cut is a polyline, not a closed loop, so subsequent chords
-            //    don't cross the chord we just inserted). Distribute remaining hits.
-            var remainingForLeft = new List<float3>();
-            var remainingForRight = new List<float3>();
-            // The "remaining cut" starts at h1.point and continues along the cut. But for
-            // recursion we re-detect intersections from scratch — simpler than partitioning the
-            // already-found hits. Pass the same cut polyline; each sub-polygon will find only
-            // the intersections lying inside its boundary.
-            var leftSubResults = (hits.Count > 2)
-                ? SplitByPolyline(left, cut)
-                : new List<List<float3>> { left };
-            var rightSubResults = (hits.Count > 2)
-                ? SplitByPolyline(right, cut)
-                : new List<List<float3>> { right };
+                // 5. Recurse on both halves with the same cut — later chords of a multi-chord
+                //    cut are re-detected from scratch inside whichever half they landed in.
+                //    Bounded: every level strictly shrinks ring area (real-split guard above),
+                //    with kMaxSplitDepth as the backstop.
+                foreach (var r in SplitByPolyline(left, cut, depth + 1)) if (IsValidRing(r)) result.Add(r);
+                foreach (var r in SplitByPolyline(right, cut, depth + 1)) if (IsValidRing(r)) result.Add(r);
+                return result;
+            }
 
-            foreach (var r in leftSubResults) if (IsValidRing(r)) result.Add(r);
-            foreach (var r in rightSubResults) if (IsValidRing(r)) result.Add(r);
+            // No productive pair — every candidate chord grazed the boundary. Not a split.
+            result.Add(polygon);
             return result;
         }
 
