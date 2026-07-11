@@ -14,6 +14,9 @@ decomp/
 # External mod sources cloned for reference (Traffic, RoadBuilder, ...)
 _refs/
 
+# Local working notes / research docs (not part of the mod)
+_notes/
+
 # IDE
 .vs/
 .idea/
@@ -23,5 +26,5 @@ _refs/
 *.log
 NOTES_local.md
 
-# Claude Code local settings (personal — global allowlist lives in settings.json)
-.claude/settings.local.json
+# Claude Code settings (personal tooling, not part of the mod)
+.claude/
