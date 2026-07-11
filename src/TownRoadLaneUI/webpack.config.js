@@ -14,7 +14,12 @@ const gray = (text) => `\x1b[90m${text}\x1b[0m`;
 // <RemoveDir $(DeployDir)> on every build and wiped the .mjs that we'd just placed there —
 // the UI went silently missing after every C# rebuild.
 const OUTPUT_DIR = "./dist/";
-const banner = `\n * Cities: Skylines II UI Module\n * Id: ${MOD.id}\n * Author: ${MOD.author}\n * Version: ${MOD.version}\n`;
+// The banner is the manifest: the game's UIModuleAsset.PostCreate parses this
+// comment block out of the .mjs itself (NOT mod.json). The Dependencies line
+// is REQUIRED even when empty — PostCreate calls AddTags(m_UIModuleDependencies)
+// unconditionally, and that field stays null (→ NullReferenceException in the
+// game log on every startup) unless a "Dependencies:" line was parsed.
+const banner = `\n * Cities: Skylines II UI Module\n * Id: ${MOD.id}\n * Author: ${MOD.author}\n * Version: ${MOD.version}\n * Dependencies: ${(MOD.dependencies || []).join(", ")}\n`;
 
 module.exports = {
   // cohtml's JS runtime doesn't expose readable stack traces — every error

@@ -94,15 +94,13 @@
 		<None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
 	</ItemGroup>
 
-	<!-- NOTE: Do NOT ship mod.json next to the .dll/.mjs in the local-mod deploy folder.
-	     Every working CS2 UI mod we sampled (AdvancedRoadTools, Platter, SystemTimeMod, etc.
-	     in .cache/Mods/pdx_mods/) ships ONLY .mjs + .css + .dll without a manifest — the game
-	     synthesises a UIModuleAsset on the fly from filename conventions. The only mod we
-	     saw with a manifest was TTE, and that ships through PDX Mods (different code path).
-	     When we shipped mod.json for local mods the game's UIModuleAsset.PostCreate called
-	     AddTags(null) and threw NullReferenceException at load.
-	     mod.json stays in source so the UI webpack can read MOD.id for output naming; just
-	     don't copy it into the local-mod deploy. -->
+	<!-- NOTE on the startup NullReferenceException in UIModuleAsset.PostCreate: decompiling
+	     Colossal.IO.AssetDatabase showed the game parses the UI module manifest from the
+	     BANNER COMMENT inside the .mjs itself (Id/Author/Version/Dependencies lines) — NOT
+	     from mod.json. PostCreate then calls AddTags(m_UIModuleDependencies) unconditionally,
+	     which is null when the banner lacks a "Dependencies:" line. Fixed in the UI's
+	     webpack.config.js banner. mod.json is inert for this either way; it stays in source
+	     for webpack (MOD.id output naming) and ships for PDX-tooling parity with TTE. -->
 	<ItemGroup>
 		<None Include="mod.json" CopyToOutputDirectory="Never" />
 	</ItemGroup>
@@ -125,9 +123,8 @@
 			<TRLUIImageFiles Include="..\TownRoadLaneUI\dist\images\**\*.*" />
 		</ItemGroup>
 		<Copy SourceFiles="@(TRLUIImageFiles)" DestinationFiles="@(TRLUIImageFiles->'$(OutDir)images\%(RecursiveDir)%(Filename)%(Extension)')" Condition="'@(TRLUIImageFiles)' != ''" />
-		<!-- Ship mod.json next to .mjs so UIModuleAsset.PostCreate has `tags` to read instead
-		     of null. Without it the game's AssetData.AddTags(null) throws NullReferenceException
-		     on every startup — UI still works, but the error log noise is annoying. -->
+		<!-- mod.json ships alongside the bundle for PDX-tooling parity (see the manifest NOTE
+		     above — it plays no role in UIModuleAsset registration). -->
 		<Copy SourceFiles="..\TownRoadLaneUI\mod.json" DestinationFolder="$(OutDir)" />
 		<Message Text="[BuildFrontend] Copied UI bundle + manifest into $(OutDir)" Importance="high" />
 	</Target>

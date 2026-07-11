@@ -22,8 +22,14 @@ Makes the game generate proper edge lane markings for ordinary city roads with 3
 	<ModVersion Value="1.0" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.0.*" />
-	<!--Dependency for the mod, can be set multiple times-->
-	<Dependency Id="" />
+	<!--Dependency for the mod, can be set multiple times.
+	    Both G87 packs supply the render prefabs our styles reference:
+	    97828 = [G87] Road Markings (includes UK Set)  - line styles, junction box, bike/bus fills
+	    98624 = [G87] Road Markings: Stripes and Chevrons - stripe area fills
+	    The mod degrades gracefully without them (vanilla/concrete fallbacks), but every
+	    non-default style needs them, so they ship as hard deps for install-and-it-works.-->
+	<Dependency Id="97828" />
+	<Dependency Id="98624" />
 	<!--Required DLC, can be set multiple times. Supported values are "Landmark Buildings", "San Fransisco Set", "Beach Properties", "Urban Promenades", "Modern Architecture"-->
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
