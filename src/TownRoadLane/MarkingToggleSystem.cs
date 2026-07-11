@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Colossal.Logging;
 using Game;
 using Game.Common;
@@ -7,31 +8,45 @@ using Game.Prefabs;
 using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
-using SubLane = Game.Net.SubLane;
 
 namespace TownRoadLane
 {
     /// <summary>
-    /// Handles the "Reapply markings now" settings button. Two-step:
-    ///   1. Re-run <see cref="EdgeLineCloneSystem.ApplyOrUpdate"/> and
-    ///      <see cref="ParkingLineCloneSystem.ApplyOrUpdate"/> so the cloned marking prefabs pick up the
-    ///      currently-selected style (or strip hosting if the feature was switched off).
-    ///   2. Mark every road edge + intersection node <c>Updated</c> so CustomSecondaryLaneSystem
-    ///      rebuilds their markings on the next frame and live roads pick up the change.
+    /// Handles the "Reapply markings now" settings button.
     ///
-    /// On a big city step 2 is a brief freeze, so the system stays idle until the button asks for it.
-    /// Road Builder edges are skipped — re-running SecondaryLaneSystem on RB-generated geometry has
-    /// historically crashed (commit 5bb0b5e, K5 in IMPLEMENTATION_PLAN.md). RB roads still pick up the
-    /// style change on the next game load like styles always do.
+    ///   1. Re-run <see cref="EdgeLineCloneSystem.ApplyOrUpdate"/> and
+    ///      <see cref="ParkingLineCloneSystem.ApplyOrUpdate"/> so the cloned marking prefabs pick up
+    ///      the currently-selected style (or strip hosting if the feature was switched off).
+    ///   2. Add <see cref="BatchesUpdated"/> to every live lane entity whose PrefabRef points at one
+    ///      of our clone prefabs — the render system rebuilds their batches against the freshly
+    ///      swapped mesh, so a STYLE change is visible immediately. This mirrors what the vanilla
+    ///      ReplacePrefabSystem does on prefab mesh replacement.
+    ///
+    /// History: two earlier designs marked road edges + nodes <c>Updated</c> to force a full
+    /// SecondaryLane rebuild. Both crashed: one-shot marking (~6.6k entities in one frame) blew up
+    /// native jobs downstream, and even a 128/tick batch died in ModificationBarrier4B's ECB playback
+    /// (parallel-writer chains from the SecondaryLane rebuild) — native crash, empty managed stack.
+    /// Restyling never needed a structural rebuild in the first place: the lanes stay, only their
+    /// render batches go stale. Feature ENABLE/DISABLE (lanes appearing/disappearing on existing
+    /// roads) is deliberately deferred to the next save load, where the world spawns lanes against
+    /// the refreshed prefabs anyway — same guarantee Road Builder roads always had.
     /// </summary>
     public partial class MarkingToggleSystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;
 
+        // Lane entities tagged per frame while draining. Batch-refresh is cheap (tag add, render
+        // batch rebuild only), but stay polite to the frame budget anyway.
+        private const int kBatchPerTick = 1024;
+
         private PrefabSystem m_PrefabSystem;
-        private EntityQuery m_EdgeQuery;
-        private EntityQuery m_NodeQuery;
+        private EntityQuery m_LaneQuery;
         private bool m_Requested;
+        // Drain queue for the current reapply request. Persistent allocation, created on demand,
+        // disposed when fully drained (or on destroy).
+        private NativeList<Entity> m_Pending;
+        private int m_PendingCursor;
+        private int m_TouchedTotal;
 
         /// <summary>Called from the settings button. The actual work runs on the next system update.</summary>
         public static void RequestReapply()
@@ -46,91 +61,126 @@ namespace TownRoadLane
         {
             base.OnCreate();
             m_PrefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
-            // Road edges: have EdgeGeometry + Edge + a PrefabRef. Exclude in-edit / deleted.
-            m_EdgeQuery = GetEntityQuery(new EntityQueryDesc
+            // Live lane entities (our markings are net sublanes). Exclude in-edit / dying.
+            m_LaneQuery = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[] { ComponentType.ReadOnly<EdgeGeometry>(), ComponentType.ReadOnly<Edge>(), ComponentType.ReadOnly<PrefabRef>() },
-                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
-            });
-            // Intersection nodes: have Node + a SubLane buffer (so secondary lanes can attach).
-            m_NodeQuery = GetEntityQuery(new EntityQueryDesc
-            {
-                All = new[] { ComponentType.ReadOnly<Node>(), ComponentType.ReadOnly<SubLane>() },
+                All = new[] { ComponentType.ReadOnly<Lane>(), ComponentType.ReadOnly<PrefabRef>() },
                 None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
             });
             Enabled = false; // idle until the button asks
         }
 
+        protected override void OnDestroy()
+        {
+            if (m_Pending.IsCreated) m_Pending.Dispose();
+            base.OnDestroy();
+        }
+
         protected override void OnUpdate()
         {
-            if (!m_Requested) { Enabled = false; return; }
-            m_Requested = false;
-            Enabled = false;
-
             try
             {
-                // Step 1: refresh the cloned marking prefabs against current settings. Each clone system
-                // decides on its own whether to apply (feature enabled, run ApplyOrUpdate) or strip
-                // hosting (feature disabled, call the dedicated strip path where one exists).
-                var edgeSys = World.GetExistingSystemManaged<EdgeLineCloneSystem>();
-                if (edgeSys != null)
+                if (m_Requested)
                 {
-                    if (Mod.Settings != null && Mod.Settings.EdgeLineEnabled) edgeSys.ApplyOrUpdate();
-                    else edgeSys.StripHostingIfDisabled();
+                    m_Requested = false;
+                    BeginReapply();
                 }
-                else log.Warn("EdgeLineCloneSystem not found — edge-line prefabs not refreshed");
-
-                var parkSys = World.GetExistingSystemManaged<ParkingLineCloneSystem>();
-                if (parkSys != null)
-                {
-                    if (Mod.Settings != null && Mod.Settings.ParkingMarkingsEnabled) parkSys.ApplyOrUpdate();
-                    // ParkingLineCloneSystem doesn't have a separate strip helper — ApplyOrUpdate handles
-                    // the end-tick None case internally; for the longitudinal "feature off" case we'd want
-                    // an equivalent strip pass. TODO if/when ParkingMarkingsEnabled toggling is exposed
-                    // as a runtime concern (currently it's a session-start setting).
-                }
-                else log.Warn("ParkingLineCloneSystem not found — parking-line prefabs not refreshed");
-
-                // Step 2: mark every non-RB edge and node Updated so CustomSecondaryLaneSystem rebuilds
-                // markings on them. RB roads pick up the prefab change on the next game load.
-                var edges = m_EdgeQuery.ToEntityArray(Allocator.Temp);
-                var nodes = m_NodeQuery.ToEntityArray(Allocator.Temp);
-
-                int touched = 0, skippedRb = 0;
-                MarkUpdated(edges, ref touched, ref skippedRb);
-                MarkUpdated(nodes, ref touched, ref skippedRb);
-                log.Info($"reapply: refreshed clone prefabs, marked {touched} entities Updated, skipped {skippedRb} RB edge/node(s)");
-
-                edges.Dispose();
-                nodes.Dispose();
+                DrainBatch();
             }
-            catch (Exception e) { log.Error(e, "MarkingToggleSystem failed"); }
-        }
-
-        private void MarkUpdated(NativeArray<Entity> entities, ref int touched, ref int skippedRb)
-        {
-            for (int i = 0; i < entities.Length; i++)
+            catch (Exception e)
             {
-                var e = entities[i];
-                if (LooksLikeRoadBuilderRoad(e)) { skippedRb++; continue; }
-                if (!EntityManager.HasComponent<Updated>(e))
-                    EntityManager.AddComponent<Updated>(e);
-                touched++;
+                log.Error(e, "MarkingToggleSystem failed");
+                if (m_Pending.IsCreated) m_Pending.Dispose();
+                Enabled = false;
             }
         }
 
-        /// <summary>Road Builder names its generated road prefabs like "r&lt;guid&gt;-&lt;steamid&gt;".</summary>
-        private bool LooksLikeRoadBuilderRoad(Entity e)
+        /// <summary>Step 1 (prefab refresh) + capture of the lane drain queue. Runs once per request.</summary>
+        private void BeginReapply()
         {
-            if (!EntityManager.HasComponent<PrefabRef>(e)) return false;
-            var pe = EntityManager.GetComponentData<PrefabRef>(e).m_Prefab;
-            if (!m_PrefabSystem.TryGetPrefab<PrefabBase>(pe, out var p) || p == null) return false;
-            var name = p.name;
-            if (string.IsNullOrEmpty(name) || name.Length < 20) return false;
-            if (name[0] != 'r' && name[0] != 'R') return false;
-            int dashes = 0;
-            foreach (var c in name) if (c == '-') dashes++;
-            return dashes >= 4;
+            // Refresh the cloned marking prefabs against current settings. Each clone system
+            // decides on its own whether to apply (feature enabled, run ApplyOrUpdate) or strip
+            // hosting (feature disabled, call the dedicated strip path where one exists).
+            var edgeSys = World.GetExistingSystemManaged<EdgeLineCloneSystem>();
+            if (edgeSys != null)
+            {
+                if (Mod.Settings != null && Mod.Settings.EdgeLineEnabled) edgeSys.ApplyOrUpdate();
+                else edgeSys.StripHostingIfDisabled();
+            }
+            else log.Warn("EdgeLineCloneSystem not found — edge-line prefabs not refreshed");
+
+            var parkSys = World.GetExistingSystemManaged<ParkingLineCloneSystem>();
+            if (parkSys != null)
+            {
+                if (Mod.Settings != null && Mod.Settings.ParkingMarkingsEnabled) parkSys.ApplyOrUpdate();
+                // ParkingLineCloneSystem doesn't have a separate strip helper — ApplyOrUpdate handles
+                // the end-tick None case internally; for the longitudinal "feature off" case we'd want
+                // an equivalent strip pass. TODO if/when ParkingMarkingsEnabled toggling is exposed
+                // as a runtime concern (currently it's a session-start setting).
+            }
+            else log.Warn("ParkingLineCloneSystem not found — parking-line prefabs not refreshed");
+
+            // Collect the prefab entities of OUR clones — every clone prefab is named
+            // "TownRoadLane ..." (edge lines + parking lines, EU/NA variants). Lane entities
+            // referencing anything else are untouched.
+            var ourPrefabs = new HashSet<Entity>();
+            var prefabQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
+            using (var prefabEntities = prefabQuery.ToEntityArray(Allocator.Temp))
+            {
+                for (int i = 0; i < prefabEntities.Length; i++)
+                {
+                    if (m_PrefabSystem.TryGetPrefab<PrefabBase>(prefabEntities[i], out var pb) && pb != null
+                        && pb.name != null && pb.name.StartsWith("TownRoadLane ", StringComparison.Ordinal))
+                    {
+                        ourPrefabs.Add(prefabEntities[i]);
+                    }
+                }
+            }
+
+            // Capture the lanes that reference our clones; the queue drains kBatchPerTick per frame.
+            if (m_Pending.IsCreated) m_Pending.Dispose();
+            m_Pending = new NativeList<Entity>(4096, Allocator.Persistent);
+            using (var lanes = m_LaneQuery.ToEntityArray(Allocator.Temp))
+            {
+                for (int i = 0; i < lanes.Length; i++)
+                {
+                    var prefab = EntityManager.GetComponentData<PrefabRef>(lanes[i]).m_Prefab;
+                    if (ourPrefabs.Contains(prefab)) m_Pending.Add(lanes[i]);
+                }
+            }
+            m_PendingCursor = 0;
+            m_TouchedTotal = 0;
+            log.Info($"reapply: refreshed clone prefabs ({ourPrefabs.Count} clone prefab(s)), queued {m_Pending.Length} lane(s) for batch refresh ({kBatchPerTick}/tick)");
+        }
+
+        /// <summary>Step 2, spread across frames: tag queued lanes <see cref="BatchesUpdated"/> so the
+        /// renderer rebuilds their batches against the swapped meshes. Non-cascading — nothing but
+        /// the render batch reacts, and CleanUpSystem strips the tag right after.</summary>
+        private void DrainBatch()
+        {
+            if (!m_Pending.IsCreated)
+            {
+                Enabled = false;
+                return;
+            }
+
+            int end = Math.Min(m_PendingCursor + kBatchPerTick, m_Pending.Length);
+            for (; m_PendingCursor < end; m_PendingCursor++)
+            {
+                var e = m_Pending[m_PendingCursor];
+                if (!EntityManager.Exists(e)) continue;
+                if (EntityManager.HasComponent<Deleted>(e)) continue;
+                if (!EntityManager.HasComponent<BatchesUpdated>(e))
+                    EntityManager.AddComponent<BatchesUpdated>(e);
+                m_TouchedTotal++;
+            }
+
+            if (m_PendingCursor >= m_Pending.Length)
+            {
+                log.Info($"reapply: done — batch-refreshed {m_TouchedTotal} lane(s)");
+                m_Pending.Dispose();
+                Enabled = false;
+            }
         }
     }
 }

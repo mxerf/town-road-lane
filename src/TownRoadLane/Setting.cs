@@ -249,7 +249,7 @@ namespace TownRoadLane
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ReapplyMarkings)), "Reapply markings now" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ReapplyMarkings)),
-                    "Re-applies the chosen styles and rebuilds markings on every road already in the city. On a large city this causes a brief freeze. Road Builder roads are skipped to avoid known crash patterns. WARNING: known crash 10-20s after triggering on some saves — if it happens, save & reload to apply the style." },
+                    "Applies the chosen STYLES to markings already drawn in the city immediately (the visuals refresh over a second or two). Enabling or disabling a feature (lines appearing on / disappearing from existing roads) takes effect on the next save load." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ActivateMarkingTool)), "Activate marking tool" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ActivateMarkingTool)),
@@ -342,7 +342,7 @@ namespace TownRoadLane
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ReapplyMarkings)), "Переприменить разметку сейчас" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ReapplyMarkings)),
-                    "Заново применяет выбранные стили и перестраивает разметку на всех дорогах города. В большом городе возможно кратковременное подвисание. Дороги Road Builder пропускаются во избежание известных вылетов. ВНИМАНИЕ: на некоторых сейвах известен вылет через 10–20 с после запуска — в этом случае сохранитесь и перезагрузите сейв, стиль применится." },
+                    "Мгновенно применяет выбранные СТИЛИ к уже нарисованной в городе разметке (визуал обновляется за секунду-две). Включение/выключение фич (появление или исчезновение линий на существующих дорогах) вступает в силу при следующей загрузке сейва." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ActivateMarkingTool)), "Активировать инструмент разметки" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ActivateMarkingTool)),
