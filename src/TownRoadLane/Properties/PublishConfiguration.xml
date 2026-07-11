@@ -1,27 +1,62 @@
-﻿<Publish>
+<Publish>
 	<!--Id must be set in order to update existed mod. it is not required for publishing mod for the first time-->
 	<ModId Value="" />
 	<!--Name of the mod to display to players-->
-	<DisplayName Value="TownRoadLane" />
+	<DisplayName Value="Town Road Lane — Road Markings" />
 	<!--Short description of the mod-->
-	<ShortDescription Value="Adds edge-side road markings to vanilla city roads (3m lanes)" />
+	<ShortDescription Value="Road-marking editor: draw lines and area fills on any intersection, plus automatic edge and parking markings for town roads" />
 	<!--Long description of the mod. Single line or multi line. Supports minimal markdown subset-->
-	<!--LongDescription Value="Makes the game generate proper edge lane markings for ordinary city roads with 3m lanes, the same way highway roads get them, so parking, sidewalks and stops react correctly." /-->
 	<LongDescription>
-Makes the game generate proper edge lane markings for ordinary city roads with 3m lanes, the same way highway roads get them, so parking, sidewalks and stops react correctly.
+# Town Road Lane — Road Markings
+
+A road-marking editor for intersections plus automatic lane markings for ordinary town roads.
+
+## Marking editor
+Click any intersection and draw your own markings:
+- **Lines** between lane endpoint dots — Solid, Dashed, Double Solid, and G87 line styles, with adjustable curvature and per-segment visibility.
+- **Area fills** over any polygon you outline — junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete.
+- **Hide vanilla markings** per intersection to start from a clean slate.
+- Full in-game panel (English + Russian) and hotkeys: **Ctrl+M** toggle tool, **Y** cycle line style, **A** area mode, **U** cycle area fill.
+
+## Automatic markings
+Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included.
+
+## Requirements
+Both G87 marking packs ship as dependencies and install automatically — they supply the line styles and area fills. Huge thanks to G87 for the marking assets!
+
+---
+
+# Town Road Lane — дорожная разметка
+
+Редактор дорожной разметки для перекрёстков + автоматическая разметка обычных городских дорог.
+
+## Редактор разметки
+Кликните по любому перекрёстку и нарисуйте свою разметку:
+- **Линии** между точками полос — сплошная, пунктир, двойная сплошная и стили G87; настраиваемая кривизна и видимость отдельных сегментов.
+- **Заливки областей** по обведённому полигону — вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон.
+- **Скрытие ванильной разметки** на отдельном перекрёстке, чтобы начать с чистого листа.
+- Полноценная панель в игре (английский + русский) и горячие клавиши: **Ctrl+M** — инструмент, **Y** — стиль линии, **A** — режим области, **U** — заливка области.
+
+## Автоматическая разметка
+Обычные городские дороги с полосами 3 м получают краевую разметку — как на шоссе, — поэтому парковка, тротуары и остановки работают корректно. Разметка парковочных полос включена.
+
+## Зависимости
+Оба пака разметки G87 подключены как зависимости и ставятся автоматически — они дают стили линий и заливки. Спасибо G87 за ассеты!
 	</LongDescription>
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.png" />
 	<!--Screenshot, can be set multiple times-->
-	<Screenshot Value="" />
+	<Screenshot Value="Properties/Screenshots/Screenshot_01.png" />
+	<Screenshot Value="Properties/Screenshots/Screenshot_02.png" />
+	<Screenshot Value="Properties/Screenshots/Screenshot_03.png" />
 	<!--Tag, can be set multiple times-->
-	<Tag Value="" />
+	<Tag Value="Code Mod" />
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="1.0" />
+	<ModVersion Value="2.0.0" />
 	<!--Recommended version of the base game to use the mod-->
-	<GameVersion Value="1.0.*" />
+	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
 	    Both G87 packs supply the render prefabs our styles reference:
 	    97828 = [G87] Road Markings (includes UK Set)  - line styles, junction box, bike/bus fills
@@ -33,11 +68,16 @@ Makes the game generate proper edge lane markings for ordinary city roads with 3
 	<!--Required DLC, can be set multiple times. Supported values are "Landmark Buildings", "San Fransisco Set", "Beach Properties", "Urban Promenades", "Modern Architecture"-->
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
-	<ChangeLog Value="" />
-	<!--<ChangeLog>
-	</ChangeLog>-->
+	<ChangeLog>
+# 2.0.0
+- New: full marking editor for intersections — draw lines between lane endpoints (solid / dashed / double / G87 styles, curvature, per-segment visibility).
+- New: area fills — junction box, hatching, bike / bus lane fills, concrete.
+- New: hide vanilla markings per intersection.
+- New: in-game panel (EN + RU) with hotkeys (Ctrl+M, Y, A, U).
+- G87 marking packs added as dependencies.
+	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
-	<ExternalLink Type="" Url="" />
-	<!--Supported values Public, Private, Unlisted-->
-	<AccessLevel Value="Public" />
+	<!--<ExternalLink Type="github" Url="" />-->
+	<!--Supported values Public, Private, Unlisted. Unlisted for the first publish; flip to Public after verifying the page.-->
+	<AccessLevel Value="Unlisted" />
 </Publish>
