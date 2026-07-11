@@ -50,3 +50,7 @@ The build compiles the C# systems, bundles the React UI via webpack, and deploys
 
 - **G87** — the marking prefab packs this mod builds its styles on.
 - Author: **mxerf**
+
+## License
+
+[GPL-3.0](LICENSE)
