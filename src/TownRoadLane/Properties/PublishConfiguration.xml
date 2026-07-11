@@ -77,7 +77,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 - G87 marking packs added as dependencies.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
-	<!--<ExternalLink Type="github" Url="" />-->
+	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />
 	<!--Supported values Public, Private, Unlisted. Unlisted for the first publish; flip to Public after verifying the page.-->
 	<AccessLevel Value="Unlisted" />
 </Publish>
