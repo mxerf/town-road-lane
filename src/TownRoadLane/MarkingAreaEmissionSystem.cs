@@ -72,8 +72,6 @@ namespace TownRoadLane
         // Resolved lazily — G87 surfaces show up ~10 s after game load. Entity.Null = retry next tick.
         private Entity[] _stylePrefabEntities = new Entity[kStyleCount];
 
-        private int _heartbeatTicks;
-
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -93,8 +91,6 @@ namespace TownRoadLane
 
         protected override void OnUpdate()
         {
-            _heartbeatTicks++;
-
             TryResolveAllStyles();
             Entity solidEntity = _stylePrefabEntities[kStyleSolidConcrete];
             if (solidEntity == Entity.Null) return;
@@ -216,11 +212,11 @@ namespace TownRoadLane
             ecb.Playback(EntityManager);
             ecb.Dispose();
 
-            if (_heartbeatTicks % 240 == 1 || spawned > 0 || deleted > 0)
+            if (spawned > 0 || deleted > 0)
             {
                 int resolved = 0;
                 for (int i = 0; i < kStyleCount; i++) if (_stylePrefabEntities[i] != Entity.Null) resolved++;
-                log.Info($"[area-emission] tick={_heartbeatTicks} nodesWithAreas={_nodesWithAreas.CalculateEntityCount()} stylesResolved={resolved}/{kStyleCount} spawned={spawned} deleted={deleted}");
+                log.Info($"[area-emission] nodesWithAreas={_nodesWithAreas.CalculateEntityCount()} stylesResolved={resolved}/{kStyleCount} spawned={spawned} deleted={deleted}");
             }
         }
 

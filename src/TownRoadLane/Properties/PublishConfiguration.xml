@@ -54,7 +54,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.0.0" />
+	<ModVersion Value="2.0.1" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -69,12 +69,8 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-# 2.0.0
-- New: full marking editor for intersections — draw lines between lane endpoints (solid / dashed / double / G87 styles, curvature, per-segment visibility).
-- New: area fills — junction box, hatching, bike / bus lane fills, concrete.
-- New: hide vanilla markings per intersection.
-- New: in-game panel (EN + RU) with hotkeys (Ctrl+M, Y, A, U).
-- G87 marking packs added as dependencies.
+# 2.0.1
+- Fixed: removed leftover periodic debug (heartbeat) logging that could flood Player.log every ~2 seconds (GitHub issue #1).
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />

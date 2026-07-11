@@ -116,7 +116,6 @@ namespace TownRoadLane
         private int _lastLoggedHoverIdx = -2; // -2 = "never logged"; -1 = "no hover"
         private float3 _cursorWorldPos;
         private Entity _hoveredNode; // raycast result while tool is active; Entity.Null when no node under cursor
-        private int _heartbeatCounter; // logs raycast outcome periodically when active
 
         // Stage 5c: current style for the next line the user draws. Cycled via the
         // CycleMarkingStyle hotkey (default Y). Stays across tool deactivate/reactivate inside
@@ -306,15 +305,6 @@ namespace TownRoadLane
                 ? HitTestLines(_cursorWorldPos)
                 : -1;
 
-            // Heartbeat every ~120 frames (~2 sec @60fps) — confirms tool is actually running and
-            // raycast is hitting things. Without this we can't tell "tool not ticking" apart from
-            // "tool ticking but raycast empty".
-            if ((++_heartbeatCounter % 120) == 0)
-            {
-                string ent = hitSomething ? $"#{hitEntity.Index}" : "<none>";
-                string hasNode = hitSomething && EntityManager.HasComponent<Node>(hitEntity) ? "YES" : "no";
-                log.Info($"tool heartbeat: state={_state}, raycast hit={ent} hasNode={hasNode}, cursor={_cursorWorldPos}");
-            }
             // Polish: log hover transitions only (avoid per-frame spam). Useful for triage of
             // "I'm hovering but the dot doesn't react" reports.
             if (_hoverIdx != _lastLoggedHoverIdx)

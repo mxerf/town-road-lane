@@ -44,8 +44,6 @@ namespace TownRoadLane
         private EdgeLineCloneSystem _edgeLineSys;
         private CityConfigurationSystem _cityConfig;
 
-        private int _heartbeatTicks;
-
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -72,10 +70,6 @@ namespace TownRoadLane
 
         protected override void OnUpdate()
         {
-            _heartbeatTicks++;
-            if (_heartbeatTicks % 120 == 1)
-                log.Info($"[segment-emission] heartbeat tick={_heartbeatTicks} nodesWithLines={_nodesWithLines.CalculateEntityCount()} ourSubLanes={_ourSubLanes.CalculateEntityCount()} legacyPair={_legacyPairSubLanes.CalculateEntityCount()}");
-
             var ecb = new EntityCommandBuffer(Allocator.Temp);
 
             // 0. One-shot cleanup of pre-5b sublanes. Their MarkingPair source is gone after
