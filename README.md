@@ -1,8 +1,8 @@
-# Town Road Lane — Road Markings
+﻿# Town Road Lane — Road Markings
 
 A road-marking mod for **Cities: Skylines II**: a manual marking editor for intersections plus automatic edge/parking lane markings for ordinary town roads.
 
-![Line editor](src/TownRoadLane/Properties/Screenshots/Screenshot_01.png)
+![Line editor](src/TownRoadLane/Properties/Screenshots/Screenshot_01.jpg)
 
 ## Features
 
@@ -14,12 +14,12 @@ Click any intersection and draw your own markings:
 - **Hide vanilla markings** per intersection to start from a clean slate.
 - In-game panel (English + Russian) and hotkeys: `Ctrl+M` toggle tool, `Y` cycle line style, `A` area mode, `U` cycle area fill.
 
-![Area fills](src/TownRoadLane/Properties/Screenshots/Screenshot_02.png)
+![Area fills](src/TownRoadLane/Properties/Screenshots/Screenshot_02.jpg)
 
 ### Automatic markings
 Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included.
 
-![City overview](src/TownRoadLane/Properties/Screenshots/Screenshot_03.png)
+![City overview](src/TownRoadLane/Properties/Screenshots/Screenshot_03.jpg)
 
 ## Dependencies
 
