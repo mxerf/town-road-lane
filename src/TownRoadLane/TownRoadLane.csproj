@@ -117,6 +117,14 @@
 		<Exec Command="npm run build" WorkingDirectory="..\TownRoadLaneUI\" ContinueOnError="false" />
 		<Copy SourceFiles="..\TownRoadLaneUI\dist\TownRoadLane.mjs" DestinationFolder="$(OutDir)" />
 		<Copy SourceFiles="..\TownRoadLaneUI\dist\TownRoadLane.css" DestinationFolder="$(OutDir)" Condition="Exists('..\TownRoadLaneUI\dist\TownRoadLane.css')" />
+		<!-- Static UI assets (toolbar icon etc.) emitted by webpack's asset/resource rule into
+		     dist/images/. Referenced at runtime as coui://ui-mods/images/<name> — the game hosts
+		     the deployed mod folder under that root, and Mod.targets' DeployWIP mirrors OutDir
+		     recursively, so preserving the images/ subfolder here is all that's needed. -->
+		<ItemGroup>
+			<TRLUIImageFiles Include="..\TownRoadLaneUI\dist\images\**\*.*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(TRLUIImageFiles)" DestinationFiles="@(TRLUIImageFiles->'$(OutDir)images\%(RecursiveDir)%(Filename)%(Extension)')" Condition="'@(TRLUIImageFiles)' != ''" />
 		<!-- Ship mod.json next to .mjs so UIModuleAsset.PostCreate has `tags` to read instead
 		     of null. Without it the game's AssetData.AddTags(null) throws NullReferenceException
 		     on every startup — UI still works, but the error log noise is annoying. -->

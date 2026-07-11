@@ -15,34 +15,9 @@
 import { styled } from "../styles/styled";
 import { tokens as T } from "../styles/tokens";
 
-// ── Toolbar button (GameTopLeft) ───────────────────────────────────────
-// Sized to roughly match vanilla CS2 floating toggle buttons. Icon is the
-// only child; we don't show a text label here — the tooltip handles that.
-
-export const ToolbarBtn = styled.button<{ $active?: boolean }>`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36rem;
-  height: 36rem;
-  margin: 6rem;
-  padding: 0;
-  background: ${(p) => (p.$active ? T.colorAccentSoft : T.colorPanelBg)};
-  color: ${(p) => (p.$active ? "#fff" : T.colorTextPrimary)};
-  border: 1rem solid ${(p) => (p.$active ? T.colorAccent : T.colorBorderMid)};
-  border-radius: ${T.radiusMd};
-  cursor: pointer;
-  pointer-events: auto;
-  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
-
-  &:hover {
-    background: ${(p) => (p.$active ? T.colorAccentSoft : "rgba(40, 48, 60, 0.95)")};
-    border-color: ${T.colorBorderStrong};
-    color: ${(p) => (p.$active ? "#fff" : T.colorAccent)};
-  }
-`;
-
 // ── Main panel (GameTopRight) ──────────────────────────────────────────
+// (The old custom ToolbarBtn is gone — the toolbar toggle now uses the
+// vanilla cs2/ui FloatingButton, see toolbar-toggle-button.tsx.)
 
 export const Panel = styled.div`
   position: absolute;
@@ -83,10 +58,152 @@ export const PanelTitle = styled.h3`
   margin: 0 0 ${T.space1} 0;
 `;
 
+// Header row: app title on the left, close button on the right. The title is
+// the mod name (stable), the node id lives in PanelMeta below — users think
+// "markings panel", not "node panel".
+export const PanelHeaderRow = styled.div`
+  display: flex;
+  align-items: center;
+
+  > h3 {
+    flex: 1;
+    margin-bottom: 0;
+  }
+`;
+
+export const CloseBtn = styled.button`
+  width: 22rem;
+  height: 22rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: ${T.colorTextMuted};
+  border: 1rem solid transparent;
+  border-radius: ${T.radiusSm};
+  cursor: pointer;
+  pointer-events: auto;
+  padding: 0;
+  transition: background ${T.transitionFast}, color ${T.transitionFast}, border-color ${T.transitionFast};
+
+  &:hover {
+    background: ${T.colorRowBgHover};
+    border-color: ${T.colorBorderMid};
+    color: ${T.colorTextPrimary};
+  }
+`;
+
+// ── Mode switch (Lines / Area segmented control) ───────────────────────
+
+export const ModeRow = styled.div`
+  display: flex;
+  margin: ${T.space2} 0 0;
+
+  > * {
+    flex: 1;
+    margin-right: ${T.space1};
+  }
+  > *:last-child {
+    margin-right: 0;
+  }
+`;
+
+export const ModeBtn = styled.button<{ $active?: boolean }>`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: ${T.space1} ${T.space2};
+  background: ${(p) => (p.$active ? T.colorRowBgActive : "transparent")};
+  color: ${(p) => (p.$active ? "#fff" : T.colorTextMuted)};
+  border: 1rem solid ${(p) => (p.$active ? T.colorAccentSoft : T.colorBorderMid)};
+  border-radius: ${T.radiusSm};
+  font-size: ${T.fontSizeSm};
+  font-weight: ${T.fontWeightMedium};
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
+
+  > svg {
+    margin-right: ${T.space1};
+    flex-shrink: 0;
+  }
+
+  &:hover {
+    background: ${(p) => (p.$active ? T.colorRowBgActive : T.colorRowBgHover)};
+    color: ${(p) => (p.$active ? "#fff" : T.colorTextPrimary)};
+    border-color: ${(p) => (p.$active ? T.colorAccentSoft : T.colorBorderStrong)};
+  }
+`;
+
+// ── Area draft box (visible while AreaSelecting) ───────────────────────
+
+// Accent-tinted card so the "you are in a special mode" state is impossible
+// to miss. Lists click hints because the polygon gesture has three distinct
+// actions (add / undo / close) that are invisible otherwise.
+export const DraftBox = styled.div`
+  background: ${T.colorAccentDim};
+  border: 1rem solid ${T.colorAccentSoft};
+  border-radius: ${T.radiusMd};
+  padding: ${T.space2};
+  margin: ${T.space2} 0 0;
+`;
+
+export const DraftTitle = styled.div`
+  font-size: ${T.fontSizeSm};
+  font-weight: ${T.fontWeightBold};
+  margin-bottom: ${T.space1};
+`;
+
+export const DraftProgress = styled.div`
+  font-size: ${T.fontSizeSm};
+  color: ${T.colorTextPrimary};
+  margin-bottom: ${T.space1};
+  font-variant-numeric: tabular-nums;
+`;
+
+export const DraftHint = styled.div`
+  font-size: ${T.fontSizeXs};
+  color: ${T.colorTextMuted};
+  margin-bottom: 2rem;
+`;
+
+// ── Labeled field row (label left, control right) ──────────────────────
+
+// Shared shape for the "next line style" / "next area fill" pickers in the
+// sticky chrome. The dropdown gets the remaining width.
+export const FieldRow = styled.div`
+  display: flex;
+  align-items: center;
+  margin: ${T.space2} 0 0;
+
+  > *:last-child {
+    flex: 1;
+  }
+`;
+
+export const FieldLabel = styled.span`
+  font-size: ${T.fontSizeSm};
+  color: ${T.colorTextMuted};
+  margin-right: ${T.space2};
+  flex-shrink: 0;
+`;
+
+// ── Section title (Lines / Areas list headers) ─────────────────────────
+
+export const SectionTitle = styled.div`
+  font-size: ${T.fontSizeXs};
+  font-weight: ${T.fontWeightBold};
+  color: ${T.colorTextDim};
+  text-transform: uppercase;
+  letter-spacing: 0.6rem;
+  margin: ${T.space3} 0 ${T.space1};
+`;
+
 export const PanelMeta = styled.div`
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  // center, not baseline — cohtml can't parse align-items: baseline.
+  align-items: center;
   color: ${T.colorTextMuted};
   font-size: ${T.fontSizeSm};
 
@@ -108,8 +225,10 @@ export const PanelMetaValue = styled.span`
 
 // Thin vertical separator between PanelMeta items. Pure CSS — no glyph that
 // might fall back to a missing-character square (looking at you, U+00B7).
+// display: block (not inline-block, which cohtml can't parse) — sizing comes
+// from explicit width/height, and the parent flex row handles placement.
 export const PanelMetaSep = styled.span`
-  display: inline-block;
+  display: block;
   width: 1rem;
   height: 10rem;
   background: ${T.colorBorderMid};
@@ -169,7 +288,7 @@ export const LineHeader = styled.div`
 
 export const LineChevron = styled.span<{ $open?: boolean }>`
   color: ${T.colorTextMuted};
-  display: inline-flex;
+  display: flex;
   align-items: center;
   transition: transform 0.15s ease;
   transform-origin: center;
@@ -237,7 +356,10 @@ export const CurvLabel = styled.span`
   color: ${T.colorTextMuted};
 `;
 
-export const CurvBtn = styled.button`
+// Disabled look comes from the `disabled` prop directly — cohtml doesn't
+// support the :disabled pseudo-class selector (Player.log warns on it), so a
+// &:disabled rule silently never applied.
+export const CurvBtn = styled.button<{ disabled?: boolean }>`
   width: 24rem;
   height: 24rem;
   display: flex;
@@ -248,20 +370,16 @@ export const CurvBtn = styled.button`
   border: 1rem solid ${T.colorBorderMid};
   border-radius: ${T.radiusSm};
   font-size: ${T.fontSizeMd};
-  cursor: pointer;
+  cursor: ${(p) => (p.disabled ? "default" : "pointer")};
+  opacity: ${(p) => (p.disabled ? 0.35 : 1)};
   pointer-events: auto;
   padding: 0;
-  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
+  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast}, opacity ${T.transitionFast};
 
   &:hover {
-    background: ${T.colorRowBgHover};
-    border-color: ${T.colorBorderStrong};
-    color: ${T.colorAccent};
-  }
-
-  &:disabled {
-    opacity: 0.35;
-    cursor: default;
+    background: ${(p) => (p.disabled ? "transparent" : T.colorRowBgHover)};
+    border-color: ${(p) => (p.disabled ? T.colorBorderMid : T.colorBorderStrong)};
+    color: ${(p) => (p.disabled ? T.colorTextPrimary : T.colorAccent)};
   }
 `;
 
@@ -375,12 +493,49 @@ export const ConfirmRow = styled.div`
   }
 `;
 
+// ── Hotkey hints footer ────────────────────────────────────────────────
+
+export const HintsBox = styled.div`
+  margin-top: ${T.space3};
+  padding-top: ${T.space2};
+  border-top: 1rem solid ${T.colorBorderSoft};
+`;
+
+export const HintRow = styled.div`
+  display: flex;
+  align-items: center;
+  margin-bottom: 3rem;
+  font-size: ${T.fontSizeXs};
+  color: ${T.colorTextMuted};
+`;
+
+// kbd-style chip for the key name. Fixed min-width keeps the description
+// column aligned across rows. flex (not inline-block — unparseable in cohtml)
+// with centered content; the parent HintRow is a flex row so this behaves as
+// a fixed-min-width item.
+export const HintKey = styled.span`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44rem;
+  padding: 1rem 5rem;
+  margin-right: ${T.space2};
+  background: ${T.colorRowBg};
+  border: 1rem solid ${T.colorBorderMid};
+  border-radius: ${T.radiusSm};
+  color: ${T.colorTextPrimary};
+  font-variant-numeric: tabular-nums;
+`;
+
 export const Btn = styled.button<{ $danger?: boolean; $full?: boolean }>`
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: ${(p) => (p.$danger ? T.colorDanger : "inherit")};
+  // Explicit colour, NOT "inherit" — cohtml can't parse color:inherit (see
+  // Player.log "Unable to parse declaration"), so the button fell back to the
+  // UA-default BLACK text and blended into the dark panel.
+  color: ${(p) => (p.$danger ? T.colorDanger : T.colorTextPrimary)};
   border: 1rem solid ${T.colorBorderMid};
   border-radius: ${T.radiusSm};
   padding: ${T.space1} ${T.space2};

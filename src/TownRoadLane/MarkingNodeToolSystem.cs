@@ -165,6 +165,56 @@ namespace TownRoadLane
         public override PrefabBase GetPrefab() => null;
         public override bool TrySetPrefab(PrefabBase prefab) => false;
 
+        // --- UI-facing mutators (TownRoadLaneUISystem) ------------------------------------
+        // The panel mirrors the hotkey flows (Y / U / A) with clickable controls; these
+        // methods are the click-side entry points. All of them are main-thread calls from
+        // TriggerBinding handlers, same phase as our own OnUpdate — no synchronisation needed.
+
+        /// <summary>Set the style used for the NEXT line the user draws (panel dropdown —
+        /// same state the Y hotkey cycles).</summary>
+        public void SetCurrentStyle(MarkingStyle style)
+        {
+            _currentStyle = style;
+            log.Info($"tool: UI set next-line style → {_currentStyle}");
+        }
+
+        /// <summary>Set the fill style for the NEXT area the user closes (panel dropdown —
+        /// same state the U hotkey cycles).</summary>
+        public void SetCurrentAreaStyle(int styleId)
+        {
+            _currentAreaStyle = math.clamp(styleId, 0, MarkingAreaEmissionSystem.kStyleCount - 1);
+            log.Info($"tool: UI set next-area style → {_currentAreaStyle}");
+        }
+
+        /// <summary>Panel "Area" mode button — NodeSelected → AreaSelecting. Also aborts a
+        /// half-picked line pair first (SourceSelected → NodeSelected → AreaSelecting) so the
+        /// button works from any node-scoped state. No-op in Default (no node to draw on).</summary>
+        public bool TryEnterAreaMode()
+        {
+            if (_state == State.SourceSelected)
+            {
+                _sourceIdx = -1;
+                _state = State.NodeSelected;
+            }
+            if (_state != State.NodeSelected) return false;
+            _state = State.AreaSelecting;
+            _areaPolygon.Clear();
+            _areaHover = AreaCandidate.None;
+            log.Info($"area: entered AreaSelecting via UI on node #{_selectedNode.Index}");
+            return true;
+        }
+
+        /// <summary>Panel "Lines" mode button / area-mode cancel — AreaSelecting → NodeSelected,
+        /// dropping any partially collected contour.</summary>
+        public void ExitAreaMode()
+        {
+            if (_state != State.AreaSelecting) return;
+            log.Info($"area: exited AreaSelecting via UI (had {_areaPolygon.Count} vertices)");
+            _areaPolygon.Clear();
+            _areaHover = AreaCandidate.None;
+            _state = State.NodeSelected;
+        }
+
         protected override void OnCreate()
         {
             base.OnCreate();

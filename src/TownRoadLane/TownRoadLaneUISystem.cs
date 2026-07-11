@@ -99,6 +99,20 @@ namespace TownRoadLane
             AddBinding(new TriggerBinding(
                 "TownRoadLane", "ActivateTool", OnActivateTool));
             AddBinding(new TriggerBinding<int>(
+                "TownRoadLane", "SetCurrentStyle", OnSetCurrentStyle));
+            AddBinding(new TriggerBinding<int>(
+                "TownRoadLane", "SetCurrentAreaStyle", OnSetCurrentAreaStyle));
+            AddBinding(new TriggerBinding(
+                "TownRoadLane", "ToggleAreaMode", OnToggleAreaMode));
+            AddBinding(new TriggerBinding<int, int>(
+                "TownRoadLane", "SetAreaStyle", OnSetAreaStyle));
+            AddBinding(new TriggerBinding<int>(
+                "TownRoadLane", "ToggleAreaVisible", OnToggleAreaVisible));
+            AddBinding(new TriggerBinding<int>(
+                "TownRoadLane", "DeleteArea", OnDeleteArea));
+            AddBinding(new TriggerBinding(
+                "TownRoadLane", "ResetNode", OnResetNode));
+            AddBinding(new TriggerBinding<int>(
                 "TownRoadLane", "SetHoveredLine", OnSetHoveredLine));
             AddBinding(new TriggerBinding<int, int>(
                 "TownRoadLane", "SetHoveredSegment", OnSetHoveredSegment));
@@ -153,8 +167,17 @@ namespace TownRoadLane
                 vanillaHidden = EntityManager.GetComponentData<MarkingOverride>(_tool.SelectedNode).HideAll;
             }
 
+            // Tool sub-state for the panel's mode UI: 0 Default, 1 NodeSelected,
+            // 2 SourceSelected, 3 AreaSelecting (mirrors MarkingNodeToolSystem.State).
+            int toolState = isActive ? (int)_tool.ToolState : 0;
+            int areaVertexCount = isActive ? (_tool.AreaPolygon?.Count ?? 0) : 0;
+            int currentAreaStyle = _tool?.CurrentAreaStyle ?? 0;
+
             sb.Append("{");
             sb.Append("\"isActive\":").Append(isActive ? "true" : "false").Append(",");
+            sb.Append("\"toolState\":").Append(toolState).Append(",");
+            sb.Append("\"areaVertexCount\":").Append(areaVertexCount).Append(",");
+            sb.Append("\"currentAreaStyle\":").Append(currentAreaStyle).Append(",");
             sb.Append("\"selectedNodeIndex\":").Append(nodeIdx).Append(",");
             sb.Append("\"currentStyle\":").Append(currentStyle).Append(",");
             sb.Append("\"vanillaHidden\":").Append(vanillaHidden ? "true" : "false").Append(",");
@@ -238,6 +261,43 @@ namespace TownRoadLane
                         }
                     }
                     sb.Append("]}");
+                }
+            }
+
+            sb.Append("],\"areas\":[");
+
+            // Areas list — one entry per user-closed polygon on the selected node. Piece counts
+            // come from the topology buffer so the panel can show "K piece(s)" when lines cut
+            // the area apart. Style + visibility mirror the MarkingArea buffer directly.
+            if (isActive && _tool.SelectedNode != Entity.Null
+                && EntityManager.HasBuffer<MarkingArea>(_tool.SelectedNode))
+            {
+                var node = _tool.SelectedNode;
+                var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
+                var pieces = EntityManager.HasBuffer<MarkingAreaPiece>(node)
+                    ? EntityManager.GetBuffer<MarkingAreaPiece>(node, isReadOnly: true)
+                    : default;
+                for (int a = 0; a < areas.Length; a++)
+                {
+                    if (a > 0) sb.Append(",");
+                    var area = areas[a];
+                    int pieceCount = 0, visiblePieces = 0;
+                    if (pieces.IsCreated)
+                    {
+                        for (int p = 0; p < pieces.Length; p++)
+                        {
+                            if (pieces[p].areaIndex != a) continue;
+                            pieceCount++;
+                            if (pieces[p].visible) visiblePieces++;
+                        }
+                    }
+                    sb.Append("{\"areaIndex\":").Append(a)
+                        .Append(",\"styleId\":").Append(area.styleId)
+                        .Append(",\"visible\":").Append(area.visible ? "true" : "false")
+                        .Append(",\"vertexCount\":").Append(area.vertexCount)
+                        .Append(",\"pieceCount\":").Append(pieceCount)
+                        .Append(",\"visiblePieces\":").Append(visiblePieces)
+                        .Append("}");
                 }
             }
 
@@ -439,6 +499,137 @@ namespace TownRoadLane
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
             log.Info($"UI: deleted line#{lineIndex} on node#{node.Index}");
+        }
+
+        // --- Mode + next-style commands (panel mirrors of the Y / U / A hotkeys) ---
+
+        /// <summary>Panel dropdown: style for the NEXT line drawn. Same state the Y hotkey cycles.</summary>
+        private void OnSetCurrentStyle(int style)
+        {
+            _tool?.SetCurrentStyle((MarkingStyle)style);
+        }
+
+        /// <summary>Panel dropdown: fill style for the NEXT area closed. Same state the U hotkey cycles.</summary>
+        private void OnSetCurrentAreaStyle(int styleId)
+        {
+            _tool?.SetCurrentAreaStyle(styleId);
+        }
+
+        /// <summary>Panel mode switch: NodeSelected ⇄ AreaSelecting. Entering clears any running
+        /// contour; leaving drops a partial contour without committing (same as the A hotkey).</summary>
+        private void OnToggleAreaMode()
+        {
+            if (_tool == null) return;
+            if (_tool.ToolState == MarkingNodeToolSystem.State.AreaSelecting)
+                _tool.ExitAreaMode();
+            else
+                _tool.TryEnterAreaMode();
+        }
+
+        // --- Area commands (list rows in the panel) ---
+
+        /// <summary>Change the fill style of a committed area. Emission diffs prefab per tick and
+        /// respawns the vanilla Area entity when the style prefab changes — no hash bust needed.</summary>
+        private void OnSetAreaStyle(int areaIndex, int styleId)
+        {
+            var node = _tool?.SelectedNode ?? Entity.Null;
+            if (node == Entity.Null) { log.Warn("SetAreaStyle ignored — no node selected"); return; }
+            if (!EntityManager.HasBuffer<MarkingArea>(node)) return;
+
+            var areas = EntityManager.GetBuffer<MarkingArea>(node);
+            if (areaIndex < 0 || areaIndex >= areas.Length) return;
+            var area = areas[areaIndex];
+            area.styleId = styleId;
+            areas[areaIndex] = area;
+            log.Info($"UI: set area#{areaIndex} style → {styleId} on node#{node.Index}");
+        }
+
+        /// <summary>Hide/show a committed area without deleting it. Pieces keep their own
+        /// visibility flags, so hide → show restores the previous piece pattern.</summary>
+        private void OnToggleAreaVisible(int areaIndex)
+        {
+            var node = _tool?.SelectedNode ?? Entity.Null;
+            if (node == Entity.Null) { log.Warn("ToggleAreaVisible ignored — no node selected"); return; }
+            if (!EntityManager.HasBuffer<MarkingArea>(node)) return;
+
+            var areas = EntityManager.GetBuffer<MarkingArea>(node);
+            if (areaIndex < 0 || areaIndex >= areas.Length) return;
+            var area = areas[areaIndex];
+            area.visible = !area.visible;
+            areas[areaIndex] = area;
+            log.Info($"UI: area#{areaIndex} on node#{node.Index} → visible={area.visible}");
+        }
+
+        /// <summary>Delete a committed area: drop its buffer entry + vertex slice, remap the
+        /// firstVertex offsets of the areas after it, then force a piece recompute (piece
+        /// headers reference areas by index, so every index after the deleted one shifts).</summary>
+        private void OnDeleteArea(int areaIndex)
+        {
+            var node = _tool?.SelectedNode ?? Entity.Null;
+            if (node == Entity.Null) { log.Warn("DeleteArea ignored — no node selected"); return; }
+            if (!EntityManager.HasBuffer<MarkingArea>(node)) return;
+
+            var areas = EntityManager.GetBuffer<MarkingArea>(node);
+            if (areaIndex < 0 || areaIndex >= areas.Length) return;
+            var removed = areas[areaIndex];
+
+            if (EntityManager.HasBuffer<MarkingAreaVertex>(node) && removed.vertexCount > 0)
+            {
+                var verts = EntityManager.GetBuffer<MarkingAreaVertex>(node);
+                if (removed.firstVertex >= 0 && removed.firstVertex + removed.vertexCount <= verts.Length)
+                    verts.RemoveRange(removed.firstVertex, removed.vertexCount);
+            }
+            areas.RemoveAt(areaIndex);
+            for (int a = 0; a < areas.Length; a++)
+            {
+                var other = areas[a];
+                if (other.firstVertex > removed.firstVertex)
+                {
+                    other.firstVertex -= removed.vertexCount;
+                    areas[a] = other;
+                }
+            }
+
+            // Piece headers address areas by index — bust the combined hash so
+            // MarkingAreaTopologySystem rebuilds them against the shifted list.
+            if (EntityManager.HasComponent<MarkingAreaTopologyState>(node))
+                EntityManager.SetComponentData(node, new MarkingAreaTopologyState { combinedHash = 0 });
+            if (!EntityManager.HasComponent<Updated>(node))
+                EntityManager.AddComponent<Updated>(node);
+            log.Info($"UI: deleted area#{areaIndex} on node#{node.Index} ({areas.Length} remaining)");
+        }
+
+        /// <summary>Full reset of the selected node: every line, segment, area and the vanilla
+        /// override go away in one shot, restoring stock game markings. Buffers are cleared (not
+        /// removed) — emission systems diff against the now-empty desired sets and despawn all
+        /// our sublanes / Area entities on the next tick, and the absence of user lines plus the
+        /// removed MarkingOverride lets CustomSecondaryLaneSystem regenerate vanilla markings.</summary>
+        private void OnResetNode()
+        {
+            var node = _tool?.SelectedNode ?? Entity.Null;
+            if (node == Entity.Null) { log.Warn("ResetNode ignored — no node selected"); return; }
+
+            if (EntityManager.HasBuffer<MarkingLine>(node))
+                EntityManager.GetBuffer<MarkingLine>(node).Clear();
+            if (EntityManager.HasBuffer<MarkingSegment>(node))
+                EntityManager.GetBuffer<MarkingSegment>(node).Clear();
+            if (EntityManager.HasBuffer<MarkingArea>(node))
+                EntityManager.GetBuffer<MarkingArea>(node).Clear();
+            if (EntityManager.HasBuffer<MarkingAreaVertex>(node))
+                EntityManager.GetBuffer<MarkingAreaVertex>(node).Clear();
+            if (EntityManager.HasBuffer<MarkingAreaPiece>(node))
+                EntityManager.GetBuffer<MarkingAreaPiece>(node).Clear();
+            if (EntityManager.HasBuffer<MarkingAreaPieceVertex>(node))
+                EntityManager.GetBuffer<MarkingAreaPieceVertex>(node).Clear();
+            if (EntityManager.HasComponent<MarkingOverride>(node))
+                EntityManager.RemoveComponent<MarkingOverride>(node);
+            if (EntityManager.HasComponent<MarkingTopologyState>(node))
+                EntityManager.SetComponentData(node, new MarkingTopologyState { linesHash = 0 });
+            if (EntityManager.HasComponent<MarkingAreaTopologyState>(node))
+                EntityManager.SetComponentData(node, new MarkingAreaTopologyState { combinedHash = 0 });
+            if (!EntityManager.HasComponent<Updated>(node))
+                EntityManager.AddComponent<Updated>(node);
+            log.Info($"UI: full reset of node#{node.Index} — lines, areas and vanilla override cleared");
         }
     }
 }

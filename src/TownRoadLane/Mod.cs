@@ -39,6 +39,7 @@ namespace TownRoadLane
             Settings.RegisterKeyBindings();
             Settings.RegisterInOptionsUI();
             GameManager.instance.localizationManager.AddSource("en-US", new LocaleEN(Settings));
+            GameManager.instance.localizationManager.AddSource("ru-RU", new LocaleRU(Settings));
             AssetDatabase.global.LoadSettings(nameof(TownRoadLane), Settings, new Setting(this));
 
             // Read-only structural dump, useful when something changes between game patches.

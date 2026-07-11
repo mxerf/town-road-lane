@@ -10,10 +10,20 @@ import {
   cmdSetHoveredSegment,
   cmdSetLineCurvature,
   cmdToggleVanillaMarkings,
+  cmdActivateTool,
+  cmdSetCurrentStyle,
+  cmdSetCurrentAreaStyle,
+  cmdToggleAreaMode,
+  cmdSetAreaStyle,
+  cmdToggleAreaVisible,
+  cmdDeleteArea,
+  cmdResetNode,
+  TOOL_STATE,
   LineVM,
   SegmentVM,
+  AreaVM,
 } from "../hooks/useToolState";
-import { ChevronRight, Eye, EyeOff, Trash, Cycle } from "../components/icons";
+import { ChevronRight, Cross, Eye, EyeOff, Trash, Cycle } from "../components/icons";
 import { Dropdown, DropdownOption } from "../components/Dropdown";
 import { TooltipProvider, Tooltip } from "../components/Tooltip";
 import { useT } from "../i18n";
@@ -23,11 +33,24 @@ import {
   Panel,
   PanelStickyChrome,
   PanelTitle,
+  PanelHeaderRow,
+  CloseBtn,
   PanelMeta,
-  PanelMetaValue,
   PanelMetaSep,
   PanelHint,
   PanelList,
+  ModeRow,
+  ModeBtn,
+  DraftBox,
+  DraftTitle,
+  DraftProgress,
+  DraftHint,
+  FieldRow,
+  FieldLabel,
+  SectionTitle,
+  HintsBox,
+  HintRow,
+  HintKey,
   LineRowOuter,
   LineHeader,
   LineChevron,
@@ -94,6 +117,14 @@ const STYLE_KEYS: Record<number, StringKey> = {
 
 const styleLabel = (t: ReturnType<typeof useT>, style: number): string =>
   t(STYLE_KEYS[style] ?? "style.unknown");
+
+// Area fill styles — indexes match kStyleSurfaceNames in MarkingAreaEmissionSystem.
+const AREA_STYLE_VALUES = [0, 1, 2, 3, 4, 5, 6] as const;
+
+const areaStyleLabel = (t: ReturnType<typeof useT>, styleId: number): string => {
+  const key = `areaStyle.${styleId}` as StringKey;
+  return styleId >= 0 && styleId < AREA_STYLE_VALUES.length ? t(key) : t("style.unknown");
+};
 
 // Exported wrapper — boundary first, then real panel. moduleRegistry mounts
 // this into GameTopRight, so the boundary protects the game UI from our bugs.
@@ -203,12 +234,34 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   );
 };
 
+// Static footer with the tool's keyboard map. The bindings are configurable in
+// the mod settings, but the defaults cover ~all users; the settings screen is
+// linked from the game's own options, not from here.
+const HotkeyHints = () => {
+  const t = useT();
+  return (
+    <HintsBox>
+      <SectionTitle style={{ marginTop: 0 }}>{t("hotkeys.title")}</SectionTitle>
+      <HintRow><HintKey>Ctrl+M</HintKey><span>{t("hotkeys.toggle")}</span></HintRow>
+      <HintRow><HintKey>Y</HintKey><span>{t("hotkeys.cycleLine")}</span></HintRow>
+      <HintRow><HintKey>A</HintKey><span>{t("hotkeys.areaMode")}</span></HintRow>
+      <HintRow><HintKey>U</HintKey><span>{t("hotkeys.cycleArea")}</span></HintRow>
+      <HintRow><HintKey>{t("hotkeys.rmb")}</HintKey><span>{t("hotkeys.rmb.desc")}</span></HintRow>
+      <HintRow><HintKey>{t("hotkeys.esc")}</HintKey><span>{t("hotkeys.esc.desc")}</span></HintRow>
+    </HintsBox>
+  );
+};
+
 const TownRoadLanePanelInner = () => {
   const state = useToolState();
   const t = useT();
   // Index of the currently-expanded line row. -1 = all collapsed.
   // Auto-snaps to a single-line selection so a fresh node opens immediately.
   const [expandedLine, setExpandedLine] = useState<number>(-1);
+  // Index of the currently-expanded area row. Independent of expandedLine —
+  // lines and areas are separate lists and expanding one shouldn't collapse
+  // the other.
+  const [expandedArea, setExpandedArea] = useState<number>(-1);
   // Pending delete confirmation for the expanded line, driven by the Delete
   // keyboard shortcut (B2). First press flips this on; second press inside the
   // 3s window actually deletes. The DeleteLineButton mirrors this state so the
@@ -226,6 +279,11 @@ const TownRoadLanePanelInner = () => {
       setExpandedLine(-1);
     }
   }, [state.selectedNodeIndex, state.lines.length]);
+
+  // Areas: clamp the expanded row when the list shrinks; collapse on node switch.
+  useEffect(() => {
+    if (expandedArea >= state.areas.length) setExpandedArea(-1);
+  }, [state.selectedNodeIndex, state.areas.length]);
 
   // Reverse hover-bridge: user clicked on a line in the game world (not a dot, not on
   // an existing accordion row). Auto-expand the matching line. Tick-based — same line
@@ -314,23 +372,117 @@ const TownRoadLanePanelInner = () => {
     return () => window.clearTimeout(id);
   }, [pendingDelete]);
 
-  if (!state.isActive || state.selectedNodeIndex < 0) return null;
+  if (!state.isActive) return null;
+
+  const inAreaMode = state.toolState === TOOL_STATE.AreaSelecting;
+
+  // Tool active, nothing selected yet: a compact "how to start" card. Without
+  // this the tool felt OFF after activation (no visual change anywhere until
+  // the first node click).
+  if (state.selectedNodeIndex < 0) {
+    return (
+      <Panel>
+        <PanelHeaderRow>
+          <PanelTitle>{t("panel.appTitle")}</PanelTitle>
+          <Tooltip content={t("panel.close.tooltip")}>
+            <CloseBtn onClick={() => cmdActivateTool()}>
+              <Cross size={10} />
+            </CloseBtn>
+          </Tooltip>
+        </PanelHeaderRow>
+        <PanelHint>{t("panel.hint.selectNode")}</PanelHint>
+        <HotkeyHints />
+      </Panel>
+    );
+  }
 
   const popoverLine =
     expandedLine >= 0 && expandedLine < state.lines.length ? state.lines[expandedLine] : null;
+
+  const lineStyleOptions: DropdownOption<StyleValue>[] = STYLE_VALUES.map((s) => ({
+    value: s,
+    label: styleLabel(t, s),
+  }));
+  const areaStyleOptions: DropdownOption<number>[] = AREA_STYLE_VALUES.map((s) => ({
+    value: s,
+    label: areaStyleLabel(t, s),
+  }));
 
   return (
     <>
       <Panel>
         <PanelStickyChrome>
-          <PanelTitle>{t("panel.title", { n: state.selectedNodeIndex })}</PanelTitle>
+          <PanelHeaderRow>
+            <PanelTitle>{t("panel.appTitle")}</PanelTitle>
+            <Tooltip content={t("panel.close.tooltip")}>
+              <CloseBtn onClick={() => cmdActivateTool()}>
+                <Cross size={10} />
+              </CloseBtn>
+            </Tooltip>
+          </PanelHeaderRow>
           <PanelMeta>
+            <span>{t("panel.title", { n: state.selectedNodeIndex })}</span>
+            <PanelMetaSep />
             <span>{t("panel.meta.lines", { n: state.lines.length })}</span>
             <PanelMetaSep />
-            <span>
-              {t("panel.meta.defaultStyle")} <PanelMetaValue>{styleLabel(t, state.currentStyle)}</PanelMetaValue>
-            </span>
+            <span>{t("panel.meta.areas", { n: state.areas.length })}</span>
           </PanelMeta>
+
+          <ModeRow>
+            <Tooltip content={t("mode.lines.tooltip")}>
+              <ModeBtn
+                $active={!inAreaMode}
+                onClick={() => { if (inAreaMode) cmdToggleAreaMode(); }}
+              >
+                {t("mode.lines")}
+              </ModeBtn>
+            </Tooltip>
+            <Tooltip content={t("mode.area.tooltip")}>
+              <ModeBtn
+                $active={inAreaMode}
+                onClick={() => { if (!inAreaMode) cmdToggleAreaMode(); }}
+              >
+                {t("mode.area")}
+              </ModeBtn>
+            </Tooltip>
+          </ModeRow>
+
+          {inAreaMode ? (
+            <>
+              <FieldRow>
+                <Tooltip content={t("next.areaStyle.tooltip")}>
+                  <FieldLabel>{t("next.areaStyle")}</FieldLabel>
+                </Tooltip>
+                <Dropdown
+                  value={state.currentAreaStyle}
+                  options={areaStyleOptions}
+                  onChange={(s) => cmdSetCurrentAreaStyle(s)}
+                />
+              </FieldRow>
+              <DraftBox>
+                <DraftTitle>{t("area.draft.title")}</DraftTitle>
+                <DraftProgress>{t("area.draft.progress", { n: state.areaVertexCount })}</DraftProgress>
+                <DraftHint>{t("area.draft.hint.add")}</DraftHint>
+                <DraftHint>{t("area.draft.hint.undo")}</DraftHint>
+                <DraftHint>{t("area.draft.hint.close")}</DraftHint>
+                <Btn $full onClick={() => cmdToggleAreaMode()}>
+                  <span>{t("area.draft.cancel")}</span>
+                </Btn>
+              </DraftBox>
+            </>
+          ) : (
+            <FieldRow>
+              <Tooltip content={t("next.lineStyle.tooltip")}>
+                <FieldLabel>{t("next.lineStyle")}</FieldLabel>
+              </Tooltip>
+              <Dropdown
+                value={state.currentStyle as StyleValue}
+                options={lineStyleOptions}
+                onChange={(s) => cmdSetCurrentStyle(s)}
+              />
+            </FieldRow>
+          )}
+
           <Tooltip content={t("vanilla.tooltip")}>
             <Btn $full onClick={cmdToggleVanillaMarkings}>
               {state.vanillaHidden ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -339,27 +491,57 @@ const TownRoadLanePanelInner = () => {
           </Tooltip>
         </PanelStickyChrome>
 
-        {state.lines.length === 0 && (
+        {state.lines.length === 0 && state.areas.length === 0 && (
           <PanelHint>{t("panel.hint.empty")}</PanelHint>
         )}
 
-        <PanelList>
-          {state.lines.map((line) => (
-            <LineRow
-              key={line.lineIndex}
-              line={line}
-              isExpanded={expandedLine === line.lineIndex}
-              isGameHovered={state.hoveredLineInGame === line.lineIndex}
-              isPendingDelete={pendingDelete === line.lineIndex}
-              onToggleExpand={() =>
-                setExpandedLine(expandedLine === line.lineIndex ? -1 : line.lineIndex)
-              }
-              onCancelPendingDelete={() => setPendingDelete(-1)}
-            />
-          ))}
-        </PanelList>
+        {state.lines.length > 0 && (
+          <>
+            <SectionTitle>{t("section.lines")}</SectionTitle>
+            <PanelList>
+              {state.lines.map((line) => (
+                <LineRow
+                  key={line.lineIndex}
+                  line={line}
+                  isExpanded={expandedLine === line.lineIndex}
+                  isGameHovered={state.hoveredLineInGame === line.lineIndex}
+                  isPendingDelete={pendingDelete === line.lineIndex}
+                  onToggleExpand={() =>
+                    setExpandedLine(expandedLine === line.lineIndex ? -1 : line.lineIndex)
+                  }
+                  onCancelPendingDelete={() => setPendingDelete(-1)}
+                />
+              ))}
+            </PanelList>
+          </>
+        )}
+
+        {state.areas.length > 0 && (
+          <>
+            <SectionTitle>{t("section.areas")}</SectionTitle>
+            <PanelList>
+              {state.areas.map((area) => (
+                <AreaRow
+                  key={area.areaIndex}
+                  area={area}
+                  isExpanded={expandedArea === area.areaIndex}
+                  areaStyleOptions={areaStyleOptions}
+                  onToggleExpand={() =>
+                    setExpandedArea(expandedArea === area.areaIndex ? -1 : area.areaIndex)
+                  }
+                />
+              ))}
+            </PanelList>
+          </>
+        )}
+
+        {(state.lines.length > 0 || state.areas.length > 0 || state.vanillaHidden) && (
+          <ResetNodeButton />
+        )}
+
+        <HotkeyHints />
       </Panel>
-      {popoverLine?.segments.map((seg) => (
+      {!inAreaMode && popoverLine?.segments.map((seg) => (
         <SegmentPopover
           key={`pop-${seg.lineIndex}-${seg.segmentIndex}`}
           seg={seg}
@@ -416,6 +598,114 @@ const LineRow = ({
         />
       </LineBody>
     </LineRowOuter>
+  );
+};
+
+// Area accordion row — mirrors LineRow's layout so the two lists read as one
+// visual system. Body controls: fill-style dropdown, visibility toggle, and a
+// two-stage delete (same confirm pattern as lines).
+const AreaRow = ({
+  area,
+  isExpanded,
+  areaStyleOptions,
+  onToggleExpand,
+}: {
+  area: AreaVM;
+  isExpanded: boolean;
+  areaStyleOptions: DropdownOption<number>[];
+  onToggleExpand: () => void;
+}) => {
+  const t = useT();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const id = window.setTimeout(() => setConfirmingDelete(false), 3000);
+    return () => window.clearTimeout(id);
+  }, [confirmingDelete]);
+
+  return (
+    <LineRowOuter $expanded={isExpanded}>
+      <LineHeader onClick={onToggleExpand}>
+        <LineChevron $open={isExpanded}>
+          <ChevronRight size={10} />
+        </LineChevron>
+        <LineTitle>{t("area.title", { n: area.areaIndex })}</LineTitle>
+        <LineStyleTag>{areaStyleLabel(t, area.styleId)}</LineStyleTag>
+        <LineSegCount>
+          {area.pieceCount > 1
+            ? t("area.pieces", { visible: area.visiblePieces, total: area.pieceCount })
+            : t("area.meta.vertices", { n: area.vertexCount })}
+        </LineSegCount>
+      </LineHeader>
+      <LineBody $open={isExpanded}>
+        <FieldRow style={{ marginTop: 0 }}>
+          <FieldLabel>{t("area.style")}</FieldLabel>
+          <Dropdown
+            value={area.styleId}
+            options={areaStyleOptions}
+            onChange={(s) => cmdSetAreaStyle(area.areaIndex, s)}
+          />
+        </FieldRow>
+        <Tooltip content={area.visible ? t("area.hide.tooltip") : t("area.show.tooltip")}>
+          <Btn $full onClick={() => cmdToggleAreaVisible(area.areaIndex)}>
+            {area.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+            <span>{area.visible ? t("area.hide.tooltip") : t("area.show.tooltip")}</span>
+          </Btn>
+        </Tooltip>
+        {!confirmingDelete ? (
+          <Btn $danger $full onClick={() => setConfirmingDelete(true)}>
+            <Trash size={12} color={T.colorDanger} />
+            <span>{t("area.delete")}</span>
+          </Btn>
+        ) : (
+          <ConfirmRow>
+            <Btn onClick={() => setConfirmingDelete(false)}>
+              <span>{t("line.delete.cancel")}</span>
+            </Btn>
+            <Btn $danger onClick={() => { cmdDeleteArea(area.areaIndex); setConfirmingDelete(false); }}>
+              <Trash size={12} color={T.colorDanger} />
+              <span>{t("line.delete.confirm.btn")}</span>
+            </Btn>
+          </ConfirmRow>
+        )}
+      </LineBody>
+    </LineRowOuter>
+  );
+};
+
+// Full node reset — wipes every line, area and the vanilla-hide override on
+// the selected node, restoring stock markings. Destructive and node-wide, so
+// it gets the same two-stage confirm as deletes and hides at the very bottom
+// of the panel (rendered only when there is actually something to reset).
+const ResetNodeButton = () => {
+  const t = useT();
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (!confirming) return;
+    const id = window.setTimeout(() => setConfirming(false), 3000);
+    return () => window.clearTimeout(id);
+  }, [confirming]);
+
+  if (!confirming) {
+    return (
+      <Tooltip content={t("node.reset.tooltip")}>
+        <Btn $danger $full onClick={() => setConfirming(true)}>
+          <Trash size={12} color={T.colorDanger} />
+          <span>{t("node.reset")}</span>
+        </Btn>
+      </Tooltip>
+    );
+  }
+  return (
+    <ConfirmRow>
+      <Btn onClick={() => setConfirming(false)}>
+        <span>{t("line.delete.cancel")}</span>
+      </Btn>
+      <Btn $danger onClick={() => { cmdResetNode(); setConfirming(false); }}>
+        <Trash size={12} color={T.colorDanger} />
+        <span>{t("line.delete.confirm.btn")}</span>
+      </Btn>
+    </ConfirmRow>
   );
 };
 

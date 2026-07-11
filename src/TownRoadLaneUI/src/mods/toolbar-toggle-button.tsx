@@ -1,23 +1,27 @@
+import { FloatingButton, Tooltip } from "cs2/ui";
 import { useToolState, cmdActivateTool } from "../hooks/useToolState";
-import { Road } from "../components/icons";
 import { useT } from "../i18n";
-import { ToolbarBtn } from "./panel.styles";
+import iconSrc from "../assets/marking-tool.svg";
 
-// Small round button in the top-left game cluster. Click toggles our marking
-// tool active/inactive — same effect as Ctrl+M or the settings button, but
-// always visible on screen. Icon-only for compactness; full label sits in
-// the native tooltip.
+// Toolbar toggle in the top-left game cluster. Uses the vanilla cs2/ui
+// FloatingButton — the exact component the game (and mods like Traffic) use
+// for tool toggles — so we inherit the native round look, hover/press sounds,
+// the selected ring, and theme changes for free. The icon ships as an SVG
+// asset next to the bundle (coui://ui-mods/images/, see webpack asset rule).
+//
+// Tooltip is the vanilla cs2/ui one wrapped AROUND the button —
+// FloatingButton's own tooltipLabel prop is ignored by this variant, so
+// wrapping is the pattern every mod uses for native tooltips here.
 export const ToolbarToggleButton = () => {
   const state = useToolState();
   const t = useT();
   return (
-    <ToolbarBtn
-      $active={state.isActive}
-      onClick={() => cmdActivateTool()}
-      title={t("toolbar.toggle.tooltip")}
-      aria-label={t("toolbar.toggle.label")}
-    >
-      <Road size={18} />
-    </ToolbarBtn>
+    <Tooltip tooltip={t("toolbar.toggle.tooltip")}>
+      <FloatingButton
+        src={iconSrc}
+        selected={state.isActive}
+        onSelect={() => cmdActivateTool()}
+      />
+    </Tooltip>
   );
 };

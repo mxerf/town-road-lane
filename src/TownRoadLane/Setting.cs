@@ -302,4 +302,97 @@ namespace TownRoadLane
 
         public void Unload() { }
     }
+
+    public class LocaleRU : IDictionarySource
+    {
+        private readonly Setting m_Setting;
+        public LocaleRU(Setting setting) { m_Setting = setting; }
+
+        public IEnumerable<KeyValuePair<string, string>> ReadEntries(IList<IDictionaryEntryError> errors, Dictionary<string, int> indexCounts)
+        {
+            return new Dictionary<string, string>
+            {
+                { m_Setting.GetSettingsLocaleID(), "Town Road Lane" },
+                { m_Setting.GetOptionTabLocaleID(Setting.kSection), "Основное" },
+
+                { m_Setting.GetOptionGroupLocaleID(Setting.kEdgeGroup), "Краевая линия у бордюра" },
+                { m_Setting.GetOptionGroupLocaleID(Setting.kParkingGroup), "Разметка параллельной парковки" },
+                { m_Setting.GetOptionGroupLocaleID(Setting.kReapplyGroup), "Применение к существующим дорогам" },
+                { m_Setting.GetOptionGroupLocaleID(Setting.kKeybindGroup), "Горячие клавиши" },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EdgeLineEnabled)), "Краевая линия на городских дорогах" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EdgeLineEnabled)),
+                    "Добавляет краевую линию у бордюра обычным городским дорогам (полосы 3 м) — так же, как на шоссе. Применяется при следующем обновлении дороги; для уже построенных дорог используйте кнопку «Переприменить» ниже." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EdgeLineStyle)), "Стиль краевой линии" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EdgeLineStyle)),
+                    "Стиль меша краевой линии. Варианты «G87» требуют мод [G87] Road Markings; без него используется ванильный стиль." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingMarkingsEnabled)), "Размечать зоны параллельной парковки" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingMarkingsEnabled)),
+                    "Рисует линию вдоль зон параллельной уличной парковки с поперечной чертой на концах квартала. Дороги без сублейна Parking Lane 2 (односторонние трёхполосные, асимметричные варианты) остаются без разметки — то же покрытие, что и в v1.1." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingLineStyle)), "Стиль линии парковки" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingLineStyle)),
+                    "Продольная линия вдоль парковочной зоны. Варианты «G87» требуют мод [G87] Road Markings." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingEndStyle)), "Стиль концевой черты парковки" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingEndStyle)),
+                    "Короткая поперечная черта в начале и конце парковочного квартала. «Нет» отключает черты. Варианты «G87» требуют мод [G87] Road Markings." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ReapplyMarkings)), "Переприменить разметку сейчас" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ReapplyMarkings)),
+                    "Заново применяет выбранные стили и перестраивает разметку на всех дорогах города. В большом городе возможно кратковременное подвисание. Дороги Road Builder пропускаются во избежание известных вылетов. ВНИМАНИЕ: на некоторых сейвах известен вылет через 10–20 с после запуска — в этом случае сохранитесь и перезагрузите сейв, стиль применится." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ActivateMarkingTool)), "Активировать инструмент разметки" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ActivateMarkingTool)),
+                    "Включает/выключает инструмент настройки разметки перекрёстков. То же, что горячая клавиша ниже, но работает всегда (кнопку не может перехватить другой мод)." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ToggleMarkingToolBinding)), "Инструмент разметки (клавиша)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleMarkingToolBinding)),
+                    "Включает или выключает инструмент настройки разметки перекрёстков. По умолчанию Ctrl+M. Если клавиша не срабатывает (перехвачена другим модом), используйте кнопку выше." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.CycleMarkingStyleBinding)), "Стиль линии по кругу (клавиша)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.CycleMarkingStyleBinding)),
+                    "При активном инструменте листает стили: сплошная → пунктир → … Выбранный стиль применяется к СЛЕДУЮЩЕЙ линии. По умолчанию Y. Цвет точек-якорей отражает текущий стиль." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EnterAreaModeBinding)), "Режим области (клавиша)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EnterAreaModeBinding)),
+                    "При выбранном узле запускает режим полигональной области: кликайте по опорным точкам, чтобы построить заливку. Повторное нажатие или Esc — отмена. По умолчанию A." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.CycleAreaStyleBinding)), "Стиль области по кругу (клавиша)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.CycleAreaStyleBinding)),
+                    "При активном инструменте листает стиль заливки для СЛЕДУЮЩЕЙ замкнутой области (бетон → вафельная разметка → белая штриховка → жёлтая штриховка → велополоса → автобусная полоса → сначала). По умолчанию U. Стили G87 без установленного мода G87 заменяются бетоном." },
+
+                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid), "Белая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolidThick), "Белая сплошная (толстая)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteDashed), "Белый пунктир" },
+                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.YellowSolid), "Жёлтая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid_G87), "Белая сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteDashed_G87), "Белый пунктир (G87)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.YellowSolid_G87), "Жёлтая сплошная (G87)" },
+
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashedDense), "Белый пунктир (частый)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashed), "Белый пунктир" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteSolid), "Белая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowDashed), "Жёлтый пунктир" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowSolid), "Жёлтая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteSolid_G87), "Белая сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashed_G87), "Белый пунктир (G87)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowSolid_G87), "Жёлтая сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowDashed_G87), "Жёлтый пунктир (G87)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.BlueSolid_G87), "Синяя сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.BlueDashed_G87), "Синий пунктир (G87)" },
+
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.None), "Нет" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.WhiteSolid), "Белая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.WhiteSolidThick), "Белая сплошная (толстая)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.WhiteTerminal_G87), "Белая концевая линия (G87)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.YellowTerminal_G87), "Жёлтая концевая линия (G87)" },
+                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.BlueSolid_G87), "Синяя сплошная (G87)" },
+            };
+        }
+
+        public void Unload() { }
+    }
 }

@@ -31,8 +31,34 @@ export interface LineVM {
   segments: SegmentVM[];
 }
 
+// One user-closed polygon area on the selected node. pieceCount/visiblePieces
+// reflect the post-split state (lines crossing the area cut it into pieces).
+export interface AreaVM {
+  areaIndex: number;
+  styleId: number;        // index into the C#-side kStyleSurfaceNames catalogue
+  visible: boolean;
+  vertexCount: number;
+  pieceCount: number;
+  visiblePieces: number;
+}
+
+// Mirrors MarkingNodeToolSystem.State — drives the panel's mode UI.
+export const TOOL_STATE = {
+  Default: 0,
+  NodeSelected: 1,
+  SourceSelected: 2,
+  AreaSelecting: 3,
+} as const;
+
 export interface ToolStateVM {
   isActive: boolean;       // tool currently the active tool
+  // Tool sub-state (see TOOL_STATE). AreaSelecting means the user is collecting
+  // polygon vertices; the panel shows draft progress + a cancel affordance.
+  toolState: number;
+  // Vertices collected so far in the running area contour (AreaSelecting only).
+  areaVertexCount: number;
+  // Fill style for the NEXT area the user closes (cycled by U / set by the panel).
+  currentAreaStyle: number;
   selectedNodeIndex: number; // -1 when no node selected
   currentStyle: number;    // enum value
   // Reverse hover-bridge: lineIndex of the line the user clicked on in the game world
@@ -50,10 +76,14 @@ export interface ToolStateVM {
   // markings on the node are suppressed regardless of user lines.
   vanillaHidden: boolean;
   lines: LineVM[];
+  areas: AreaVM[];
 }
 
 const EMPTY: ToolStateVM = {
   isActive: false,
+  toolState: 0,
+  areaVertexCount: 0,
+  currentAreaStyle: 0,
   selectedNodeIndex: -1,
   currentStyle: 0,
   lastClickedLine: -1,
@@ -61,6 +91,7 @@ const EMPTY: ToolStateVM = {
   hoveredLineInGame: -1,
   vanillaHidden: false,
   lines: [],
+  areas: [],
 };
 
 const STATE_BINDING = bindValue<string>("TownRoadLane", "GetToolState", "{}");
@@ -76,6 +107,9 @@ export const useToolState = (): ToolStateVM => {
     // so consumers can trust ToolStateVM invariants.
     return {
       isActive: Boolean(raw.isActive),
+      toolState: typeof raw.toolState === "number" ? raw.toolState : 0,
+      areaVertexCount: typeof raw.areaVertexCount === "number" ? raw.areaVertexCount : 0,
+      currentAreaStyle: typeof raw.currentAreaStyle === "number" ? raw.currentAreaStyle : 0,
       selectedNodeIndex: typeof raw.selectedNodeIndex === "number" ? raw.selectedNodeIndex : -1,
       currentStyle: typeof raw.currentStyle === "number" ? raw.currentStyle : 0,
       lastClickedLine: typeof raw.lastClickedLine === "number" ? raw.lastClickedLine : -1,
@@ -100,6 +134,16 @@ export const useToolState = (): ToolStateVM => {
                   screenY: typeof s?.screenY === "number" ? s.screenY : -1,
                 }))
               : [],
+          }))
+        : [],
+      areas: Array.isArray((raw as any).areas)
+        ? (raw as any).areas.map((a: any) => ({
+            areaIndex: typeof a?.areaIndex === "number" ? a.areaIndex : -1,
+            styleId: typeof a?.styleId === "number" ? a.styleId : 0,
+            visible: Boolean(a?.visible),
+            vertexCount: typeof a?.vertexCount === "number" ? a.vertexCount : 0,
+            pieceCount: typeof a?.pieceCount === "number" ? a.pieceCount : 0,
+            visiblePieces: typeof a?.visiblePieces === "number" ? a.visiblePieces : 0,
           }))
         : [],
     };
@@ -145,6 +189,44 @@ export const cmdToggleVanillaMarkings = () => {
 // button. Triggered from the toolbar button in GameTopLeft.
 export const cmdActivateTool = () => {
   trigger("TownRoadLane", "ActivateTool");
+};
+
+// Style for the NEXT line drawn — panel dropdown mirror of the Y hotkey cycle.
+export const cmdSetCurrentStyle = (style: number) => {
+  trigger("TownRoadLane", "SetCurrentStyle", style);
+};
+
+// Fill style for the NEXT area closed — panel dropdown mirror of the U hotkey.
+export const cmdSetCurrentAreaStyle = (styleId: number) => {
+  trigger("TownRoadLane", "SetCurrentAreaStyle", styleId);
+};
+
+// Switch between line drawing (NodeSelected) and polygon-area collection
+// (AreaSelecting) — panel mode buttons, mirrors the A hotkey. Leaving area
+// mode drops any partially collected contour without committing.
+export const cmdToggleAreaMode = () => {
+  trigger("TownRoadLane", "ToggleAreaMode");
+};
+
+// Change the fill style of a committed area (panel dropdown per area row).
+export const cmdSetAreaStyle = (areaIndex: number, styleId: number) => {
+  trigger("TownRoadLane", "SetAreaStyle", areaIndex, styleId);
+};
+
+// Hide/show a committed area without deleting it.
+export const cmdToggleAreaVisible = (areaIndex: number) => {
+  trigger("TownRoadLane", "ToggleAreaVisible", areaIndex);
+};
+
+// Delete a committed area (its pieces + vanilla Area entities follow next tick).
+export const cmdDeleteArea = (areaIndex: number) => {
+  trigger("TownRoadLane", "DeleteArea", areaIndex);
+};
+
+// Full reset of the selected node: all lines, all areas, and the vanilla-hide
+// override — back to stock game markings in one click.
+export const cmdResetNode = () => {
+  trigger("TownRoadLane", "ResetNode");
 };
 
 // Tell C# which line row the user is currently hovering over in the panel.

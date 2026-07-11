@@ -15,12 +15,73 @@ const enUS = {
   "toolbar.toggle.tooltip":   "Toggle TownRoadLane marking tool (Ctrl+M)",
 
   // Panel chrome
+  "panel.appTitle":           "Road Markings",
   "panel.title":              "Node #{n}",
-  "panel.meta.lines":         "{n} line(s)",
+  "panel.close.tooltip":      "Close the marking tool",
+  "panel.meta.lines":         "lines: {n}",
+  "panel.meta.areas":         "areas: {n}",
   "panel.meta.defaultStyle":  "default style",
-  "panel.hint.empty":         "Click two endpoint dots to draw a line.",
+  "panel.hint.selectNode":    "Click an intersection on the map to edit its markings.",
+  "panel.hint.empty":         "Click two endpoint dots to draw a line, or switch to Area mode to fill a polygon.",
   "panel.error.title":        "Panel error",
   "panel.error.retry":        "Retry",
+
+  // Mode switch
+  "mode.lines":               "Lines",
+  "mode.area":                "Area",
+  "mode.lines.tooltip":       "Draw marking lines between endpoint dots",
+  "mode.area.tooltip":        "Fill a polygon between anchor dots (safety islands, hatched zones)",
+
+  // Area draft (AreaSelecting)
+  "area.draft.title":         "New area",
+  "area.draft.progress":      "points placed: {n}",
+  "area.draft.hint.add":      "LMB — add a point",
+  "area.draft.hint.undo":     "RMB — remove the last point",
+  "area.draft.hint.close":    "Click the first point again to close (needs 3+)",
+  "area.draft.cancel":        "Cancel area",
+
+  // Next-object style pickers
+  "next.lineStyle":           "New line style",
+  "next.lineStyle.tooltip":   "Style applied to the NEXT line you draw (hotkey Y cycles it)",
+  "next.areaStyle":           "New area fill",
+  "next.areaStyle.tooltip":   "Fill applied to the NEXT area you close (hotkey U cycles it). Non-concrete fills require the G87 Road Markings mod.",
+
+  // Sections
+  "section.lines":            "Lines",
+  "section.areas":            "Areas",
+
+  // Area rows
+  "area.title":               "Area #{n}",
+  "area.pieces":              "{visible}/{total}",
+  "area.meta.vertices":       "{n} pts",
+  "area.hide.tooltip":        "Hide area",
+  "area.show.tooltip":        "Show area",
+  "area.delete":              "Delete area",
+  "area.style":               "Fill style",
+
+  // Area fill styles (indexes match kStyleSurfaceNames on the C# side)
+  "areaStyle.0":              "Concrete",
+  "areaStyle.1":              "Junction box (G87)",
+  "areaStyle.2":              "White stripes (G87)",
+  "areaStyle.3":              "White stripes, sparse (G87)",
+  "areaStyle.4":              "Yellow stripes (G87)",
+  "areaStyle.5":              "Green bike lane (G87)",
+  "areaStyle.6":              "Red bus lane (G87)",
+
+  // Full node reset
+  "node.reset":               "Reset all markings",
+  "node.reset.tooltip":       "Delete every line and area on this node and bring back the game's own markings.",
+
+  // Hotkey hints footer
+  "hotkeys.title":            "Hotkeys",
+  "hotkeys.toggle":           "toggle tool",
+  "hotkeys.cycleLine":        "next line style",
+  "hotkeys.cycleArea":        "next area fill",
+  "hotkeys.areaMode":         "area mode",
+  "hotkeys.rmb":              "RMB",
+  "hotkeys.rmb.desc":         "undo point / cancel",
+  "hotkeys.esc":              "Esc",
+  "hotkeys.esc.desc":         "step back",
 
   // Vanilla markings toggle
   "vanilla.hide":             "Hide vanilla markings",
@@ -61,12 +122,73 @@ const ruRU: LocaleDict = {
   "toolbar.toggle.tooltip":   "Включить инструмент разметки TownRoadLane (Ctrl+M)",
 
   // Panel chrome
+  "panel.appTitle":           "Дорожная разметка",
   "panel.title":              "Узел #{n}",
+  "panel.close.tooltip":      "Закрыть инструмент разметки",
   "panel.meta.lines":         "линий: {n}",
+  "panel.meta.areas":         "областей: {n}",
   "panel.meta.defaultStyle":  "стиль по умолчанию",
-  "panel.hint.empty":         "Кликни две точки на краях узла, чтобы провести линию.",
+  "panel.hint.selectNode":    "Кликните по перекрёстку на карте, чтобы редактировать его разметку.",
+  "panel.hint.empty":         "Кликните две точки, чтобы провести линию, или переключитесь в режим «Область» для заливки полигона.",
   "panel.error.title":        "Ошибка панели",
   "panel.error.retry":        "Повторить",
+
+  // Mode switch
+  "mode.lines":               "Линии",
+  "mode.area":                "Область",
+  "mode.lines.tooltip":       "Рисование линий разметки между точками",
+  "mode.area.tooltip":        "Заливка полигона по опорным точкам (островки безопасности, штриховка)",
+
+  // Area draft (AreaSelecting)
+  "area.draft.title":         "Новая область",
+  "area.draft.progress":      "точек поставлено: {n}",
+  "area.draft.hint.add":      "ЛКМ — добавить точку",
+  "area.draft.hint.undo":     "ПКМ — убрать последнюю точку",
+  "area.draft.hint.close":    "Клик по первой точке — замкнуть (нужно 3+)",
+  "area.draft.cancel":        "Отменить область",
+
+  // Next-object style pickers
+  "next.lineStyle":           "Стиль новой линии",
+  "next.lineStyle.tooltip":   "Стиль СЛЕДУЮЩЕЙ линии, которую вы проведёте (хоткей Y листает по кругу)",
+  "next.areaStyle":           "Заливка новой области",
+  "next.areaStyle.tooltip":   "Заливка СЛЕДУЮЩЕЙ замкнутой области (хоткей U листает по кругу). Все стили, кроме бетона, требуют мод G87 Road Markings.",
+
+  // Sections
+  "section.lines":            "Линии",
+  "section.areas":            "Области",
+
+  // Area rows
+  "area.title":               "Область #{n}",
+  "area.pieces":              "{visible}/{total}",
+  "area.meta.vertices":       "{n} тчк",
+  "area.hide.tooltip":        "Скрыть область",
+  "area.show.tooltip":        "Показать область",
+  "area.delete":              "Удалить область",
+  "area.style":               "Стиль заливки",
+
+  // Area fill styles (indexes match kStyleSurfaceNames on the C# side)
+  "areaStyle.0":              "Бетон",
+  "areaStyle.1":              "Вафельная разметка (G87)",
+  "areaStyle.2":              "Белая штриховка (G87)",
+  "areaStyle.3":              "Белая штриховка, редкая (G87)",
+  "areaStyle.4":              "Жёлтая штриховка (G87)",
+  "areaStyle.5":              "Зелёная велополоса (G87)",
+  "areaStyle.6":              "Красная автобусная полоса (G87)",
+
+  // Full node reset
+  "node.reset":               "Сбросить всю разметку",
+  "node.reset.tooltip":       "Удаляет все линии и области на этом узле и возвращает штатную разметку игры.",
+
+  // Hotkey hints footer
+  "hotkeys.title":            "Горячие клавиши",
+  "hotkeys.toggle":           "вкл/выкл инструмент",
+  "hotkeys.cycleLine":        "стиль новой линии",
+  "hotkeys.cycleArea":        "заливка новой области",
+  "hotkeys.areaMode":         "режим области",
+  "hotkeys.rmb":              "ПКМ",
+  "hotkeys.rmb.desc":         "убрать точку / отмена",
+  "hotkeys.esc":              "Esc",
+  "hotkeys.esc.desc":         "шаг назад",
 
   // Vanilla markings toggle
   "vanilla.hide":             "Скрыть ванильную разметку",

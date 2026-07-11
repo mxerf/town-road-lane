@@ -143,9 +143,10 @@ export const TooltipProvider = ({ children }: { children: ReactNode }) => {
 };
 
 // Wrapper for any element that should show a tooltip. Renders children inside
-// a span that captures mouse events; the span doesn't change layout (display:
-// contents would be cleaner but cohtml's support is unreliable, so we use
-// inline-block + display: inherit which works in practice for buttons).
+// a span that captures mouse events. display: flex (NOT inline-flex — cohtml
+// fails to parse it, see Player.log, leaving the span at its default display)
+// so the wrapper hugs its child deterministically; every mount point is a
+// flex container anyway (cohtml's default display is flex).
 export const Tooltip = ({
   content,
   position = "bottom",
@@ -161,7 +162,7 @@ export const Tooltip = ({
   return (
     <span
       ref={ref}
-      style={{ display: "inline-flex" }}
+      style={{ display: "flex" }}
       onMouseEnter={() => {
         if (ref.current) show(content, ref.current.getBoundingClientRect(), position);
       }}
