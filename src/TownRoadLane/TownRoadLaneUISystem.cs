@@ -345,53 +345,93 @@ namespace TownRoadLane
             return vm;
         }
 
-        /// <summary>World→screen anchors for the per-segment popovers, refreshed every tick while
-        /// a node is selected. Off-screen / behind-camera segments are simply omitted — the JS
-        /// positionRegistry hides popovers whose key received no point this sync. The hash gate
-        /// (positions quantised to 0.1 px) keeps a static camera from pushing anything.</summary>
+        /// <summary>World→screen anchors for the in-world popovers (segment midpoints + area
+        /// centroids), refreshed every tick while a node is selected. Off-screen / behind-camera
+        /// anchors are simply omitted — the JS positionRegistry hides popovers whose key received
+        /// no point this sync. The hash gate (positions quantised to 0.1 px, scale to 0.01) keeps
+        /// a static camera from pushing anything.</summary>
         private void RefreshScreenPoints(Entity node)
         {
             var cam = Camera.main;
-            if (node == Entity.Null || cam == null
-                || !EntityManager.HasBuffer<MarkingLine>(node)
-                || !EntityManager.HasBuffer<MarkingSegment>(node))
+            if (node == Entity.Null || cam == null)
             {
-                if (_lastPointsHash != kFnvOffset)
-                {
-                    _lastPointsHash = kFnvOffset;
-                    _screenPoints.Value = Array.Empty<SegmentPointVM>();
-                }
+                ClearScreenPoints();
                 return;
             }
 
-            var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
-            var segs = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
+            bool hasLines = EntityManager.HasBuffer<MarkingLine>(node)
+                            && EntityManager.HasBuffer<MarkingSegment>(node);
+            bool hasAreas = EntityManager.HasBuffer<MarkingArea>(node)
+                            && EntityManager.HasBuffer<MarkingAreaVertex>(node)
+                            && EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true).Length > 0;
+            if (!hasLines && !hasAreas)
+            {
+                ClearScreenPoints();
+                return;
+            }
+
             var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
             int screenH = Screen.height; // Unity screen Y is bottom-up, CSS is top-down
 
             ulong h = kFnvOffset;
-            var points = new List<SegmentPointVM>(segs.Length);
-            for (int i = 0; i < lines.Length; i++)
+            var points = new List<SegmentPointVM>();
+
+            if (hasLines)
             {
-                if (!MarkingCurveBuilder.TryBuild(endpoints, lines[i], out var fullBez)) continue;
-                int perLineCounter = 0;
-                for (int s = 0; s < segs.Length; s++)
+                var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
+                var segs = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
+                for (int i = 0; i < lines.Length; i++)
                 {
-                    var seg = segs[s];
-                    if (seg.lineIndex != i) continue;
-                    int segmentIndex = perLineCounter++;
-                    // Midpoint world position of the segment — anchor for the popover.
-                    var midWorld = MathUtils.Position(fullBez, (seg.tStart + seg.tEnd) * 0.5f);
-                    var screen = cam.WorldToScreenPoint(midWorld);
-                    if (screen.z <= 0f) continue; // behind camera
+                    if (!MarkingCurveBuilder.TryBuild(endpoints, lines[i], out var fullBez)) continue;
+                    int perLineCounter = 0;
+                    for (int s = 0; s < segs.Length; s++)
+                    {
+                        var seg = segs[s];
+                        if (seg.lineIndex != i) continue;
+                        int segmentIndex = perLineCounter++;
+                        // Midpoint world position of the segment — anchor for the popover.
+                        var midWorld = MathUtils.Position(fullBez, (seg.tStart + seg.tEnd) * 0.5f);
+                        var screen = cam.WorldToScreenPoint(midWorld);
+                        if (screen.z <= 0f) continue; // behind camera
+                        float x = screen.x;
+                        float y = screenH - screen.y;
+                        float scale = PopoverScale(screen.z);
+                        points.Add(new SegmentPointVM
+                        {
+                            lineIndex = i, segmentIndex = segmentIndex, x = x, y = y, scale = scale,
+                        });
+                        h = Fold(h, i);
+                        h = Fold(h, segmentIndex);
+                        // Quantise to 0.1 px so sub-pixel camera jitter doesn't force pushes.
+                        h = Fold(h, (int)math.round(x * 10f));
+                        h = Fold(h, (int)math.round(y * 10f));
+                        h = Fold(h, (int)math.round(scale * 100f));
+                    }
+                }
+            }
+
+            if (hasAreas)
+            {
+                var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
+                var verts = EntityManager.GetBuffer<MarkingAreaVertex>(node, isReadOnly: true);
+                var corners = MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node);
+                for (int a = 0; a < areas.Length; a++)
+                {
+                    if (!TryAreaAnchor(areas[a], verts, endpoints, corners, out var centroid)) continue;
+                    var screen = cam.WorldToScreenPoint(centroid);
+                    if (screen.z <= 0f) continue;
                     float x = screen.x;
                     float y = screenH - screen.y;
-                    points.Add(new SegmentPointVM { lineIndex = i, segmentIndex = segmentIndex, x = x, y = y });
-                    h = Fold(h, i);
-                    h = Fold(h, segmentIndex);
-                    // Quantise to 0.1 px so sub-pixel camera jitter doesn't force pushes.
+                    float scale = PopoverScale(screen.z);
+                    points.Add(new SegmentPointVM
+                    {
+                        lineIndex = -1, segmentIndex = -1, areaIndex = a, x = x, y = y, scale = scale,
+                    });
+                    h = Fold(h, unchecked((int)0x41524541)); // 'AREA' — keys area points apart from (line, seg) pairs
+                    h = Fold(h, a);
                     h = Fold(h, (int)math.round(x * 10f));
                     h = Fold(h, (int)math.round(y * 10f));
+                    h = Fold(h, (int)math.round(scale * 100f));
                 }
             }
 
@@ -400,6 +440,56 @@ namespace TownRoadLane
                 _lastPointsHash = h;
                 _screenPoints.Value = points.ToArray();
             }
+        }
+
+        private void ClearScreenPoints()
+        {
+            if (_lastPointsHash != kFnvOffset)
+            {
+                _lastPointsHash = kFnvOffset;
+                _screenPoints.Value = Array.Empty<SegmentPointVM>();
+            }
+        }
+
+        /// <summary>Camera-distance scale for the in-world popovers: full authored size while the
+        /// camera is near the intersection, shrinking gently (floor 0.65) as it pulls away so a
+        /// zoomed-out view isn't wallpapered with full-size chrome. Never grows above 1 — the JS
+        /// side clamps back UP to 1 while a popover is hover-expanded. screenZ is the world-unit
+        /// distance WorldToScreenPoint returned in its z component.</summary>
+        private static float PopoverScale(float screenZ)
+            => math.clamp(math.sqrt(120f / math.max(screenZ, 1f)), 0.65f, 1f);
+
+        /// <summary>Popover anchor for one area: the average of its resolved vertex positions.
+        /// (Not the true polygon centroid — for the small convex-ish contours users draw at an
+        /// intersection the vertex average is indistinguishable and much cheaper.) Mirrors
+        /// MarkingAreaTopologySystem.ResolveOuterRing's lookup; false when any vertex fails to
+        /// resolve (line removed, road demolished — topology will clean the area up shortly).</summary>
+        private static bool TryAreaAnchor(MarkingArea area, DynamicBuffer<MarkingAreaVertex> verts,
+                                          List<MarkingEndpoint> endpoints, List<MarkingCornerAnchor> corners,
+                                          out float3 centroid)
+        {
+            centroid = default;
+            if (area.vertexCount <= 0) return false;
+            float3 sum = float3.zero;
+            for (int v = 0; v < area.vertexCount; v++)
+            {
+                int idx = area.firstVertex + v;
+                if (idx < 0 || idx >= verts.Length) return false;
+                var av = verts[idx];
+                if (av.kind == 0)
+                {
+                    if (av.refIndex < 0 || av.refIndex >= endpoints.Count) return false;
+                    sum += endpoints[av.refIndex].position;
+                }
+                else if (av.kind == 1)
+                {
+                    if (av.refIndex < 0 || av.refIndex >= corners.Count) return false;
+                    sum += corners[av.refIndex].position;
+                }
+                else return false;
+            }
+            centroid = sum / area.vertexCount;
+            return true;
         }
 
         // --- Commands ---
@@ -780,13 +870,18 @@ namespace TownRoadLane
         public int visiblePieces;
     }
 
-    /// <summary>Screen-space anchor of one segment's popover (CSS px, origin top-left).
-    /// Only on-screen segments are sent — absence means "hide the popover".</summary>
+    /// <summary>Screen-space anchor of one in-world popover (CSS px, origin top-left).
+    /// Segment midpoints carry (lineIndex, segmentIndex); area centroids carry areaIndex
+    /// with the segment fields at -1 — both travel on the one GetScreenPoints binding.
+    /// Only on-screen anchors are sent — absence means "hide the popover".</summary>
     public class SegmentPointVM
     {
         public int lineIndex;
         public int segmentIndex;
+        public int areaIndex = -1;
         public float x;
         public float y;
+        // Camera-distance popover scale, [0.65, 1] — see PopoverScale.
+        public float scale = 1f;
     }
 }

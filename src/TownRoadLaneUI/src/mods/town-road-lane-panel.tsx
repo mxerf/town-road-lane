@@ -25,8 +25,9 @@ import {
   SegmentVM,
   AreaVM,
 } from "../hooks/useToolState";
-import { registerSegmentAnchor, segKey } from "../hooks/positionRegistry";
+import { registerSegmentAnchor, setAnchorExpanded, segKey, areaKey } from "../hooks/positionRegistry";
 import { ChevronRight, Cross, Eye, EyeOff, Trash, Cycle } from "../components/icons";
+import { LineStylePreview, AreaStylePreview, isG87LineStyle } from "../components/stylePreviews";
 import { Dropdown, DropdownOption } from "../components/Dropdown";
 import { TooltipProvider, Tooltip } from "../components/Tooltip";
 import { useT } from "../i18n";
@@ -60,7 +61,8 @@ import {
   LineHeader,
   LineChevron,
   LineTitle,
-  LineStyleTag,
+  SwatchWrap,
+  G87Mark,
   LineSegCount,
   LineBody,
   StyleRow,
@@ -71,6 +73,7 @@ import {
   CurvResetBtn,
   PopoverRoot,
   PopoverBtn,
+  PopoverMarker,
   SegmentRow,
   SegmentInfo,
   SegmentLen,
@@ -143,19 +146,24 @@ export const TownRoadLanePanel = () => (
   </PanelErrorBoundary>
 );
 
-// Floating in-world popover anchored at a segment's midpoint. Buttons mirror
-// the accordion controls (toggle visibility, cycle style) plus a delete-line
-// button (C6, two-press confirm to avoid mistaken loss of work).
+// Floating in-world popover anchored at a segment's midpoint. Collapsed it's
+// a small state dot (white = visible, red = hidden); hovering expands it into
+// the button row — visibility toggle, style cycle, delete-line (C6, two-press
+// confirm). One dot per segment keeps a many-segment line from wallpapering
+// the world with button rows.
 //
 // Positioning is IMPERATIVE (Stage 5e): the root registers itself with
 // positionRegistry, and the per-frame GetScreenPoints binding writes
-// style.left/top directly — camera movement never re-renders React. The
-// registry also hides the popover (display:none) while its segment is
-// off-screen / behind the camera.
+// style.left/top/transform directly — camera movement never re-renders React.
+// The registry also hides the popover (display:none) while its segment is
+// off-screen / behind the camera, and scales it down with camera distance
+// (snapping back to full size while hover-expanded).
 const POPOVER_DELETE_CONFIRM_MS = 2500;
 
 const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   const t = useT();
+  const key = segKey(seg.lineIndex, seg.segmentIndex);
+  const [expanded, setExpanded] = useState(false);
   // Two-press delete state, local to each popover. First click flips on; second
   // click within the window dispatches. Resets on timeout or when the segment
   // changes (popovers re-render with new keys when the line is rebuilt).
@@ -166,6 +174,13 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
     return () => window.clearTimeout(id);
   }, [confirmingDelete]);
 
+  // Mirror the hover-expansion into the registry so it can clamp the
+  // camera-distance scale to ≥1 while the buttons are up. The unregister path
+  // (ref callback with null) clears the flag on unmount.
+  useEffect(() => {
+    setAnchorExpanded(key, expanded);
+  }, [key, expanded]);
+
   // Portal into document.body — our panel mounts inside GameTopRight which
   // likely has CSS transform/will-change set up by CS2, creating a containing
   // block that pins our `position: fixed` to the slot instead of the viewport.
@@ -173,73 +188,167 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   // Camera.WorldToScreenPoint values were computed against.
   return createPortal(
     <PopoverRoot
-      ref={(el: HTMLElement | null) => registerSegmentAnchor(segKey(seg.lineIndex, seg.segmentIndex), el)}
+      ref={(el: HTMLElement | null) => registerSegmentAnchor(key, el)}
       onMouseEnter={() => {
+        setExpanded(true);
         // Per-segment hover (C3): light up THIS segment specifically, not the
         // whole line. The popover's anchored to one segment, so the UX should
         // narrow attention to that segment alone.
         cmdSetHoveredSegment(seg.lineIndex, seg.segmentIndex);
       }}
       onMouseLeave={() => {
+        setExpanded(false);
         cmdSetHoveredSegment(-1, -1);
         // Cancel pending delete if the user moves away — avoids the confirm
         // state lingering after the user gave up.
         setConfirmingDelete(false);
       }}
     >
-      <Tooltip
-        content={seg.visible ? t("segment.hide.tooltip") : t("segment.show.tooltip")}
-      >
-        <PopoverBtn
-          // $active when the segment is hidden — telegraphs the toggle state at
-          // a glance without forcing the user to interpret the icon.
-          $active={!seg.visible}
-          onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
-        >
-          {seg.visible ? <Eye size={14} /> : <EyeOff size={14} />}
-        </PopoverBtn>
-      </Tooltip>
-      <Tooltip
-        content={t("segment.cycleStyle.tooltip", { style: styleLabel(t, seg.style) })}
-      >
-        <PopoverBtn
-          onClick={() =>
-            cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, (seg.style + 1) % STYLE_VALUES.length)
-          }
-        >
-          <Cycle size={14} />
-        </PopoverBtn>
-      </Tooltip>
-      <Tooltip
-        content={
-          confirmingDelete ? t("line.delete.confirm.btn") : t("line.delete")
-        }
-      >
-        <PopoverBtn
-          // $active = red-tinted confirm state. Same visual language as the
-          // panel's inline DeleteLineButton confirm row.
-          $active={confirmingDelete}
-          style={
-            confirmingDelete
-              ? {
-                  background: T.colorDangerSoft,
-                  borderColor: T.colorDanger,
-                  color: T.colorDanger,
-                }
-              : undefined
-          }
-          onClick={() => {
-            if (confirmingDelete) {
-              cmdDeleteLine(seg.lineIndex);
-              setConfirmingDelete(false);
-            } else {
-              setConfirmingDelete(true);
+      {!expanded ? (
+        <PopoverMarker $hidden={!seg.visible} />
+      ) : (
+        <>
+          <Tooltip
+            content={seg.visible ? t("segment.hide.tooltip") : t("segment.show.tooltip")}
+          >
+            <PopoverBtn
+              // $active when the segment is hidden — telegraphs the toggle state at
+              // a glance without forcing the user to interpret the icon.
+              $active={!seg.visible}
+              onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
+            >
+              {seg.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+            </PopoverBtn>
+          </Tooltip>
+          <Tooltip
+            content={t("segment.cycleStyle.tooltip", { style: styleLabel(t, seg.style) })}
+          >
+            <PopoverBtn
+              onClick={() =>
+                cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, (seg.style + 1) % STYLE_VALUES.length)
+              }
+            >
+              <Cycle size={14} />
+            </PopoverBtn>
+          </Tooltip>
+          <Tooltip
+            content={
+              confirmingDelete ? t("line.delete.confirm.btn") : t("line.delete")
             }
-          }}
-        >
-          <Trash size={14} color={confirmingDelete ? T.colorDanger : undefined} />
-        </PopoverBtn>
-      </Tooltip>
+          >
+            <PopoverBtn
+              // $active = red-tinted confirm state. Same visual language as the
+              // panel's inline DeleteLineButton confirm row.
+              $active={confirmingDelete}
+              style={
+                confirmingDelete
+                  ? {
+                      background: T.colorDangerSoft,
+                      borderColor: T.colorDanger,
+                      color: T.colorDanger,
+                    }
+                  : undefined
+              }
+              onClick={() => {
+                if (confirmingDelete) {
+                  cmdDeleteLine(seg.lineIndex);
+                  setConfirmingDelete(false);
+                } else {
+                  setConfirmingDelete(true);
+                }
+              }}
+            >
+              <Trash size={14} color={confirmingDelete ? T.colorDanger : undefined} />
+            </PopoverBtn>
+          </Tooltip>
+        </>
+      )}
+    </PopoverRoot>,
+    document.body,
+  );
+};
+
+// In-world popover for an area, anchored at its polygon centroid (C# sends it
+// on the same GetScreenPoints channel under an `area:` key). Same collapsed/
+// expanded scheme as SegmentPopover; the collapsed face is the area's fill
+// swatch, so the dot itself says which area it is.
+const AreaPopover = ({ area }: { area: AreaVM }) => {
+  const t = useT();
+  const key = areaKey(area.areaIndex);
+  const [expanded, setExpanded] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const id = window.setTimeout(() => setConfirmingDelete(false), POPOVER_DELETE_CONFIRM_MS);
+    return () => window.clearTimeout(id);
+  }, [confirmingDelete]);
+
+  useEffect(() => {
+    setAnchorExpanded(key, expanded);
+  }, [key, expanded]);
+
+  return createPortal(
+    <PopoverRoot
+      ref={(el: HTMLElement | null) => registerSegmentAnchor(key, el)}
+      onMouseEnter={() => setExpanded(true)}
+      onMouseLeave={() => {
+        setExpanded(false);
+        setConfirmingDelete(false);
+      }}
+    >
+      {!expanded ? (
+        area.visible ? (
+          <AreaStylePreview styleId={area.styleId} size={12} />
+        ) : (
+          <PopoverMarker $hidden />
+        )
+      ) : (
+        <>
+          <Tooltip content={area.visible ? t("area.hide.tooltip") : t("area.show.tooltip")}>
+            <PopoverBtn
+              $active={!area.visible}
+              onClick={() => cmdToggleAreaVisible(area.areaIndex)}
+            >
+              {area.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+            </PopoverBtn>
+          </Tooltip>
+          <Tooltip
+            content={t("segment.cycleStyle.tooltip", { style: areaStyleLabel(t, area.styleId) })}
+          >
+            <PopoverBtn
+              onClick={() =>
+                cmdSetAreaStyle(area.areaIndex, (area.styleId + 1) % AREA_STYLE_VALUES.length)
+              }
+            >
+              <Cycle size={14} />
+            </PopoverBtn>
+          </Tooltip>
+          <Tooltip content={confirmingDelete ? t("line.delete.confirm.btn") : t("area.delete")}>
+            <PopoverBtn
+              $active={confirmingDelete}
+              style={
+                confirmingDelete
+                  ? {
+                      background: T.colorDangerSoft,
+                      borderColor: T.colorDanger,
+                      color: T.colorDanger,
+                    }
+                  : undefined
+              }
+              onClick={() => {
+                if (confirmingDelete) {
+                  cmdDeleteArea(area.areaIndex);
+                  setConfirmingDelete(false);
+                } else {
+                  setConfirmingDelete(true);
+                }
+              }}
+            >
+              <Trash size={14} color={confirmingDelete ? T.colorDanger : undefined} />
+            </PopoverBtn>
+          </Tooltip>
+        </>
+      )}
     </PopoverRoot>,
     document.body,
   );
@@ -436,14 +545,17 @@ const TownRoadLanePanelInner = () => {
 
   const popoverLine =
     expandedLine >= 0 && expandedLine < state.lines.length ? state.lines[expandedLine] : null;
+  const popoverArea = state.areas.find((a) => a.areaIndex === expandedArea) ?? null;
 
   const lineStyleOptions: DropdownOption<StyleValue>[] = STYLE_VALUES.map((s) => ({
     value: s,
     label: styleLabel(t, s),
+    preview: <LineStylePreview style={s} width={28} height={8} />,
   }));
   const areaStyleOptions: DropdownOption<number>[] = AREA_STYLE_VALUES.map((s) => ({
     value: s,
     label: areaStyleLabel(t, s),
+    preview: <AreaStylePreview styleId={s} size={12} />,
   }));
 
   return (
@@ -586,6 +698,9 @@ const TownRoadLanePanelInner = () => {
           seg={seg}
         />
       ))}
+      {!inAreaMode && popoverArea && (
+        <AreaPopover key={`pop-area-${popoverArea.areaIndex}`} area={popoverArea} />
+      )}
     </>
   );
 };
@@ -620,7 +735,12 @@ const LineRow = ({
         </LineChevron>
         {/* 1-based for humans; commands keep the raw index. */}
         <LineTitle>{t("line.title", { n: line.lineIndex + 1 })}</LineTitle>
-        <LineStyleTag>{styleLabel(t, line.style)}</LineStyleTag>
+        <Tooltip content={styleLabel(t, line.style)}>
+          <SwatchWrap>
+            <LineStylePreview style={line.style} width={28} height={8} />
+            {isG87LineStyle(line.style) && <G87Mark>G87</G87Mark>}
+          </SwatchWrap>
+        </Tooltip>
         <LineSegCount>
           {t("line.segCount", { visible: visibleCount, total: line.segments.length })}
         </LineSegCount>
@@ -671,7 +791,11 @@ const AreaRow = ({
         </LineChevron>
         {/* 1-based for humans; commands keep the raw index. */}
         <LineTitle>{t("area.title", { n: area.areaIndex + 1 })}</LineTitle>
-        <LineStyleTag>{areaStyleLabel(t, area.styleId)}</LineStyleTag>
+        <Tooltip content={areaStyleLabel(t, area.styleId)}>
+          <SwatchWrap>
+            <AreaStylePreview styleId={area.styleId} size={12} />
+          </SwatchWrap>
+        </Tooltip>
         <LineSegCount>
           {area.pieceCount > 1
             ? t("area.pieces", { visible: area.visiblePieces, total: area.pieceCount })
@@ -870,6 +994,7 @@ const StyleSelector = ({ line }: { line: LineVM }) => {
   const options: DropdownOption<StyleValue>[] = STYLE_VALUES.map((s) => ({
     value: s,
     label: styleLabel(t, s),
+    preview: <LineStylePreview style={s} width={28} height={8} />,
   }));
   return (
     <StyleRow>

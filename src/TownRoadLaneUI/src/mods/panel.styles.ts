@@ -352,10 +352,24 @@ export const LineTitle = styled.span`
   font-weight: ${T.fontWeightMedium};
 `;
 
-export const LineStyleTag = styled.span`
-  font-size: ${T.fontSizeXs};
+// Header slot for the mini style preview (LineStylePreview / AreaStylePreview)
+// — replaces the old uppercase text tag. The svg gets display:block so its
+// inline-baseline gap doesn't skew vertical centering.
+export const SwatchWrap = styled.span`
+  display: flex;
+  align-items: center;
+
+  > svg {
+    display: block;
+  }
+`;
+
+// Tiny "G87" affix after a line-style swatch — the preview geometry alone
+// can't distinguish vanilla from G87 variants (same solid/dashed pattern).
+export const G87Mark = styled.span`
+  margin-left: 3rem;
+  font-size: 9rem;
   color: ${T.colorTextMuted};
-  text-transform: uppercase;
   letter-spacing: 0.4rem;
 `;
 
@@ -463,18 +477,35 @@ export const CurvResetBtn = styled.button`
 
 // ── Segment popover (floats in world space via portal) ─────────────────
 
+// NOTE: transform is ALSO written inline by positionRegistry (translate +
+// camera-distance scale) — the declaration here only covers the frame before
+// the first sync. Keep both in lockstep.
 export const PopoverRoot = styled.div`
   position: fixed;
   transform: translate(-50%, -120%);
   display: flex;
+  align-items: center;
   padding: 4rem;
   background: ${T.colorPanelBg};
   backdrop-filter: ${T.backdropBlur};
   border: 1rem solid ${T.colorBorderMid};
   border-radius: ${T.radiusMd};
   pointer-events: auto;
+  cursor: pointer;
   box-shadow: ${T.shadowMd};
   z-index: 999998;
+`;
+
+// Collapsed popover face: a small state dot. White = segment/area visible,
+// red = hidden (matches the red ghost the overlay draws for hidden segments).
+// Hovering the root swaps the dot for the full button row.
+export const PopoverMarker = styled.span<{ $hidden?: boolean }>`
+  display: block;
+  width: 12rem;
+  height: 12rem;
+  border-radius: 6rem;
+  background-color: ${(p) => (p.$hidden ? T.colorDanger : "rgba(240, 251, 255, 0.92)")};
+  border: 1rem solid rgba(10, 14, 20, 0.85);
 `;
 
 // Bigger hit target (24 → 30rem) + clearer hover (background + border swap +

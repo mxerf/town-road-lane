@@ -17,7 +17,7 @@
 //   - Arrow as unicode glyph ▼/▲ — these two specifically render fine in
 //     cohtml (unlike chevron arrows and many other symbols).
 
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { ReactNode, useState, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { styled } from "../styles/styled";
 import { tokens as T } from "../styles/tokens";
@@ -25,6 +25,8 @@ import { tokens as T } from "../styles/tokens";
 export interface DropdownOption<V> {
   value: V;
   label: string;
+  /** Optional visual sample rendered before the label (style swatches etc). */
+  preview?: ReactNode;
 }
 
 export interface DropdownProps<V> {
@@ -90,6 +92,8 @@ const Menu = styled.div`
 `;
 
 const Item = styled.div`
+  display: flex;
+  align-items: center;
   padding: ${T.space1} ${T.space2};
   color: ${T.colorTextPrimary};
   cursor: pointer;
@@ -99,6 +103,15 @@ const Item = styled.div`
   &:hover {
     background: ${T.colorRowBgHover};
   }
+`;
+
+// Swatch slot before the label (toggle + menu items). flex-shrink 0 so the
+// ellipsized label never squeezes the sample.
+const Preview = styled.span`
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-right: ${T.space2};
 `;
 
 const itemSelectedStyle = {
@@ -158,6 +171,7 @@ export const Dropdown = <V,>({ value, options, onChange, placeholder = "—" }: 
   return (
     <Container ref={containerRef}>
       <Toggle ref={toggleRef} onClick={() => setIsOpen(!isOpen)}>
+        {selected?.preview && <Preview>{selected.preview}</Preview>}
         <Label>{selected ? selected.label : placeholder}</Label>
         <Arrow>{isOpen ? "▲" : "▼"}</Arrow>
       </Toggle>
@@ -173,7 +187,8 @@ export const Dropdown = <V,>({ value, options, onChange, placeholder = "—" }: 
                 style={opt.value === value ? itemSelectedStyle : undefined}
                 onClick={() => handleSelect(opt.value)}
               >
-                {opt.label}
+                {opt.preview && <Preview>{opt.preview}</Preview>}
+                <span>{opt.label}</span>
               </Item>
             ))}
           </Menu>,
