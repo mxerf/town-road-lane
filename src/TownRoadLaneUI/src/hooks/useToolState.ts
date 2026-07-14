@@ -68,6 +68,9 @@ export interface ToolStateVM {
   // making the bridge symmetric — UI hover lights up the line in the world, and
   // world hover lights up the row in the panel.
   hoveredLineInGame: number;
+  // Same bridge for areas (Phase 7c): cursor inside a committed area's piece → its
+  // panel row lights up. Lines/dots win when both match.
+  hoveredAreaInGame: number;
   // True when the selected node carries the MarkingOverride{All} component — vanilla
   // markings on the node are suppressed regardless of user lines.
   vanillaHidden: boolean;
@@ -85,6 +88,7 @@ const EMPTY: ToolStateVM = {
   lastClickedLine: -1,
   lastClickedTick: 0,
   hoveredLineInGame: -1,
+  hoveredAreaInGame: -1,
   vanillaHidden: false,
   lines: [],
   areas: [],
@@ -194,4 +198,16 @@ export const cmdSetHoveredLine = (lineIndex: number) => {
 // leave. Used by SegmentPopover hover handlers.
 export const cmdSetHoveredSegment = (lineIndex: number, segmentIndex: number) => {
   trigger("TownRoadLane", "SetHoveredSegment", lineIndex, segmentIndex);
+};
+
+// Area counterpart of cmdSetHoveredLine (Phase 7c): the overlay outlines every piece
+// of this area in the world. Used by the area row and the area popover.
+export const cmdSetHoveredArea = (areaIndex: number) => {
+  trigger("TownRoadLane", "SetHoveredArea", areaIndex);
+};
+
+// Race-safe leave: passes the row's OWN index; C# clears only while that index still
+// owns the hover (cohtml can deliver the next row's mouseenter before this mouseleave).
+export const cmdClearHoveredArea = (areaIndex: number) => {
+  trigger("TownRoadLane", "ClearHoveredArea", areaIndex);
 };

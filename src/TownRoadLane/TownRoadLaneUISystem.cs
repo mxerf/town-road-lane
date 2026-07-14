@@ -74,6 +74,12 @@ namespace TownRoadLane
         public int UIHoveredSegmentLineIndex => _uiHoveredSegmentLine;
         public int UIHoveredSegmentIndex => _uiHoveredSegmentIndex;
 
+        // Phase 7c: which AREA is hovered in the React panel (row or its world popover).
+        // Read by MarkingOverlaySystem to outline every piece of that area — the area
+        // counterpart of _uiHoveredLineIndex.
+        private int _uiHoveredAreaIndex = -1;
+        public int UIHoveredAreaIndex => _uiHoveredAreaIndex;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -107,6 +113,8 @@ namespace TownRoadLane
             CreateTrigger("ResetNode", OnResetNode);
             CreateTrigger<int>("SetHoveredLine", OnSetHoveredLine);
             CreateTrigger<int, int>("SetHoveredSegment", OnSetHoveredSegment);
+            CreateTrigger<int>("SetHoveredArea", OnSetHoveredArea);
+            CreateTrigger<int>("ClearHoveredArea", OnClearHoveredArea);
 
             log.Info("TownRoadLaneUISystem: bindings registered");
         }
@@ -179,6 +187,7 @@ namespace TownRoadLane
             h = Fold(h, _tool?.LastClickedLine ?? -1);
             h = Fold(h, _tool?.LastClickedTick ?? 0);
             h = Fold(h, _tool?.HoveredLineInGame ?? -1);
+            h = Fold(h, _tool?.HoveredAreaInGame ?? -1);
 
             if (node != Entity.Null && EntityManager.HasBuffer<MarkingLine>(node))
             {
@@ -249,6 +258,7 @@ namespace TownRoadLane
                 lastClickedLine = _tool?.LastClickedLine ?? -1,
                 lastClickedTick = _tool?.LastClickedTick ?? 0,
                 hoveredLineInGame = _tool?.HoveredLineInGame ?? -1,
+                hoveredAreaInGame = _tool?.HoveredAreaInGame ?? -1,
             };
 
             if (node != Entity.Null && EntityManager.HasBuffer<MarkingLine>(node))
@@ -415,9 +425,18 @@ namespace TownRoadLane
                 var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
                 var verts = EntityManager.GetBuffer<MarkingAreaVertex>(node, isReadOnly: true);
                 var corners = MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node);
+                // Snapshot lines for intersection-vertex resolve (kind 2) — TryResolve wants an
+                // IReadOnlyList, which DynamicBuffer isn't.
+                var linesSnap = Array.Empty<MarkingLine>();
+                if (EntityManager.HasBuffer<MarkingLine>(node))
+                {
+                    var lb = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
+                    linesSnap = new MarkingLine[lb.Length];
+                    for (int i = 0; i < lb.Length; i++) linesSnap[i] = lb[i];
+                }
                 for (int a = 0; a < areas.Length; a++)
                 {
-                    if (!TryAreaAnchor(areas[a], verts, endpoints, corners, out var centroid)) continue;
+                    if (!TryAreaAnchor(areas[a], verts, endpoints, corners, linesSnap, out var centroid)) continue;
                     var screen = cam.WorldToScreenPoint(centroid);
                     if (screen.z <= 0f) continue;
                     float x = screen.x;
@@ -466,7 +485,7 @@ namespace TownRoadLane
         /// resolve (line removed, road demolished — topology will clean the area up shortly).</summary>
         private static bool TryAreaAnchor(MarkingArea area, DynamicBuffer<MarkingAreaVertex> verts,
                                           List<MarkingEndpoint> endpoints, List<MarkingCornerAnchor> corners,
-                                          out float3 centroid)
+                                          MarkingLine[] lines, out float3 centroid)
         {
             centroid = default;
             if (area.vertexCount <= 0) return false;
@@ -485,6 +504,11 @@ namespace TownRoadLane
                 {
                     if (av.refIndex < 0 || av.refIndex >= corners.Count) return false;
                     sum += corners[av.refIndex].position;
+                }
+                else if (av.kind == 2) // line crossing — refIndex is the packed (lineA, lineB, hit)
+                {
+                    if (!MarkingIntersectionExtractor.TryResolve(endpoints, lines, av.refIndex, out var p)) return false;
+                    sum += p;
                 }
                 else return false;
             }
@@ -509,6 +533,35 @@ namespace TownRoadLane
         {
             _uiHoveredSegmentLine = lineIndex;
             _uiHoveredSegmentIndex = segmentIndex;
+        }
+
+        /// <summary>Phase 7c — area hover bridge. React calls this from the area row and the
+        /// area popover; the overlay outlines every piece of that area.</summary>
+        private void OnSetHoveredArea(int areaIndex)
+        {
+            _uiHoveredAreaIndex = areaIndex;
+        }
+
+        /// <summary>Race-safe hover clear: cohtml can fire mouseenter of the NEXT row before
+        /// mouseleave of the previous one — an unconditional "-1" on leave would then wipe the
+        /// fresh hover. Leave passes its OWN index and only clears while it still owns it.</summary>
+        private void OnClearHoveredArea(int areaIndex)
+        {
+            if (_uiHoveredAreaIndex == areaIndex)
+                _uiHoveredAreaIndex = -1;
+        }
+
+        /// <summary>Drop every UI-driven hover index. Must run on ANY structural mutation
+        /// (delete line/area, node reset): rows shift under a stationary cursor and cohtml does
+        /// not re-fire mouseenter/leave for the reshuffled rows, so a stale index would keep
+        /// outlining — and visually "selecting" — a DIFFERENT object than the one the next
+        /// click acts on (7c bug report: hover shows one area, delete removes another).</summary>
+        private void ClearUIHover()
+        {
+            _uiHoveredLineIndex = -1;
+            _uiHoveredSegmentLine = -1;
+            _uiHoveredSegmentIndex = -1;
+            _uiHoveredAreaIndex = -1;
         }
 
         /// <summary>Toolbar-button command: toggle our tool active/inactive. Same semantics as
@@ -678,14 +731,13 @@ namespace TownRoadLane
             var lines = EntityManager.GetBuffer<MarkingLine>(node);
             if (lineIndex < 0 || lineIndex >= lines.Length) return;
             lines.RemoveAt(lineIndex);
-            // Topology rebuild needs to see new lineIndex assignments — wipe segments + hash.
-            if (EntityManager.HasBuffer<MarkingSegment>(node))
-                EntityManager.GetBuffer<MarkingSegment>(node).Clear();
-            if (EntityManager.HasComponent<MarkingTopologyState>(node))
-                EntityManager.SetComponentData(node, new MarkingTopologyState { linesHash = 0 });
+            // Surgical reindex (segments keep their overrides, area anchors shift) — the old
+            // wipe-everything reset every user tweak on EVERY line when one was deleted.
+            MarkingTopologySystem.OnLineRemoved(EntityManager, node, lineIndex);
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
-            log.Info($"UI: deleted line#{lineIndex} on node#{node.Index}");
+            ClearUIHover();
+            log.Info($"UI: deleted line#{lineIndex} on node#{node.Index} — segment overrides and area anchors reindexed");
         }
 
         // --- Mode + next-style commands (panel mirrors of the Y / U / A hotkeys) ---
@@ -783,6 +835,7 @@ namespace TownRoadLane
                 EntityManager.SetComponentData(node, new MarkingAreaTopologyState { combinedHash = 0 });
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
+            ClearUIHover();
             log.Info($"UI: deleted area#{areaIndex} on node#{node.Index} ({areas.Length} remaining)");
         }
 
@@ -816,6 +869,7 @@ namespace TownRoadLane
                 EntityManager.SetComponentData(node, new MarkingAreaTopologyState { combinedHash = 0 });
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
+            ClearUIHover();
             log.Info($"UI: full reset of node#{node.Index} — lines, areas and vanilla override cleared");
         }
     }
@@ -837,6 +891,7 @@ namespace TownRoadLane
         public int lastClickedLine = -1;
         public int lastClickedTick;
         public int hoveredLineInGame = -1;
+        public int hoveredAreaInGame = -1;
         public LineVM[] lines = Array.Empty<LineVM>();
         public AreaVM[] areas = Array.Empty<AreaVM>();
     }

@@ -10,6 +10,8 @@ import {
   cmdDeleteLine,
   cmdSetHoveredLine,
   cmdSetHoveredSegment,
+  cmdSetHoveredArea,
+  cmdClearHoveredArea,
   cmdSetLineCurvature,
   cmdToggleVanillaMarkings,
   cmdActivateTool,
@@ -290,9 +292,14 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
   return createPortal(
     <PopoverRoot
       ref={(el: HTMLElement | null) => registerSegmentAnchor(key, el)}
-      onMouseEnter={() => setExpanded(true)}
+      onMouseEnter={() => {
+        setExpanded(true);
+        // Same hover-bridge as the panel row: outline this area in the world.
+        cmdSetHoveredArea(area.areaIndex);
+      }}
       onMouseLeave={() => {
         setExpanded(false);
+        cmdClearHoveredArea(area.areaIndex);
         setConfirmingDelete(false);
       }}
     >
@@ -660,6 +667,7 @@ const TownRoadLanePanelInner = () => {
                   key={area.areaIndex}
                   area={area}
                   isExpanded={expandedArea === area.areaIndex}
+                  isGameHovered={state.hoveredAreaInGame === area.areaIndex}
                   areaStyleOptions={areaStyleOptions}
                   onToggleExpand={() =>
                     setExpandedArea(expandedArea === area.areaIndex ? -1 : area.areaIndex)
@@ -767,11 +775,13 @@ const LineRow = ({
 const AreaRow = ({
   area,
   isExpanded,
+  isGameHovered,
   areaStyleOptions,
   onToggleExpand,
 }: {
   area: AreaVM;
   isExpanded: boolean;
+  isGameHovered: boolean;
   areaStyleOptions: DropdownOption<number>[];
   onToggleExpand: () => void;
 }) => {
@@ -784,7 +794,12 @@ const AreaRow = ({
   }, [confirmingDelete]);
 
   return (
-    <LineRowOuter $expanded={isExpanded}>
+    <LineRowOuter
+      $expanded={isExpanded}
+      $gameHovered={isGameHovered}
+      onMouseEnter={() => cmdSetHoveredArea(area.areaIndex)}
+      onMouseLeave={() => cmdClearHoveredArea(area.areaIndex)}
+    >
       <LineHeader onClick={onToggleExpand}>
         <LineChevron $open={isExpanded}>
           <ChevronRight size={10} />
