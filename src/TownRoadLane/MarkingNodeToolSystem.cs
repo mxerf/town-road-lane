@@ -51,8 +51,13 @@ namespace TownRoadLane
         // endpoint OR a corner anchor without separate hit-test passes.
         public enum AreaAnchorKind
         {
-            LaneEndpoint,   // MarkingEndpoint index in _endpoints
-            NodeCorner,     // MarkingCornerAnchor index in _cornerAnchors
+            LaneEndpoint,     // MarkingEndpoint index in _endpoints
+            NodeCorner,       // MarkingCornerAnchor index in _cornerAnchors
+            // Phase 7a: a line×line crossing. refIndex holds the PACKED (lineA, lineB,
+            // hitIndex) value from MarkingIntersectionExtractor.Pack — NOT a list index —
+            // so it can go into MarkingAreaVertex verbatim and stay stable when lines are
+            // added or the crossing moves under a curvature edit.
+            LineIntersection,
         }
 
         // Phase 6b: a single vertex collected so far in the running area polygon. Stored as the
@@ -104,6 +109,13 @@ namespace TownRoadLane
         // by SelectNode alongside _endpoints.
         private List<MarkingCornerAnchor> _cornerAnchors = new List<MarkingCornerAnchor>();
 
+        // Phase 7a: line-crossing anchors for the area tool. Extracted on SelectNode and
+        // re-extracted whenever the node's line topology hash changes (drawing/deleting a line
+        // or editing curvature from the panel moves the crossings mid-draft — the cached draft
+        // vertex positions are refreshed along with it, see RefreshIntersectionAnchorsIfStale).
+        private List<MarkingIntersectionAnchor> _lineIntersections = new List<MarkingIntersectionAnchor>();
+        private int _lineIntersectionsHash;
+
         // Phase 6b: running polygon contour. Filled while State == AreaSelecting. Closed +
         // emitted as a MarkingArea on a successful close click (start vertex re-clicked with
         // 3+ vertices). Cleared on exit, cancel, or commit.
@@ -146,11 +158,19 @@ namespace TownRoadLane
         // rendering — first non-negative wins.
         private int _hoveredLineInGame = -1;
 
+        // Phase 7c: areaIndex of the committed area the cursor is inside (NodeSelected only,
+        // and only when no dot/line is hovered — those are more specific). -1 = none. Mirrors
+        // _hoveredLineInGame: pushed to the panel (row highlight) and read by the overlay.
+        private int _hoveredAreaInGame = -1;
+        // Scratch ring for the per-frame point-in-polygon test — reused to stay alloc-free.
+        private readonly List<float3> _areaHitScratch = new List<float3>();
+
         public State ToolState => _state;
         public Entity SelectedNode => _selectedNode;
         public Entity HoveredNode => _hoveredNode;
         public IReadOnlyList<MarkingEndpoint> Endpoints => _endpoints;
         public IReadOnlyList<MarkingCornerAnchor> CornerAnchors => _cornerAnchors;
+        public IReadOnlyList<MarkingIntersectionAnchor> LineIntersections => _lineIntersections;
         public IReadOnlyList<AreaPolygonVertex> AreaPolygon => _areaPolygon;
         public AreaCandidate AreaHover => _areaHover;
         public int SourceEndpointIndex => _sourceIdx;
@@ -160,6 +180,7 @@ namespace TownRoadLane
         public int LastClickedLine => _lastClickedLine;
         public int LastClickedTick => _lastClickedTick;
         public int HoveredLineInGame => _hoveredLineInGame;
+        public int HoveredAreaInGame => _hoveredAreaInGame;
 
         public override PrefabBase GetPrefab() => null;
         public override bool TrySetPrefab(PrefabBase prefab) => false;
@@ -293,8 +314,11 @@ namespace TownRoadLane
             _cursorWorldPos = hitSomething ? hit.m_HitPosition : float3.zero;
             _hoveredNode = (hitSomething && EntityManager.HasComponent<Node>(hitEntity)) ? hitEntity : Entity.Null;
             _hoverIdx = (_state != State.Default && _state != State.AreaSelecting && hitSomething) ? FindHoveredEndpoint(_cursorWorldPos) : -1;
-            // Phase 6b: separate hit-test for area mode — covers both lane endpoints + corner
-            // anchors with a single picked AreaCandidate.
+            // Phase 7a: crossings move when lines are drawn/deleted or curvature is edited from
+            // the panel mid-draft — keep the anchor list (and cached draft positions) in sync.
+            if (_state == State.AreaSelecting) RefreshIntersectionAnchorsIfStale();
+            // Phase 6b: separate hit-test for area mode — covers lane endpoints, corner anchors
+            // and line crossings with a single picked AreaCandidate.
             _areaHover = (_state == State.AreaSelecting && hitSomething) ? FindHoveredAreaCandidate(_cursorWorldPos) : AreaCandidate.None;
 
             // In-game line hover: cursor near a committed line (and not already on a dot) →
@@ -303,6 +327,13 @@ namespace TownRoadLane
             // with both factors tiny in practice.
             _hoveredLineInGame = (_state == State.NodeSelected && _hoverIdx < 0 && hitSomething)
                 ? HitTestLines(_cursorWorldPos)
+                : -1;
+
+            // Phase 7c: in-game area hover — cursor inside one of the committed areas' pieces.
+            // Lines/dots are more specific targets, so they win; point-in-polygon runs over the
+            // precomputed piece rings (both counts tiny).
+            _hoveredAreaInGame = (_state == State.NodeSelected && _hoverIdx < 0 && _hoveredLineInGame < 0 && hitSomething)
+                ? HitTestAreas(_cursorWorldPos)
                 : -1;
 
             // Polish: log hover transitions only (avoid per-frame spam). Useful for triage of
@@ -500,6 +531,7 @@ namespace TownRoadLane
             // Phase 6a: corner anchors for the polygon area tool. Cheap (re-walks the same
             // ConnectedEdges as Extract) and only runs on node click.
             _cornerAnchors = MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node);
+            RefreshIntersectionAnchors();
             _sourceIdx = -1;
             _state = State.NodeSelected;
             int existingLines = EntityManager.HasBuffer<MarkingLine>(node)
@@ -575,16 +607,27 @@ namespace TownRoadLane
                 pos = _endpoints[c.refIndex].position;
                 return true;
             }
-            else // NodeCorner
+            if (c.kind == AreaAnchorKind.NodeCorner)
             {
                 if (c.refIndex >= _cornerAnchors.Count) return false;
                 pos = _cornerAnchors[c.refIndex].position;
                 return true;
             }
+            // LineIntersection — refIndex is the packed pair ref, not a list index; find it in
+            // the current extraction (linear, the list is tiny).
+            for (int i = 0; i < _lineIntersections.Count; i++)
+            {
+                if (_lineIntersections[i].PackedRef == c.refIndex)
+                {
+                    pos = _lineIntersections[i].position;
+                    return true;
+                }
+            }
+            return false;
         }
 
-        /// <summary>Pick the closest area-tool candidate (lane endpoint OR corner anchor) to the
-        /// cursor. Same XZ-only metric as <see cref="FindHoveredEndpoint"/>.</summary>
+        /// <summary>Pick the closest area-tool candidate (lane endpoint, corner anchor or line
+        /// crossing) to the cursor. Same XZ-only metric as <see cref="FindHoveredEndpoint"/>.</summary>
         private AreaCandidate FindHoveredAreaCandidate(float3 cursor)
         {
             AreaCandidate best = AreaCandidate.None;
@@ -601,34 +644,180 @@ namespace TownRoadLane
                 float sq = d.x * d.x + d.z * d.z;
                 if (sq < bestSq) { bestSq = sq; best = new AreaCandidate { kind = AreaAnchorKind.NodeCorner, refIndex = i }; }
             }
+            for (int i = 0; i < _lineIntersections.Count; i++)
+            {
+                float3 d = _lineIntersections[i].position - cursor;
+                float sq = d.x * d.x + d.z * d.z;
+                if (sq < bestSq) { bestSq = sq; best = new AreaCandidate { kind = AreaAnchorKind.LineIntersection, refIndex = _lineIntersections[i].PackedRef }; }
+            }
             return best;
         }
 
+        /// <summary>Re-extract the line-crossing anchors and remember the topology hash they
+        /// were built against.</summary>
+        private void RefreshIntersectionAnchors()
+        {
+            _lineIntersections = MarkingIntersectionExtractor.ExtractAll(EntityManager, _selectedNode);
+            _lineIntersectionsHash = _selectedNode != Entity.Null && EntityManager.HasComponent<MarkingTopologyState>(_selectedNode)
+                ? EntityManager.GetComponentData<MarkingTopologyState>(_selectedNode).linesHash
+                : 0;
+        }
+
+        /// <summary>Cheap per-frame guard for area mode: when the line topology hash moved
+        /// (line added/deleted, curvature edited from the panel), re-extract the crossings AND
+        /// re-resolve the cached positions of already-placed draft vertices so the contour
+        /// follows the lines instead of pointing at where they used to be.</summary>
+        private void RefreshIntersectionAnchorsIfStale()
+        {
+            if (_selectedNode == Entity.Null) return;
+            int current = EntityManager.HasComponent<MarkingTopologyState>(_selectedNode)
+                ? EntityManager.GetComponentData<MarkingTopologyState>(_selectedNode).linesHash
+                : 0;
+            if (current == _lineIntersectionsHash) return;
+            RefreshIntersectionAnchors();
+            for (int i = 0; i < _areaPolygon.Count; i++)
+            {
+                var pv = _areaPolygon[i];
+                var cand = new AreaCandidate { kind = pv.kind, refIndex = pv.refIndex };
+                if (TryGetAreaAnchorPos(cand, out var pos))
+                {
+                    pv.position = pos;
+                    _areaPolygon[i] = pv;
+                }
+            }
+        }
+
         /// <summary>Determine which kind of edge connects <paramref name="from"/> to
-        /// <paramref name="to"/>. IMT-style: if both anchors are lane endpoints belonging to the
-        /// same MarkingLine in the current node's buffer, the edge follows that line's Bezier
-        /// (LineBezier). Otherwise a straight chord (Straight). Phase 6 MVP — defers the rarer
-        /// IMT cases (cross-alignment EnterLine, intersection-vertex chains).</summary>
+        /// <paramref name="to"/>. IMT-style: if both anchors sit on the same MarkingLine (its
+        /// endpoints, or a crossing whose pair includes it), the edge follows that line's Bezier
+        /// (LineBezier). Otherwise a straight chord (Straight). Sampling of curved edges is still
+        /// deferred (rings render as chords today) — the metadata is kept correct for when it lands.</summary>
         private AreaEdgeKind ClassifyEdge(AreaCandidate from, AreaCandidate to)
         {
-            if (from.kind != AreaAnchorKind.LaneEndpoint || to.kind != AreaAnchorKind.LaneEndpoint)
+            if (from.kind == AreaAnchorKind.NodeCorner || to.kind == AreaAnchorKind.NodeCorner)
                 return AreaEdgeKind.Straight;
             if (_selectedNode == Entity.Null) return AreaEdgeKind.Straight;
             if (!EntityManager.HasBuffer<MarkingLine>(_selectedNode)) return AreaEdgeKind.Straight;
 
-            var fromEp = _endpoints[from.refIndex];
-            var toEp   = _endpoints[to.refIndex];
             var lines = EntityManager.GetBuffer<MarkingLine>(_selectedNode, isReadOnly: true);
             for (int i = 0; i < lines.Length; i++)
             {
-                var ln = lines[i];
-                bool fromOnLine = (ln.sourceEdge == fromEp.edge && ln.sourceGapIndex == fromEp.gapIndex)
-                               || (ln.targetEdge == fromEp.edge && ln.targetGapIndex == fromEp.gapIndex);
-                bool toOnLine   = (ln.sourceEdge == toEp.edge   && ln.sourceGapIndex == toEp.gapIndex)
-                               || (ln.targetEdge == toEp.edge   && ln.targetGapIndex == toEp.gapIndex);
-                if (fromOnLine && toOnLine) return AreaEdgeKind.LineBezier;
+                if (AnchorLiesOnLine(from, lines[i], i) && AnchorLiesOnLine(to, lines[i], i))
+                    return AreaEdgeKind.LineBezier;
             }
             return AreaEdgeKind.Straight;
+        }
+
+        /// <summary>True when the anchor geometrically sits on the given line: a lane endpoint
+        /// that is the line's source/target, or a crossing whose packed pair includes the line.</summary>
+        private bool AnchorLiesOnLine(AreaCandidate c, MarkingLine ln, int lineIndex)
+        {
+            if (c.kind == AreaAnchorKind.LaneEndpoint)
+            {
+                if (c.refIndex >= _endpoints.Count) return false;
+                var ep = _endpoints[c.refIndex];
+                return (ln.sourceEdge == ep.edge && ln.sourceGapIndex == ep.gapIndex)
+                    || (ln.targetEdge == ep.edge && ln.targetGapIndex == ep.gapIndex);
+            }
+            if (c.kind == AreaAnchorKind.LineIntersection)
+            {
+                MarkingIntersectionExtractor.Unpack(c.refIndex, out int a, out int b, out _);
+                return lineIndex == a || lineIndex == b;
+            }
+            return false;
+        }
+
+        // Curved draft edges sample with MarkingAreaTopologySystem.SampleCurvedEdge so the
+        // preview shows exactly the polyline the committed ring will get (its sparseness is
+        // deliberate — see the triangulation notes there).
+
+        /// <summary>Phase 7b: the draft contour as a drawable polyline — vertex positions with
+        /// LineBezier edges sampled along their shared line, so the overlay preview shows the
+        /// curve the committed area will actually follow. Open path (no closing edge; the
+        /// last→cursor preview stays a chord — the closing edge kind isn't known until the
+        /// closing click classifies it).</summary>
+        public void BuildAreaContourPath(List<float3> into)
+        {
+            into.Clear();
+            for (int i = 0; i < _areaPolygon.Count; i++)
+            {
+                var pv = _areaPolygon[i];
+                into.Add(pv.position);
+                if (i + 1 >= _areaPolygon.Count) break;
+                if (pv.edgeToNext == AreaEdgeKind.LineBezier)
+                    AppendEdgeSamples(pv, _areaPolygon[i + 1], into);
+            }
+        }
+
+        /// <summary>Sample the shared line's sub-curve between two draft vertices into
+        /// <paramref name="into"/> (interior points only). Falls back to nothing (= chord)
+        /// when the shared line can't be found/built anymore.</summary>
+        private void AppendEdgeSamples(AreaPolygonVertex from, AreaPolygonVertex to, List<float3> into)
+        {
+            if (_selectedNode == Entity.Null || !EntityManager.HasBuffer<MarkingLine>(_selectedNode)) return;
+            var lines = EntityManager.GetBuffer<MarkingLine>(_selectedNode, isReadOnly: true);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (!TryDraftAnchorParamOnLine(from.kind, from.refIndex, lines[i], i, out float tFrom)) continue;
+                if (!TryDraftAnchorParamOnLine(to.kind, to.refIndex, lines[i], i, out float tTo)) continue;
+                if (math.abs(tTo - tFrom) < 1e-4f) continue;
+                if (!MarkingCurveBuilder.TryBuild(_endpoints, lines[i], out var bez)) continue;
+                MarkingAreaTopologySystem.SampleCurvedEdge(bez, tFrom, tTo, into);
+                return;
+            }
+        }
+
+        /// <summary>Phase 7c: areaIndex of the piece the cursor is inside, or -1. Runs over the
+        /// precomputed MarkingAreaPiece rings (positions already resolved by the topology).</summary>
+        private int HitTestAreas(float3 cursor)
+        {
+            if (_selectedNode == Entity.Null) return -1;
+            if (!EntityManager.HasBuffer<MarkingAreaPiece>(_selectedNode)
+                || !EntityManager.HasBuffer<MarkingAreaPieceVertex>(_selectedNode)) return -1;
+            var pieces = EntityManager.GetBuffer<MarkingAreaPiece>(_selectedNode, isReadOnly: true);
+            var verts = EntityManager.GetBuffer<MarkingAreaPieceVertex>(_selectedNode, isReadOnly: true);
+            for (int p = 0; p < pieces.Length; p++)
+            {
+                var pd = pieces[p];
+                if (pd.vertexCount < 3) continue;
+                _areaHitScratch.Clear();
+                bool ok = true;
+                for (int v = 0; v < pd.vertexCount; v++)
+                {
+                    int idx = pd.firstVertex + v;
+                    if (idx < 0 || idx >= verts.Length) { ok = false; break; }
+                    _areaHitScratch.Add(verts[idx].position);
+                }
+                if (ok && PolygonSplitter.ContainsXZ(_areaHitScratch, cursor)) return pd.areaIndex;
+            }
+            return -1;
+        }
+
+        /// <summary>t parameter of a draft anchor on the given line: endpoint → source (0) /
+        /// target (1); crossing → the pair member's parameter from the current extraction.</summary>
+        private bool TryDraftAnchorParamOnLine(AreaAnchorKind kind, int refIndex, MarkingLine ln, int lineIndex, out float t)
+        {
+            t = 0f;
+            if (kind == AreaAnchorKind.LaneEndpoint)
+            {
+                if (refIndex < 0 || refIndex >= _endpoints.Count) return false;
+                var ep = _endpoints[refIndex];
+                if (ln.sourceEdge == ep.edge && ln.sourceGapIndex == ep.gapIndex) { t = 0f; return true; }
+                if (ln.targetEdge == ep.edge && ln.targetGapIndex == ep.gapIndex) { t = 1f; return true; }
+                return false;
+            }
+            if (kind == AreaAnchorKind.LineIntersection)
+            {
+                for (int i = 0; i < _lineIntersections.Count; i++)
+                {
+                    var x = _lineIntersections[i];
+                    if (x.PackedRef != refIndex) continue;
+                    if (x.lineA == lineIndex) { t = x.tA; return true; }
+                    if (x.lineB == lineIndex) { t = x.tB; return true; }
+                    return false;
+                }
+            }
+            return false;
         }
 
         /// <summary>Add a vertex to the running polygon contour. Fills in the previous vertex's
@@ -720,13 +909,8 @@ namespace TownRoadLane
 
         /// <summary>Create-or-delete: if a line with matching endpoints (order-insensitive) already
         /// exists, remove it; otherwise append a new one. Matches Traffic-style toggle UX.
-        ///
-        /// On delete: also clears the MarkingSegment buffer. Otherwise old segments referencing
-        /// the removed line's lineIndex would survive into the next topology recompute (which
-        /// reads the updated MarkingLine list and would mis-index). TopologySystem rebuilds the
-        /// segment buffer from scratch on next tick — cheaper than trying to surgically shift
-        /// lineIndex values across the segment buffer.
-        /// </summary>
+        /// On delete the segment buffer is reindexed surgically (MarkingTopologySystem
+        /// .OnLineRemoved) so per-segment overrides on OTHER lines survive.</summary>
         private void TogglePair(MarkingEndpoint src, MarkingEndpoint dst)
         {
             if (!EntityManager.HasBuffer<MarkingLine>(_selectedNode))
@@ -744,10 +928,7 @@ namespace TownRoadLane
                 {
                     log.Info($"tool: toggled OFF line #{i} on node #{_selectedNode.Index}");
                     buf.RemoveAt(i);
-                    // Wipe segments so TopologySystem rebuilds from the new line list — see XML
-                    // comment above for the lineIndex-shift reason.
-                    if (EntityManager.HasBuffer<MarkingSegment>(_selectedNode))
-                        EntityManager.GetBuffer<MarkingSegment>(_selectedNode).Clear();
+                    MarkingTopologySystem.OnLineRemoved(EntityManager, _selectedNode, i);
                     if (!EntityManager.HasComponent<Updated>(_selectedNode))
                         EntityManager.AddComponent<Updated>(_selectedNode);
                     return;

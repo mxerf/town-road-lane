@@ -47,6 +47,16 @@ namespace TownRoadLane
         // without eating real splits between independent lines. Stable across line length.
         private const float kEndpointMarginM = 2.0f;
 
+        // Filter D: minimum crossing angle for a hit to count as a segment split. sin(8°) ≈
+        // 0.139 — below that the contact is a near-tangent graze (merge-lane geometry), and
+        // splitting it only produces micro-segments. Anchor extraction for the AREA tool
+        // (MarkingIntersectionExtractor) deliberately does NOT share this filter — island tips
+        // ARE shallow crossings and must stay clickable.
+        private const float kMinCrossingSin = 0.139f;
+        // Filter E: world-space radius within which multiple reported hits of one line pair
+        // collapse to the first — near-tangent contact yields hit clusters.
+        private const float kHitClusterM = 1.5f;
+
         // Segments shorter than this are merged with their neighbour by removing the internal
         // boundary. Catches tangential grazes that survive the endpoint filter — typical case is
         // two slightly-different curves that touch in the middle for ~50cm.
@@ -166,11 +176,36 @@ namespace TownRoadLane
                 {
                     if (!bezierValid[j]) continue;
                     var hits = BezierIntersection.Intersect(beziers[i], beziers[j]);
+
+                    // Filter D (crossing angle): two lines meeting near-tangentially — the
+                    // "hyperbola" contact of merge geometry — are not a crossing worth a split;
+                    // the micro-segments it produces collapse downstream anyway (7c feedback).
+                    // Filter E (cluster): a graze that DOES pass the angle test still reports
+                    // several near-identical hits — keep the first of each world-space cluster.
+                    var kept = new List<BezierIntersection.Hit>(hits.Count);
                     for (int h = 0; h < hits.Count; h++)
                     {
-                        if (IsNearAnyEndpoint(hits[h].point, beziers[i], beziers[j])) continue;
-                        if (hits[h].tA > 0.01f && hits[h].tA < 0.99f) boundaries[i].Add(hits[h].tA);
-                        if (hits[h].tB > 0.01f && hits[h].tB < 0.99f) boundaries[j].Add(hits[h].tB);
+                        var hit = hits[h];
+                        if (IsNearAnyEndpoint(hit.point, beziers[i], beziers[j])) continue;
+                        var ta = MathUtils.Tangent(beziers[i], hit.tA).xz;
+                        var tb = MathUtils.Tangent(beziers[j], hit.tB).xz;
+                        float denom = math.max(math.length(ta) * math.length(tb), 1e-6f);
+                        float sinAngle = math.abs(ta.x * tb.y - ta.y * tb.x) / denom;
+                        if (sinAngle < kMinCrossingSin) continue;
+                        kept.Add(hit);
+                    }
+                    kept.Sort((x, y) => x.tA.CompareTo(y.tA));
+                    float3 lastPoint = default;
+                    bool haveLast = false;
+                    for (int h = 0; h < kept.Count; h++)
+                    {
+                        var hit = kept[h];
+                        if (haveLast && math.distancesq(hit.point.xz, lastPoint.xz) < kHitClusterM * kHitClusterM)
+                            continue;
+                        lastPoint = hit.point;
+                        haveLast = true;
+                        if (hit.tA > 0.01f && hit.tA < 0.99f) boundaries[i].Add(hit.tA);
+                        if (hit.tB > 0.01f && hit.tB < 0.99f) boundaries[j].Add(hit.tB);
                     }
                 }
             }
@@ -284,6 +319,53 @@ namespace TownRoadLane
             {
                 if (math.abs(values[i] - values[i - 1]) < epsilon) values.RemoveAt(i);
             }
+        }
+
+        /// <summary>Surgical bookkeeping after removing a line from a node's MarkingLine buffer
+        /// (call AFTER RemoveAt). Drops the removed line's segments and SHIFTS the lineIndex of
+        /// the rest — per-segment visibility/style overrides survive the delete instead of
+        /// being wiped (the old approach reset every user tweak on every line). Also reindexes
+        /// intersection-anchored area vertices, which reference (lineA, lineB) pairs by index,
+        /// and busts both topology hashes so the next tick rebuilds against the shifted list.
+        /// Vertices referencing the DELETED line are left alone — they fail to resolve and the
+        /// area's cached pieces get carried, which beats snapping onto the wrong crossing.</summary>
+        public static void OnLineRemoved(EntityManager em, Entity node, int lineIndex)
+        {
+            if (em.HasBuffer<MarkingSegment>(node))
+            {
+                var segs = em.GetBuffer<MarkingSegment>(node);
+                for (int s = segs.Length - 1; s >= 0; s--)
+                {
+                    var seg = segs[s];
+                    if (seg.lineIndex == lineIndex) { segs.RemoveAt(s); continue; }
+                    if (seg.lineIndex > lineIndex)
+                    {
+                        seg.lineIndex--;
+                        segs[s] = seg;
+                    }
+                }
+            }
+
+            if (em.HasBuffer<MarkingAreaVertex>(node))
+            {
+                var averts = em.GetBuffer<MarkingAreaVertex>(node);
+                for (int v = 0; v < averts.Length; v++)
+                {
+                    var av = averts[v];
+                    if (av.kind != 2) continue;
+                    MarkingIntersectionExtractor.Unpack(av.refIndex, out int a, out int b, out int k);
+                    if (a == lineIndex || b == lineIndex) continue;
+                    if (a > lineIndex) a--;
+                    if (b > lineIndex) b--;
+                    av.refIndex = MarkingIntersectionExtractor.Pack(a, b, k);
+                    averts[v] = av;
+                }
+                if (em.HasComponent<MarkingAreaTopologyState>(node))
+                    em.SetComponentData(node, new MarkingAreaTopologyState { combinedHash = 0 });
+            }
+
+            if (em.HasComponent<MarkingTopologyState>(node))
+                em.SetComponentData(node, new MarkingTopologyState { linesHash = 0 });
         }
 
         /// <summary>True if the world-space point sits within <see cref="kEndpointMarginM"/> of

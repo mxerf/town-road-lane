@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Colossal.Logging;
 using Colossal.Mathematics;
 using Game;
@@ -246,7 +247,14 @@ namespace TownRoadLane
             int hoveredSegLine = _uiSystem?.UIHoveredSegmentLineIndex ?? -1;
             int hoveredSegIdx  = _uiSystem?.UIHoveredSegmentIndex ?? -1;
 
+            // Phase 7c: hovered-area outline. Same source priority as lines — panel row /
+            // popover hover (UI) wins, else cursor-inside-area from the tool.
+            int hoveredArea = _uiSystem?.UIHoveredAreaIndex ?? -1;
+            if (hoveredArea < 0) hoveredArea = _tool?.HoveredAreaInGame ?? -1;
+
             var node = _tool.SelectedNode;
+            if (hoveredArea >= 0 && node != Entity.Null)
+                DrawHoveredAreaOutline(buf, node, hoveredArea);
             if (node != Entity.Null && EntityManager.HasBuffer<MarkingLine>(node) && EntityManager.HasBuffer<MarkingSegment>(node))
             {
                 var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
@@ -420,7 +428,8 @@ namespace TownRoadLane
         /// <summary>
         /// Phase 6b: overlay while the user is collecting vertices for an area polygon.
         /// Layers (back to front):
-        ///   1. Candidate dots (lane endpoints + corner anchors) — warm yellow, all clickable.
+        ///   1. Candidate dots (lane endpoints, corner anchors, line crossings) — warm yellow,
+        ///      all clickable.
         ///   2. Already-placed contour edges — solid white chord between consecutive vertices.
         ///      (Curved edges of kind LineBezier are still rendered as a chord here — sampling
         ///      to the line's Bezier happens at emission time in 6c; for the 6b preview a
@@ -433,10 +442,38 @@ namespace TownRoadLane
         ///      placed, hinting that a click on it will close the polygon.
         ///   6. Hovered candidate — brighter fill + larger ring on top of everything.
         /// </summary>
+        /// <summary>Phase 7c: bright contour around every piece of the hovered area — the area
+        /// counterpart of the line hover trace. Visible pieces get the calm cyan, hidden pieces
+        /// the red ghost tint (same colour language as segments).</summary>
+        private void DrawHoveredAreaOutline(OverlayRenderSystem.Buffer buf, Entity node, int areaIndex)
+        {
+            if (!EntityManager.HasBuffer<MarkingAreaPiece>(node)
+                || !EntityManager.HasBuffer<MarkingAreaPieceVertex>(node)) return;
+            var pieces = EntityManager.GetBuffer<MarkingAreaPiece>(node, isReadOnly: true);
+            var verts = EntityManager.GetBuffer<MarkingAreaPieceVertex>(node, isReadOnly: true);
+            for (int p = 0; p < pieces.Length; p++)
+            {
+                var pd = pieces[p];
+                if (pd.areaIndex != areaIndex || pd.vertexCount < 3) continue;
+                var color = pd.visible ? kColHighlightedCurve : kColHighlightedHidden;
+                for (int v = 0; v < pd.vertexCount; v++)
+                {
+                    int i0 = pd.firstVertex + v;
+                    int i1 = pd.firstVertex + (v + 1) % pd.vertexCount;
+                    if (i0 < 0 || i1 < 0 || i0 >= verts.Length || i1 >= verts.Length) return;
+                    buf.DrawLine(color, new Line3.Segment(verts[i0].position, verts[i1].position), kHighlightedPairCurveWidth);
+                }
+            }
+        }
+
+        // Scratch for the sampled draft contour — reused every frame to stay alloc-free.
+        private readonly List<float3> _areaContourScratch = new List<float3>();
+
         private void DrawAreaModeOverlay(OverlayRenderSystem.Buffer buf)
         {
             var endpoints = _tool.Endpoints;
             var corners = _tool.CornerAnchors;
+            var crossings = _tool.LineIntersections;
             var polygon = _tool.AreaPolygon;
             var hover = _tool.AreaHover;
             float3 cursor = _tool.CursorWorldPos;
@@ -466,12 +503,28 @@ namespace TownRoadLane
                     position: corners[i].position,
                     diameter: kAreaCandDotDiameter);
             }
+            // Phase 7a: line-crossing anchors — same candidate affordance as the dots above
+            // (they behave identically on click), drawn from the tool's current extraction.
+            for (int i = 0; i < crossings.Count; i++)
+            {
+                buf.DrawCircle(
+                    outlineColor: kColAreaCandOutline,
+                    fillColor: kColAreaCandFill,
+                    outlineWidth: kAreaCandDotOutlineWidth,
+                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    direction: new float2(0f, 1f),
+                    position: crossings[i].position,
+                    diameter: kAreaCandDotDiameter);
+            }
 
-            // 2. Contour edges (placed vertices' chain).
-            for (int i = 1; i < polygon.Count; i++)
+            // 2. Contour edges (placed vertices' chain). Phase 7b: LineBezier edges come back
+            //    sampled along their shared line, so the preview shows the arc the committed
+            //    area will actually follow (straight edges stay two-point chords).
+            _tool.BuildAreaContourPath(_areaContourScratch);
+            for (int i = 1; i < _areaContourScratch.Count; i++)
             {
                 buf.DrawLine(kColAreaContour,
-                    new Line3.Segment(polygon[i - 1].position, polygon[i].position),
+                    new Line3.Segment(_areaContourScratch[i - 1], _areaContourScratch[i]),
                     kAreaContourWidth);
             }
 
