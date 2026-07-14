@@ -1,4 +1,5 @@
-using System.Text;
+using System;
+using System.Collections.Generic;
 using Colossal.Logging;
 using Colossal.Mathematics;
 using Colossal.UI.Binding;
@@ -16,20 +17,22 @@ namespace TownRoadLane
     /// <summary>
     /// Stage 5d bridge between the in-game React panel and the C# tool / topology / emission stack.
     ///
-    /// Publishes <c>TownRoadLane.GetToolState</c> — JSON snapshot of "what the panel needs to render":
-    /// is the tool active, which node is selected, the line buffer, the segment buffer, the current
-    /// default style. Updated every frame; React's useValue auto-resyncs.
+    /// Publishes two value bindings, split by update frequency (Stage 5e rework):
+    ///   - <c>TownRoadLane.GetPanelState</c> — typed <see cref="PanelStateVM"/> snapshot of the
+    ///     panel structure (tool state, lines, segments, areas). Rebuilt + pushed ONLY when a
+    ///     content hash of the authoritative buffers changes, so camera movement and idle frames
+    ///     cost neither serialization nor a React re-render.
+    ///   - <c>TownRoadLane.GetScreenPoints</c> — world→screen anchors for the per-segment
+    ///     popovers. Camera-dependent, so it refreshes every tick while the tool is active
+    ///     (gated by its own hash — a static camera pushes nothing). Consumed on the JS side
+    ///     imperatively (positionRegistry), bypassing React re-render entirely.
     ///
-    /// Accepts three commands from React:
-    ///   - <c>ToggleSegment(lineIndex, segmentIndex)</c> — flip MarkingSegment.visible
-    ///   - <c>SetLineStyle(lineIndex, style)</c>          — change MarkingLine.style
-    ///   - <c>DeleteLine(lineIndex)</c>                    — remove a MarkingLine + its segments
-    ///
-    /// All structural changes mark the node Updated so the next-tick recompute + emission picks
-    /// them up. None of these commands bypass the existing pipelines — they just edit the
-    /// authoritative buffers, then let MarkingTopologySystem + MarkingSegmentEmissionSystem do
-    /// their normal jobs. This means the same invariants (PathNode slot allocation, archetype
-    /// sourcing, GC protection) hold automatically.
+    /// Commands arrive from React as TriggerBindings (see OnCreate). All structural changes mark
+    /// the node Updated so the next-tick recompute + emission picks them up. None of these
+    /// commands bypass the existing pipelines — they just edit the authoritative buffers, then
+    /// let MarkingTopologySystem + MarkingSegmentEmissionSystem do their normal jobs. This means
+    /// the same invariants (PathNode slot allocation, archetype sourcing, GC protection) hold
+    /// automatically.
     ///
     /// UI bundle loading: handled by the game's normal UIModuleAsset pipeline. Our .mjs ships
     /// next to the .dll, exports a default ModRegistrar that appends components into
@@ -38,14 +41,19 @@ namespace TownRoadLane
     /// in UIModuleAsset.PostCreate when AssetDatabase tried to register tags from an empty
     /// mod.json manifest.
     /// </summary>
-    public partial class TownRoadLaneUISystem : UISystemBase
+    public partial class TownRoadLaneUISystem : ExtendedUISystemBase
     {
         // Shadowing the inherited UISystemBase.log on purpose — Mod.log is the one wired into
         // CS2's mod-aware logger (file name, prefix) and matches the rest of the code in this
         // project. Using `new` to silence CS0108.
         private static new readonly ILog log = Mod.log;
 
-        private GetterValueBinding<string> _stateBinding;
+        private ValueBindingHelper<PanelStateVM> _panelState;
+        private ValueBindingHelper<SegmentPointVM[]> _screenPoints;
+        // Content hashes gating the pushes above — see RebuildBindings. 0 = "nothing published
+        // yet"; both start at the FNV offset so an all-default state still differs and pushes once.
+        private ulong _lastStateHash;
+        private ulong _lastPointsHash;
         private MarkingNodeToolSystem _tool;
         private DefaultToolSystem _defaultTool;
         private ToolSystem _toolSystem;
@@ -73,58 +81,42 @@ namespace TownRoadLane
             _defaultTool = World.GetOrCreateSystemManaged<DefaultToolSystem>();
             _toolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
 
-            AddBinding(_stateBinding = new GetterValueBinding<string>(
-                "TownRoadLane", "GetToolState", BuildStateJson));
+            _panelState = CreateBinding("GetPanelState", new PanelStateVM());
+            _screenPoints = CreateBinding("GetScreenPoints", Array.Empty<SegmentPointVM>());
 
             // i18n locale binding — React reads this to pick which dictionary
-            // (en-US, ru-RU, ...) to render strings from. We re-publish on every
+            // (en-US, ru-RU, ...) to render strings from. Re-evaluated every
             // tick; the binding only fires when the value actually changes, so
             // this is cheap. Falls back to en-US if the locale manager isn't
             // initialized yet (early load / unit-test contexts).
-            AddBinding(new GetterValueBinding<string>(
-                "TownRoadLane", "GetLocale", GetActiveLocale));
+            CreateBinding("GetLocale", GetActiveLocale);
 
-            AddBinding(new TriggerBinding<int, int>(
-                "TownRoadLane", "ToggleSegment", OnToggleSegment));
-            AddBinding(new TriggerBinding<int, int>(
-                "TownRoadLane", "SetLineStyle", OnSetLineStyle));
-            AddBinding(new TriggerBinding<int, int, int>(
-                "TownRoadLane", "SetSegmentStyle", OnSetSegmentStyle));
-            AddBinding(new TriggerBinding<int>(
-                "TownRoadLane", "DeleteLine", OnDeleteLine));
-            AddBinding(new TriggerBinding<int, int>(
-                "TownRoadLane", "SetLineCurvature", OnSetLineCurvature));
-            AddBinding(new TriggerBinding(
-                "TownRoadLane", "ToggleVanillaMarkings", OnToggleVanillaMarkings));
-            AddBinding(new TriggerBinding(
-                "TownRoadLane", "ActivateTool", OnActivateTool));
-            AddBinding(new TriggerBinding<int>(
-                "TownRoadLane", "SetCurrentStyle", OnSetCurrentStyle));
-            AddBinding(new TriggerBinding<int>(
-                "TownRoadLane", "SetCurrentAreaStyle", OnSetCurrentAreaStyle));
-            AddBinding(new TriggerBinding(
-                "TownRoadLane", "ToggleAreaMode", OnToggleAreaMode));
-            AddBinding(new TriggerBinding<int, int>(
-                "TownRoadLane", "SetAreaStyle", OnSetAreaStyle));
-            AddBinding(new TriggerBinding<int>(
-                "TownRoadLane", "ToggleAreaVisible", OnToggleAreaVisible));
-            AddBinding(new TriggerBinding<int>(
-                "TownRoadLane", "DeleteArea", OnDeleteArea));
-            AddBinding(new TriggerBinding(
-                "TownRoadLane", "ResetNode", OnResetNode));
-            AddBinding(new TriggerBinding<int>(
-                "TownRoadLane", "SetHoveredLine", OnSetHoveredLine));
-            AddBinding(new TriggerBinding<int, int>(
-                "TownRoadLane", "SetHoveredSegment", OnSetHoveredSegment));
+            CreateTrigger<int, int>("ToggleSegment", OnToggleSegment);
+            CreateTrigger<int, int>("SetLineStyle", OnSetLineStyle);
+            CreateTrigger<int, int, int>("SetSegmentStyle", OnSetSegmentStyle);
+            CreateTrigger<int>("DeleteLine", OnDeleteLine);
+            CreateTrigger<int, int>("SetLineCurvature", OnSetLineCurvature);
+            CreateTrigger("ToggleVanillaMarkings", OnToggleVanillaMarkings);
+            CreateTrigger("ActivateTool", OnActivateTool);
+            CreateTrigger<int>("SetCurrentStyle", OnSetCurrentStyle);
+            CreateTrigger<int>("SetCurrentAreaStyle", OnSetCurrentAreaStyle);
+            CreateTrigger("ToggleAreaMode", OnToggleAreaMode);
+            CreateTrigger<int, int>("SetAreaStyle", OnSetAreaStyle);
+            CreateTrigger<int>("ToggleAreaVisible", OnToggleAreaVisible);
+            CreateTrigger<int>("DeleteArea", OnDeleteArea);
+            CreateTrigger("ResetNode", OnResetNode);
+            CreateTrigger<int>("SetHoveredLine", OnSetHoveredLine);
+            CreateTrigger<int, int>("SetHoveredSegment", OnSetHoveredSegment);
 
             log.Info("TownRoadLaneUISystem: bindings registered");
         }
 
         protected override void OnUpdate()
         {
+            // Recompute hashes + stage new values on the dirty-buffered helpers, THEN let the
+            // base flush them — one binding push per frame max, and only on real change.
+            RebuildBindings();
             base.OnUpdate();
-            // Republish state every tick — cheap, the binding only fires on JSON change.
-            _stateBinding?.Update();
         }
 
         /// <summary>Pull the current game locale id from CS2's localization manager. Returns the
@@ -144,79 +136,139 @@ namespace TownRoadLane
 
         // --- State publishing ---
 
-        private string BuildStateJson()
+        // FNV-1a 64-bit — cheap incremental hash for the change gates below.
+        private const ulong kFnvOffset = 14695981039346656037UL;
+        private const ulong kFnvPrime = 1099511628211UL;
+
+        private static ulong Fold(ulong h, uint v) => (h ^ v) * kFnvPrime;
+        private static ulong Fold(ulong h, int v) => Fold(h, unchecked((uint)v));
+        private static ulong Fold(ulong h, bool v) => Fold(h, v ? 1u : 0u);
+        private static ulong Fold(ulong h, float v) => Fold(h, math.asuint(v));
+
+        /// <summary>Per-frame binding refresh. Pass 1 folds every UI-relevant scalar into a
+        /// content hash (zero allocation); only when the hash moved does pass 2 allocate and
+        /// stage a fresh <see cref="PanelStateVM"/>. Screen anchors are camera-dependent, so
+        /// they get their own hash + push cadence (camera pans push points, nothing else).</summary>
+        private void RebuildBindings()
         {
             bool isActive = _toolSystem != null && _tool != null && _toolSystem.activeTool == _tool;
-            int nodeIdx = (isActive && _tool.SelectedNode != Entity.Null) ? _tool.SelectedNode.Index : -1;
-            int currentStyle = (int)(_tool?.CurrentStyle ?? MarkingStyle.Solid);
+            Entity node = (isActive && _tool.SelectedNode != Entity.Null) ? _tool.SelectedNode : Entity.Null;
 
-            var sb = new StringBuilder(512);
-            int clickedLine = _tool?.LastClickedLine ?? -1;
-            int clickedTick = _tool?.LastClickedTick ?? 0;
-            // Game→UI hover bridge (Phase B5): which line the cursor is currently
-            // hovering in the world. React mirrors this to highlight the matching
-            // line row in the panel, so the panel ↔ world correlation works both
-            // ways. -1 = nothing hovered.
-            int gameHoveredLine = _tool?.HoveredLineInGame ?? -1;
-
-            // Vanilla-marking override state on the selected node — drives the panel toggle.
-            bool vanillaHidden = false;
-            if (isActive && _tool.SelectedNode != Entity.Null
-                && EntityManager.HasComponent<MarkingOverride>(_tool.SelectedNode))
+            ulong hash = HashPanelState(isActive, node);
+            if (hash != _lastStateHash)
             {
-                vanillaHidden = EntityManager.GetComponentData<MarkingOverride>(_tool.SelectedNode).HideAll;
+                _lastStateHash = hash;
+                _panelState.Value = BuildPanelState(isActive, node);
             }
 
-            // Tool sub-state for the panel's mode UI: 0 Default, 1 NodeSelected,
-            // 2 SourceSelected, 3 AreaSelecting (mirrors MarkingNodeToolSystem.State).
-            int toolState = isActive ? (int)_tool.ToolState : 0;
-            int areaVertexCount = isActive ? (_tool.AreaPolygon?.Count ?? 0) : 0;
-            int currentAreaStyle = _tool?.CurrentAreaStyle ?? 0;
+            RefreshScreenPoints(node);
+        }
 
-            sb.Append("{");
-            sb.Append("\"isActive\":").Append(isActive ? "true" : "false").Append(",");
-            sb.Append("\"toolState\":").Append(toolState).Append(",");
-            sb.Append("\"areaVertexCount\":").Append(areaVertexCount).Append(",");
-            sb.Append("\"currentAreaStyle\":").Append(currentAreaStyle).Append(",");
-            sb.Append("\"selectedNodeIndex\":").Append(nodeIdx).Append(",");
-            sb.Append("\"currentStyle\":").Append(currentStyle).Append(",");
-            sb.Append("\"vanillaHidden\":").Append(vanillaHidden ? "true" : "false").Append(",");
-            sb.Append("\"lastClickedLine\":").Append(clickedLine).Append(",");
-            sb.Append("\"lastClickedTick\":").Append(clickedTick).Append(",");
-            sb.Append("\"hoveredLineInGame\":").Append(gameHoveredLine).Append(",");
-            sb.Append("\"lines\":[");
+        private ulong HashPanelState(bool isActive, Entity node)
+        {
+            ulong h = kFnvOffset;
+            h = Fold(h, isActive);
+            h = Fold(h, isActive ? (int)_tool.ToolState : 0);
+            h = Fold(h, isActive ? (_tool.AreaPolygon?.Count ?? 0) : 0);
+            h = Fold(h, _tool?.CurrentAreaStyle ?? 0);
+            h = Fold(h, node != Entity.Null ? node.Index : -1);
+            h = Fold(h, (int)(_tool?.CurrentStyle ?? MarkingStyle.Solid));
+            h = Fold(h, node != Entity.Null
+                && EntityManager.HasComponent<MarkingOverride>(node)
+                && EntityManager.GetComponentData<MarkingOverride>(node).HideAll);
+            h = Fold(h, _tool?.LastClickedLine ?? -1);
+            h = Fold(h, _tool?.LastClickedTick ?? 0);
+            h = Fold(h, _tool?.HoveredLineInGame ?? -1);
 
-            if (isActive && _tool.SelectedNode != Entity.Null
-                && EntityManager.HasBuffer<MarkingLine>(_tool.SelectedNode))
+            if (node != Entity.Null && EntityManager.HasBuffer<MarkingLine>(node))
             {
-                var node = _tool.SelectedNode;
+                var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
+                h = Fold(h, lines.Length);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    h = Fold(h, lines[i].style);
+                    h = Fold(h, lines[i].curvature);
+                }
+                if (EntityManager.HasBuffer<MarkingSegment>(node))
+                {
+                    var segs = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
+                    h = Fold(h, segs.Length);
+                    for (int s = 0; s < segs.Length; s++)
+                    {
+                        var seg = segs[s];
+                        h = Fold(h, seg.lineIndex);
+                        h = Fold(h, seg.tStart);
+                        h = Fold(h, seg.tEnd);
+                        h = Fold(h, seg.visible);
+                        h = Fold(h, seg.style);
+                    }
+                }
+            }
+
+            if (node != Entity.Null && EntityManager.HasBuffer<MarkingArea>(node))
+            {
+                var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
+                h = Fold(h, areas.Length);
+                for (int a = 0; a < areas.Length; a++)
+                {
+                    h = Fold(h, areas[a].styleId);
+                    h = Fold(h, areas[a].visible);
+                    h = Fold(h, areas[a].vertexCount);
+                }
+                if (EntityManager.HasBuffer<MarkingAreaPiece>(node))
+                {
+                    var pieces = EntityManager.GetBuffer<MarkingAreaPiece>(node, isReadOnly: true);
+                    h = Fold(h, pieces.Length);
+                    for (int p = 0; p < pieces.Length; p++)
+                    {
+                        h = Fold(h, pieces[p].areaIndex);
+                        h = Fold(h, pieces[p].visible);
+                    }
+                }
+            }
+
+            return h;
+        }
+
+        private PanelStateVM BuildPanelState(bool isActive, Entity node)
+        {
+            var vm = new PanelStateVM
+            {
+                isActive = isActive,
+                toolState = isActive ? (int)_tool.ToolState : 0,
+                areaVertexCount = isActive ? (_tool.AreaPolygon?.Count ?? 0) : 0,
+                currentAreaStyle = _tool?.CurrentAreaStyle ?? 0,
+                selectedNodeIndex = node != Entity.Null ? node.Index : -1,
+                currentStyle = (int)(_tool?.CurrentStyle ?? MarkingStyle.Solid),
+                vanillaHidden = node != Entity.Null
+                    && EntityManager.HasComponent<MarkingOverride>(node)
+                    && EntityManager.GetComponentData<MarkingOverride>(node).HideAll,
+                // Game→UI hover bridge (Phase B5): which line the cursor is currently hovering
+                // in the world; React highlights the matching row so the panel ↔ world
+                // correlation works both ways. -1 = nothing hovered.
+                lastClickedLine = _tool?.LastClickedLine ?? -1,
+                lastClickedTick = _tool?.LastClickedTick ?? 0,
+                hoveredLineInGame = _tool?.HoveredLineInGame ?? -1,
+            };
+
+            if (node != Entity.Null && EntityManager.HasBuffer<MarkingLine>(node))
+            {
                 var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
                 var segs = EntityManager.HasBuffer<MarkingSegment>(node)
                     ? EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true)
                     : default;
 
-                // Pre-build per-line Beziers once so segment length comes out right (segment
-                // length is the chord of the cut-out Bezier slice, in metres).
+                // Per-line Beziers so segment length comes out right (segment length is the
+                // arc length of the cut-out Bezier slice, in metres).
                 var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
 
+                vm.lines = new LineVM[lines.Length];
+                var segScratch = new List<SegmentVM>(16);
                 for (int i = 0; i < lines.Length; i++)
                 {
-                    if (i > 0) sb.Append(",");
                     var line = lines[i];
-                    // Curvature exposed to the UI as an integer percent of the stepper range
-                    // [0, kMaxPullFactor] — 50% = the 0.4 default pull.
-                    int curvPercent = (int)math.round(math.saturate(line.curvature / MarkingCurveBuilder.kMaxPullFactor) * 100f);
-                    sb.Append("{\"lineIndex\":").Append(i)
-                        .Append(",\"style\":").Append(line.style)
-                        .Append(",\"curv\":").Append(curvPercent)
-                        .Append(",\"segments\":[");
-
                     bool bezOk = MarkingCurveBuilder.TryBuild(endpoints, line, out var fullBez);
-                    int segCount = 0;
-                    // Camera for world→screen projection. Captured once per line — if null
-                    // (paused / unloaded), screenX/Y default to -1 and React hides the popover.
-                    var cam = Camera.main;
-                    int screenH = Screen.height; // for flipping Y (Unity screen has 0 at bottom, CSS at top)
+                    segScratch.Clear();
                     if (segs.IsCreated)
                     {
                         int perLineCounter = 0;
@@ -224,62 +276,49 @@ namespace TownRoadLane
                         {
                             var seg = segs[s];
                             if (seg.lineIndex != i) continue;
-                            if (segCount > 0) sb.Append(",");
-
                             float lengthM = 0f;
-                            float screenX = -1f, screenY = -1f;
                             if (bezOk)
                             {
                                 var cut = MathUtils.Cut(fullBez, new float2(seg.tStart, seg.tEnd));
                                 lengthM = MathUtils.Length(cut);
-                                // Midpoint world position of the segment — anchor for the popover.
-                                var midWorld = MathUtils.Position(fullBez, (seg.tStart + seg.tEnd) * 0.5f);
-                                if (cam != null)
-                                {
-                                    var screen = cam.WorldToScreenPoint(midWorld);
-                                    // z > 0 = in front of camera. Off-screen / behind camera → skip.
-                                    if (screen.z > 0f)
-                                    {
-                                        screenX = screen.x;
-                                        screenY = screenH - screen.y; // Unity → CSS Y flip
-                                    }
-                                }
                             }
-
-                            sb.Append("{\"lineIndex\":").Append(i)
-                                .Append(",\"segmentIndex\":").Append(perLineCounter)
-                                .Append(",\"tStart\":").Append(seg.tStart.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture))
-                                .Append(",\"tEnd\":").Append(seg.tEnd.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture))
-                                .Append(",\"visible\":").Append(seg.visible ? "true" : "false")
-                                .Append(",\"style\":").Append(seg.style)
-                                .Append(",\"lengthM\":").Append(lengthM.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))
-                                .Append(",\"screenX\":").Append(screenX.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))
-                                .Append(",\"screenY\":").Append(screenY.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))
-                                .Append("}");
+                            segScratch.Add(new SegmentVM
+                            {
+                                lineIndex = i,
+                                segmentIndex = perLineCounter,
+                                tStart = seg.tStart,
+                                tEnd = seg.tEnd,
+                                visible = seg.visible,
+                                style = seg.style,
+                                lengthM = lengthM,
+                            });
                             perLineCounter++;
-                            segCount++;
                         }
                     }
-                    sb.Append("]}");
+                    vm.lines[i] = new LineVM
+                    {
+                        lineIndex = i,
+                        style = line.style,
+                        // Curvature exposed to the UI as an integer percent of the stepper range
+                        // [0, kMaxPullFactor] — 50% = the 0.4 default pull.
+                        curv = (int)math.round(math.saturate(line.curvature / MarkingCurveBuilder.kMaxPullFactor) * 100f),
+                        segments = segScratch.ToArray(),
+                    };
                 }
             }
-
-            sb.Append("],\"areas\":[");
 
             // Areas list — one entry per user-closed polygon on the selected node. Piece counts
             // come from the topology buffer so the panel can show "K piece(s)" when lines cut
             // the area apart. Style + visibility mirror the MarkingArea buffer directly.
-            if (isActive && _tool.SelectedNode != Entity.Null
-                && EntityManager.HasBuffer<MarkingArea>(_tool.SelectedNode))
+            if (node != Entity.Null && EntityManager.HasBuffer<MarkingArea>(node))
             {
-                var node = _tool.SelectedNode;
                 var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
                 var pieces = EntityManager.HasBuffer<MarkingAreaPiece>(node)
                     ? EntityManager.GetBuffer<MarkingAreaPiece>(node, isReadOnly: true)
                     : default;
+                vm.areas = new AreaVM[areas.Length];
                 for (int a = 0; a < areas.Length; a++)
                 {
-                    if (a > 0) sb.Append(",");
                     var area = areas[a];
                     int pieceCount = 0, visiblePieces = 0;
                     if (pieces.IsCreated)
@@ -291,18 +330,76 @@ namespace TownRoadLane
                             if (pieces[p].visible) visiblePieces++;
                         }
                     }
-                    sb.Append("{\"areaIndex\":").Append(a)
-                        .Append(",\"styleId\":").Append(area.styleId)
-                        .Append(",\"visible\":").Append(area.visible ? "true" : "false")
-                        .Append(",\"vertexCount\":").Append(area.vertexCount)
-                        .Append(",\"pieceCount\":").Append(pieceCount)
-                        .Append(",\"visiblePieces\":").Append(visiblePieces)
-                        .Append("}");
+                    vm.areas[a] = new AreaVM
+                    {
+                        areaIndex = a,
+                        styleId = area.styleId,
+                        visible = area.visible,
+                        vertexCount = area.vertexCount,
+                        pieceCount = pieceCount,
+                        visiblePieces = visiblePieces,
+                    };
                 }
             }
 
-            sb.Append("]}");
-            return sb.ToString();
+            return vm;
+        }
+
+        /// <summary>World→screen anchors for the per-segment popovers, refreshed every tick while
+        /// a node is selected. Off-screen / behind-camera segments are simply omitted — the JS
+        /// positionRegistry hides popovers whose key received no point this sync. The hash gate
+        /// (positions quantised to 0.1 px) keeps a static camera from pushing anything.</summary>
+        private void RefreshScreenPoints(Entity node)
+        {
+            var cam = Camera.main;
+            if (node == Entity.Null || cam == null
+                || !EntityManager.HasBuffer<MarkingLine>(node)
+                || !EntityManager.HasBuffer<MarkingSegment>(node))
+            {
+                if (_lastPointsHash != kFnvOffset)
+                {
+                    _lastPointsHash = kFnvOffset;
+                    _screenPoints.Value = Array.Empty<SegmentPointVM>();
+                }
+                return;
+            }
+
+            var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
+            var segs = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
+            var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
+            int screenH = Screen.height; // Unity screen Y is bottom-up, CSS is top-down
+
+            ulong h = kFnvOffset;
+            var points = new List<SegmentPointVM>(segs.Length);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (!MarkingCurveBuilder.TryBuild(endpoints, lines[i], out var fullBez)) continue;
+                int perLineCounter = 0;
+                for (int s = 0; s < segs.Length; s++)
+                {
+                    var seg = segs[s];
+                    if (seg.lineIndex != i) continue;
+                    int segmentIndex = perLineCounter++;
+                    // Midpoint world position of the segment — anchor for the popover.
+                    var midWorld = MathUtils.Position(fullBez, (seg.tStart + seg.tEnd) * 0.5f);
+                    var screen = cam.WorldToScreenPoint(midWorld);
+                    if (screen.z <= 0f) continue; // behind camera
+                    float x = screen.x;
+                    float y = screenH - screen.y;
+                    points.Add(new SegmentPointVM { lineIndex = i, segmentIndex = segmentIndex, x = x, y = y });
+                    h = Fold(h, i);
+                    h = Fold(h, segmentIndex);
+                    // Quantise to 0.1 px so sub-pixel camera jitter doesn't force pushes.
+                    h = Fold(h, (int)math.round(x * 10f));
+                    h = Fold(h, (int)math.round(y * 10f));
+                }
+            }
+
+            if (h != _lastPointsHash)
+            {
+                _lastPointsHash = h;
+                _screenPoints.Value = points.ToArray();
+            }
         }
 
         // --- Commands ---
@@ -631,5 +728,65 @@ namespace TownRoadLane
                 EntityManager.AddComponent<Updated>(node);
             log.Info($"UI: full reset of node#{node.Index} — lines, areas and vanilla override cleared");
         }
+    }
+
+    // --- Binding payloads (serialized by GenericUIWriter; field names ARE the JS contract,
+    //     hence camelCase — they must match the interfaces in useToolState.ts) ---
+
+    /// <summary>Panel structure snapshot — everything the React panel renders except the
+    /// camera-dependent popover anchors (those travel via <see cref="SegmentPointVM"/>).</summary>
+    public class PanelStateVM
+    {
+        public bool isActive;
+        public int toolState;
+        public int areaVertexCount;
+        public int currentAreaStyle;
+        public int selectedNodeIndex = -1;
+        public int currentStyle;
+        public bool vanillaHidden;
+        public int lastClickedLine = -1;
+        public int lastClickedTick;
+        public int hoveredLineInGame = -1;
+        public LineVM[] lines = Array.Empty<LineVM>();
+        public AreaVM[] areas = Array.Empty<AreaVM>();
+    }
+
+    public class LineVM
+    {
+        public int lineIndex;
+        public int style;
+        public int curv;
+        public SegmentVM[] segments = Array.Empty<SegmentVM>();
+    }
+
+    public class SegmentVM
+    {
+        public int lineIndex;
+        public int segmentIndex; // dense per-line counter, stable within one topology pass
+        public float tStart;
+        public float tEnd;
+        public bool visible;
+        public int style;
+        public float lengthM;
+    }
+
+    public class AreaVM
+    {
+        public int areaIndex;
+        public int styleId;
+        public bool visible;
+        public int vertexCount;
+        public int pieceCount;
+        public int visiblePieces;
+    }
+
+    /// <summary>Screen-space anchor of one segment's popover (CSS px, origin top-left).
+    /// Only on-screen segments are sent — absence means "hide the popover".</summary>
+    public class SegmentPointVM
+    {
+        public int lineIndex;
+        public int segmentIndex;
+        public float x;
+        public float y;
     }
 }

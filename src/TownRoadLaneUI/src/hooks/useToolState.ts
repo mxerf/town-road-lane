@@ -1,9 +1,10 @@
 import { bindValue, useValue, trigger } from "cs2/api";
 
-// Mirrors the JSON shape published by C# `TownRoadLaneUISystem`. Whenever the user
-// selects a different node OR changes anything that affects topology (add/remove
-// line, toggle visibility), C# bumps a state version and republishes the whole
-// blob. React resync is automatic via useValue.
+// Mirrors PanelStateVM published by C# `TownRoadLaneUISystem` (typed binding via
+// GenericUIWriter — field names ARE the contract). C# pushes a fresh object only
+// when a content hash of the authoritative buffers changes; React resync is
+// automatic via useValue. Screen-space popover anchors travel on a separate
+// per-frame binding — see positionRegistry.ts.
 
 export interface SegmentVM {
   lineIndex: number;
@@ -15,11 +16,6 @@ export interface SegmentVM {
   // can override individual pieces via the popover.
   style: number;
   lengthM: number;        // chord length of the segment in metres (approximated)
-  // Screen-space midpoint anchor for the per-segment popover (Stage 5d). CSS pixels,
-  // origin top-left. -1 when the segment is behind the camera or off-screen — UI hides
-  // the popover in that case.
-  screenX: number;
-  screenY: number;
 }
 
 export interface LineVM {
@@ -94,63 +90,19 @@ const EMPTY: ToolStateVM = {
   areas: [],
 };
 
-const STATE_BINDING = bindValue<string>("TownRoadLane", "GetToolState", "{}");
+const STATE_BINDING = bindValue<ToolStateVM>("TownRoadLane", "GetPanelState", EMPTY);
 
 export const useToolState = (): ToolStateVM => {
-  const json = useValue(STATE_BINDING);
-  try {
-    if (!json || json === "{}") return EMPTY;
-    const raw = JSON.parse(json) as Partial<ToolStateVM>;
-    // Defensive normalisation — every C# tick rebuilds the state JSON, and any
-    // missing/null fields would crash deeper in the component tree (e.g. the
-    // expandedLine effect reads state.lines.length). Coerce to known shapes here
-    // so consumers can trust ToolStateVM invariants.
-    return {
-      isActive: Boolean(raw.isActive),
-      toolState: typeof raw.toolState === "number" ? raw.toolState : 0,
-      areaVertexCount: typeof raw.areaVertexCount === "number" ? raw.areaVertexCount : 0,
-      currentAreaStyle: typeof raw.currentAreaStyle === "number" ? raw.currentAreaStyle : 0,
-      selectedNodeIndex: typeof raw.selectedNodeIndex === "number" ? raw.selectedNodeIndex : -1,
-      currentStyle: typeof raw.currentStyle === "number" ? raw.currentStyle : 0,
-      lastClickedLine: typeof raw.lastClickedLine === "number" ? raw.lastClickedLine : -1,
-      lastClickedTick: typeof raw.lastClickedTick === "number" ? raw.lastClickedTick : 0,
-      hoveredLineInGame: typeof raw.hoveredLineInGame === "number" ? raw.hoveredLineInGame : -1,
-      vanillaHidden: Boolean(raw.vanillaHidden),
-      lines: Array.isArray(raw.lines)
-        ? raw.lines.map((l: any) => ({
-            lineIndex: typeof l?.lineIndex === "number" ? l.lineIndex : -1,
-            style: typeof l?.style === "number" ? l.style : 0,
-            curv: typeof l?.curv === "number" ? l.curv : 50,
-            segments: Array.isArray(l?.segments)
-              ? l.segments.map((s: any) => ({
-                  lineIndex: typeof s?.lineIndex === "number" ? s.lineIndex : -1,
-                  segmentIndex: typeof s?.segmentIndex === "number" ? s.segmentIndex : 0,
-                  tStart: typeof s?.tStart === "number" ? s.tStart : 0,
-                  tEnd: typeof s?.tEnd === "number" ? s.tEnd : 1,
-                  visible: Boolean(s?.visible),
-                  style: typeof s?.style === "number" ? s.style : 0,
-                  lengthM: typeof s?.lengthM === "number" ? s.lengthM : 0,
-                  screenX: typeof s?.screenX === "number" ? s.screenX : -1,
-                  screenY: typeof s?.screenY === "number" ? s.screenY : -1,
-                }))
-              : [],
-          }))
-        : [],
-      areas: Array.isArray((raw as any).areas)
-        ? (raw as any).areas.map((a: any) => ({
-            areaIndex: typeof a?.areaIndex === "number" ? a.areaIndex : -1,
-            styleId: typeof a?.styleId === "number" ? a.styleId : 0,
-            visible: Boolean(a?.visible),
-            vertexCount: typeof a?.vertexCount === "number" ? a.vertexCount : 0,
-            pieceCount: typeof a?.pieceCount === "number" ? a.pieceCount : 0,
-            visiblePieces: typeof a?.visiblePieces === "number" ? a.visiblePieces : 0,
-          }))
-        : [],
-    };
-  } catch (e) {
-    console.error("TownRoadLane UI: bad state JSON:", e);
-    return EMPTY;
-  }
+  const state = useValue(STATE_BINDING);
+  // The typed binding guarantees the full field set (GenericUIWriter serializes
+  // every VM field, arrays initialised empty on the C# side). Guard only against
+  // a wholesale null/undefined push so consumers can trust ToolStateVM invariants.
+  if (!state) return EMPTY;
+  return {
+    ...state,
+    lines: Array.isArray(state.lines) ? state.lines : [],
+    areas: Array.isArray(state.areas) ? state.areas : [],
+  };
 };
 
 // --- Commands (push, React → C#) ---

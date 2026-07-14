@@ -23,6 +23,7 @@ import {
   SegmentVM,
   AreaVM,
 } from "../hooks/useToolState";
+import { registerSegmentAnchor, segKey } from "../hooks/positionRegistry";
 import { ChevronRight, Cross, Eye, EyeOff, Trash, Cycle } from "../components/icons";
 import { Dropdown, DropdownOption } from "../components/Dropdown";
 import { TooltipProvider, Tooltip } from "../components/Tooltip";
@@ -138,8 +139,13 @@ export const TownRoadLanePanel = () => (
 
 // Floating in-world popover anchored at a segment's midpoint. Buttons mirror
 // the accordion controls (toggle visibility, cycle style) plus a delete-line
-// button (C6, two-press confirm to avoid mistaken loss of work). Hidden when
-// screen coords are negative (segment behind camera / off-screen).
+// button (C6, two-press confirm to avoid mistaken loss of work).
+//
+// Positioning is IMPERATIVE (Stage 5e): the root registers itself with
+// positionRegistry, and the per-frame GetScreenPoints binding writes
+// style.left/top directly — camera movement never re-renders React. The
+// registry also hides the popover (display:none) while its segment is
+// off-screen / behind the camera.
 const POPOVER_DELETE_CONFIRM_MS = 2500;
 
 const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
@@ -154,7 +160,6 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
     return () => window.clearTimeout(id);
   }, [confirmingDelete]);
 
-  if (seg.screenX < 0 || seg.screenY < 0) return null;
   // Portal into document.body — our panel mounts inside GameTopRight which
   // likely has CSS transform/will-change set up by CS2, creating a containing
   // block that pins our `position: fixed` to the slot instead of the viewport.
@@ -162,7 +167,7 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   // Camera.WorldToScreenPoint values were computed against.
   return createPortal(
     <PopoverRoot
-      style={{ left: seg.screenX, top: seg.screenY }}
+      ref={(el: HTMLElement | null) => registerSegmentAnchor(segKey(seg.lineIndex, seg.segmentIndex), el)}
       onMouseEnter={() => {
         // Per-segment hover (C3): light up THIS segment specifically, not the
         // whole line. The popover's anchored to one segment, so the UX should
