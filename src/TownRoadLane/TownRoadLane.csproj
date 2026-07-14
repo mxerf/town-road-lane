@@ -8,8 +8,12 @@
 	</PropertyGroup>
 
 	<!--Imports must be after PropertyGroup block-->
-	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.props" />
-	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.targets" />
+	<!-- Windows: the game's modding toolchain (references, Burst post-processing, deploy).
+	     Elsewhere: LocalRefs.props — reference-only compile against a local copy of the
+	     game assemblies (_managed/) for typecheck/IDE; no Burst, no deploy. -->
+	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.props" Condition="'$(OS)' == 'Windows_NT'" />
+	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.targets" Condition="'$(OS)' == 'Windows_NT'" />
+	<Import Project="LocalRefs.props" Condition="'$(OS)' != 'Windows_NT'" />
 
 	<!-- Override the template's <LangVersion>9.0</LangVersion> from Mod.props (which is imported above
 	     and would otherwise win). Decompiled vanilla code uses C# 10 (file-scoped namespace) and
@@ -110,7 +114,7 @@
 	     BuildFrontend target). Runs BEFORE Mod.targets' AfterBuild deploy step, so by the time
 	     deploy fires the .mjs + .css are sitting in $(OutDir) and get mirrored to Mods/.
 	     Skipped if node_modules is missing (`npm install` from the user side once is enough). -->
-	<Target Name="BuildFrontend" BeforeTargets="AfterBuild" Condition="Exists('..\TownRoadLaneUI\node_modules')">
+	<Target Name="BuildFrontend" BeforeTargets="AfterBuild" Condition="'$(OS)' == 'Windows_NT' And Exists('..\TownRoadLaneUI\node_modules')">
 		<Message Text="[BuildFrontend] Running webpack in ..\TownRoadLaneUI\" Importance="high" />
 		<Exec Command="npm run build" WorkingDirectory="..\TownRoadLaneUI\" ContinueOnError="false" />
 		<Copy SourceFiles="..\TownRoadLaneUI\dist\TownRoadLane.mjs" DestinationFolder="$(OutDir)" />
@@ -128,7 +132,7 @@
 		<Copy SourceFiles="..\TownRoadLaneUI\mod.json" DestinationFolder="$(OutDir)" />
 		<Message Text="[BuildFrontend] Copied UI bundle + manifest into $(OutDir)" Importance="high" />
 	</Target>
-	<Target Name="BuildFrontendMissingWarn" BeforeTargets="AfterBuild" Condition="!Exists('..\TownRoadLaneUI\node_modules')">
+	<Target Name="BuildFrontendMissingWarn" BeforeTargets="AfterBuild" Condition="'$(OS)' == 'Windows_NT' And !Exists('..\TownRoadLaneUI\node_modules')">
 		<Message Text="[BuildFrontend] Skipping — ..\TownRoadLaneUI\node_modules not found. Run `npm install` inside src\TownRoadLaneUI\ to enable the UI bundle build." Importance="high" />
 	</Target>
 

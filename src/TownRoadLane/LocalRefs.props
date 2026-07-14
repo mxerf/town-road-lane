@@ -1,0 +1,43 @@
+<!-- Reference-only compile for non-Windows machines (typecheck / IDE support).
+     Mirrors the compile-relevant half of the CSII toolchain's Mod.props against
+     a local copy of the game assemblies:
+
+       _managed/Managed/           <- <game>/Cities2_Data/Managed
+       _managed/SourceGenerators/  <- <toolchain>/UnityModsProject/Library/PackageCache/
+                                      com.unity.entities@<ver>/Unity.Entities/SourceGenerators
+
+     Real builds (Burst post-processing, deploy to Mods/, publishing) happen on
+     Windows via the toolchain's Mod.props/Mod.targets. -->
+<Project>
+
+	<PropertyGroup>
+		<OutputType>Library</OutputType>
+		<TargetFramework>net48</TargetFramework>
+
+		<ManagedPath>$(MSBuildThisFileDirectory)../../_managed/Managed</ManagedPath>
+		<GeneratorsPath>$(MSBuildThisFileDirectory)../../_managed/SourceGenerators</GeneratorsPath>
+
+		<!-- Resolve the net48 framework from the game's own (Unity Mono) BCL — the
+		     exact assemblies the game runs on; no reference-assembly NuGet needed. -->
+		<FrameworkPathOverride>$(ManagedPath)</FrameworkPathOverride>
+		<AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+
+		<AssemblySearchPaths>$(AssemblySearchPaths);$(ManagedPath)</AssemblySearchPaths>
+	</PropertyGroup>
+
+	<!-- The game assemblies compile against Unity's netstandard 2.1 facade. On
+	     Windows the targeting pack's Facades dir supplies it implicitly; here it
+	     must be referenced explicitly (resolved from ManagedPath). -->
+	<ItemGroup>
+		<Reference Include="netstandard">
+			<Private>false</Private>
+		</Reference>
+	</ItemGroup>
+
+	<!-- Unity.Entities source generators — same set Mod.props wires up, so the
+	     generated systems code (and its diagnostics) match the Windows build. -->
+	<ItemGroup>
+		<Analyzer Include="$(GeneratorsPath)/*.dll" />
+	</ItemGroup>
+
+</Project>
