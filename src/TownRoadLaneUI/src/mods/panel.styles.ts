@@ -7,7 +7,10 @@
 //   - No `position: fixed` for popovers (TTE workaround) — but we DO use it
 //     on .trl-popover via createPortal to document.body, which worked in
 //     prior testing. Watch this if popovers regress.
-//   - Inline values from tokens directly (no var(--foo) indirection).
+//   - var(--foo) only for GAME-defined variables (via tokens.ts) — those are
+//     set on CS2's root and resolve fine (Traffic/RoadBuilder/TTE pattern).
+//     Never declare our own custom props (resolved empty in past testing),
+//     and never rely on var() fallback values (cohtml ignores them).
 //   - SVG children inherit `color` via `fill: none; stroke: currentColor;`
 //     in IconBase — make sure parent has explicit `color` set if you want
 //     a custom tint. Default color cascades from the panel root.
@@ -27,6 +30,7 @@ export const Panel = styled.div`
   max-height: ${T.panelMaxHeight};
   overflow-y: auto;
   background: ${T.colorPanelBg};
+  backdrop-filter: ${T.backdropBlur};
   color: ${T.colorTextPrimary};
   border: 1rem solid ${T.colorBorderSoft};
   border-radius: ${T.radiusLg};
@@ -53,7 +57,7 @@ export const PanelStickyChrome = styled.div`
 `;
 
 export const PanelTitle = styled.h3`
-  font-size: ${T.fontSizeLg};
+  font-size: ${T.fontSizeXl};
   font-weight: ${T.fontWeightBold};
   margin: 0 0 ${T.space1} 0;
 `;
@@ -108,14 +112,17 @@ export const ModeRow = styled.div`
   }
 `;
 
+// Segmented control, vanilla-toggle style: the active mode is an ACCENT FILL
+// with dark text (how the game marks selected toggles), the inactive one a
+// subtle filled chip — no ghost outlines.
 export const ModeBtn = styled.button<{ $active?: boolean }>`
   display: flex;
   align-items: center;
   justify-content: center;
   padding: ${T.space1} ${T.space2};
-  background: ${(p) => (p.$active ? T.colorRowBgActive : "transparent")};
-  color: ${(p) => (p.$active ? "#fff" : T.colorTextMuted)};
-  border: 1rem solid ${(p) => (p.$active ? T.colorAccentSoft : T.colorBorderMid)};
+  background: ${(p) => (p.$active ? T.colorAccent : T.colorBtnBg)};
+  color: ${(p) => (p.$active ? T.colorTextOnAccent : T.colorTextMuted)};
+  border: 1rem solid transparent;
   border-radius: ${T.radiusSm};
   font-size: ${T.fontSizeSm};
   font-weight: ${T.fontWeightMedium};
@@ -129,9 +136,8 @@ export const ModeBtn = styled.button<{ $active?: boolean }>`
   }
 
   &:hover {
-    background: ${(p) => (p.$active ? T.colorRowBgActive : T.colorRowBgHover)};
-    color: ${(p) => (p.$active ? "#fff" : T.colorTextPrimary)};
-    border-color: ${(p) => (p.$active ? T.colorAccentSoft : T.colorBorderStrong)};
+    background: ${(p) => (p.$active ? "var(--accentColorNormal-hover)" : T.colorBtnBgHover)};
+    color: ${(p) => (p.$active ? T.colorTextOnAccent : T.colorTextPrimary)};
   }
 `;
 
@@ -365,9 +371,9 @@ export const CurvBtn = styled.button<{ disabled?: boolean }>`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  background: ${T.colorBtnBg};
   color: ${T.colorTextPrimary};
-  border: 1rem solid ${T.colorBorderMid};
+  border: 1rem solid ${T.colorBorderSoft};
   border-radius: ${T.radiusSm};
   font-size: ${T.fontSizeMd};
   cursor: ${(p) => (p.disabled ? "default" : "pointer")};
@@ -377,8 +383,8 @@ export const CurvBtn = styled.button<{ disabled?: boolean }>`
   transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast}, opacity ${T.transitionFast};
 
   &:hover {
-    background: ${(p) => (p.disabled ? "transparent" : T.colorRowBgHover)};
-    border-color: ${(p) => (p.disabled ? T.colorBorderMid : T.colorBorderStrong)};
+    background: ${(p) => (p.disabled ? T.colorBtnBg : T.colorBtnBgHover)};
+    border-color: ${(p) => (p.disabled ? T.colorBorderSoft : T.colorBorderMid)};
     color: ${(p) => (p.disabled ? T.colorTextPrimary : T.colorAccent)};
   }
 `;
@@ -397,7 +403,8 @@ export const PopoverRoot = styled.div`
   transform: translate(-50%, -120%);
   display: flex;
   padding: 4rem;
-  background: rgba(18, 22, 30, 0.95);
+  background: ${T.colorPanelBg};
+  backdrop-filter: ${T.backdropBlur};
   border: 1rem solid ${T.colorBorderMid};
   border-radius: ${T.radiusMd};
   pointer-events: auto;
@@ -517,13 +524,13 @@ export const HintKey = styled.span`
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 44rem;
+  min-width: 40rem;
   padding: 1rem 5rem;
   margin-right: ${T.space2};
-  background: ${T.colorRowBg};
-  border: 1rem solid ${T.colorBorderMid};
+  background: ${T.colorBtnBg};
+  border: 1rem solid ${T.colorBorderSoft};
   border-radius: ${T.radiusSm};
-  color: ${T.colorTextPrimary};
+  color: ${T.colorTextMuted};
   font-variant-numeric: tabular-nums;
 `;
 
@@ -531,12 +538,14 @@ export const Btn = styled.button<{ $danger?: boolean; $full?: boolean }>`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  // Filled, not ghost — outline-only buttons read as wireframes next to the
+  // game's own (filled) buttons.
+  background: ${T.colorBtnBg};
   // Explicit colour, NOT "inherit" — cohtml can't parse color:inherit (see
   // Player.log "Unable to parse declaration"), so the button fell back to the
   // UA-default BLACK text and blended into the dark panel.
   color: ${(p) => (p.$danger ? T.colorDanger : T.colorTextPrimary)};
-  border: 1rem solid ${T.colorBorderMid};
+  border: 1rem solid ${T.colorBorderSoft};
   border-radius: ${T.radiusSm};
   padding: ${T.space1} ${T.space2};
   font-size: ${T.fontSizeSm};
@@ -558,7 +567,7 @@ export const Btn = styled.button<{ $danger?: boolean; $full?: boolean }>`
   }
 
   &:hover {
-    background: ${(p) => (p.$danger ? T.colorDangerSoft : T.colorRowBgHover)};
-    border-color: ${(p) => (p.$danger ? T.colorDanger : T.colorBorderStrong)};
+    background: ${(p) => (p.$danger ? T.colorDangerSoft : T.colorBtnBgHover)};
+    border-color: ${(p) => (p.$danger ? T.colorDanger : T.colorBorderMid)};
   }
 `;

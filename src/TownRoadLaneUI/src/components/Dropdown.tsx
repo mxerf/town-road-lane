@@ -75,9 +75,11 @@ const Arrow = styled.span`
 // Portal-mounted floater. Positioning is computed in JS from the toggle's
 // bounding box so it sits flush under the toggle regardless of panel scroll
 // or accordion overflow clipping.
+// Solid (not glass) — the menu floats OVER the panel, and a translucent
+// blurred surface there smears the covered controls into colour blotches.
 const Menu = styled.div`
   position: fixed;
-  background: rgba(18, 22, 30, 0.98);
+  background: ${T.colorSurfaceSolid};
   border: 1rem solid ${T.colorBorderMid};
   border-radius: ${T.radiusSm};
   box-shadow: ${T.shadowMd};
@@ -101,7 +103,7 @@ const Item = styled.div`
 
 const itemSelectedStyle = {
   background: T.colorAccentDim,
-  color: "#fff",
+  color: T.colorTextPrimary,
 };
 
 export const Dropdown = <V,>({ value, options, onChange, placeholder = "—" }: DropdownProps<V>) => {

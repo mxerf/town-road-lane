@@ -57,8 +57,10 @@ const tooltipBaseStyle: CSSProperties = {
   position: "fixed",
   display: "block",
   fontSize: "11rem",
-  color: "rgba(255, 255, 255, 0.95)",
-  background: "rgba(15, 20, 28, 0.96)",
+  color: T.colorTextPrimary,
+  // Solid, no blur — tooltips frequently hover over the panel itself, where a
+  // glass surface smears the underlying controls (same reasoning as Dropdown).
+  background: T.colorSurfaceSolid,
   border: `1rem solid ${T.colorBorderMid}`,
   borderRadius: T.radiusSm,
   padding: "5rem 8rem",
