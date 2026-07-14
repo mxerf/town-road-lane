@@ -18,13 +18,21 @@ const enUS = {
   "panel.appTitle":           "Road Markings",
   "panel.title":              "Node #{n}",
   "panel.close.tooltip":      "Close the marking tool",
-  "panel.meta.lines":         "lines: {n}",
-  "panel.meta.areas":         "areas: {n}",
-  "panel.meta.defaultStyle":  "default style",
   "panel.hint.selectNode":    "Click an intersection on the map to edit its markings.",
-  "panel.hint.empty":         "Click two endpoint dots to draw a line, or switch to Area mode to fill a polygon.",
   "panel.error.title":        "Panel error",
   "panel.error.retry":        "Retry",
+
+  // Live tool status (mirrors MarkingNodeToolSystem.State)
+  "status.line.first":        "Click the first point of a line",
+  "status.line.second":       "Click the second point to finish the line",
+  "status.area":              "Area mode — points placed: {n}",
+
+  // Section headers
+  "section.drawing":          "Drawing",
+  "section.node":             "Intersection",
+
+  // Node block
+  "node.vanilla.label":       "Vanilla markings",
 
   // Mode switch
   "mode.lines":               "Lines",
@@ -33,8 +41,6 @@ const enUS = {
   "mode.area.tooltip":        "Fill a polygon between anchor dots (safety islands, hatched zones)",
 
   // Area draft (AreaSelecting)
-  "area.draft.title":         "New area",
-  "area.draft.progress":      "points placed: {n}",
   "area.draft.hint.add":      "LMB — add a point",
   "area.draft.hint.undo":     "RMB — remove the last point",
   "area.draft.hint.close":    "Click the first point again to close (needs 3+)",
@@ -97,9 +103,10 @@ const enUS = {
   "line.delete.confirm.btn":  "Delete",
   "line.curvature":           "Curvature",
   "line.curvature.tooltip":   "Bend of the line: 0% = straight, 50% = default arc, 100% = maximum roundness",
+  "line.curvature.reset":     "Reset to the default 50%",
 
   // Segment row
-  "segment.label":            "seg {n}",
+  "segment.label":            "Segment {n}",
   "segment.length":           "{m}m",
   "segment.hide.tooltip":     "Hide segment",
   "segment.show.tooltip":     "Show segment",
@@ -125,13 +132,21 @@ const ruRU: LocaleDict = {
   "panel.appTitle":           "Дорожная разметка",
   "panel.title":              "Узел #{n}",
   "panel.close.tooltip":      "Закрыть инструмент разметки",
-  "panel.meta.lines":         "линий: {n}",
-  "panel.meta.areas":         "областей: {n}",
-  "panel.meta.defaultStyle":  "стиль по умолчанию",
   "panel.hint.selectNode":    "Кликните по перекрёстку на карте, чтобы редактировать его разметку.",
-  "panel.hint.empty":         "Кликните две точки, чтобы провести линию, или переключитесь в режим «Область» для заливки полигона.",
   "panel.error.title":        "Ошибка панели",
   "panel.error.retry":        "Повторить",
+
+  // Live tool status (mirrors MarkingNodeToolSystem.State)
+  "status.line.first":        "Кликните первую точку линии",
+  "status.line.second":       "Кликните вторую точку — линия завершится",
+  "status.area":              "Режим области — точек: {n}",
+
+  // Section headers
+  "section.drawing":          "Рисование",
+  "section.node":             "Перекрёсток",
+
+  // Node block
+  "node.vanilla.label":       "Ванильная разметка",
 
   // Mode switch
   "mode.lines":               "Линии",
@@ -140,8 +155,6 @@ const ruRU: LocaleDict = {
   "mode.area.tooltip":        "Заливка полигона по опорным точкам (островки безопасности, штриховка)",
 
   // Area draft (AreaSelecting)
-  "area.draft.title":         "Новая область",
-  "area.draft.progress":      "точек поставлено: {n}",
   "area.draft.hint.add":      "ЛКМ — добавить точку",
   "area.draft.hint.undo":     "ПКМ — убрать последнюю точку",
   "area.draft.hint.close":    "Клик по первой точке — замкнуть (нужно 3+)",
@@ -204,9 +217,10 @@ const ruRU: LocaleDict = {
   "line.delete.confirm.btn":  "Удалить",
   "line.curvature":           "Кривизна",
   "line.curvature.tooltip":   "Изгиб линии: 0% — прямая, 50% — стандартная дуга, 100% — максимальное скругление",
+  "line.curvature.reset":     "Вернуть стандартные 50%",
 
   // Segment row
-  "segment.label":            "сегм. {n}",
+  "segment.label":            "Сегмент {n}",
   "segment.length":           "{m} м",
   "segment.hide.tooltip":     "Скрыть сегмент",
   "segment.show.tooltip":     "Показать сегмент",

@@ -11,6 +11,12 @@
 //     set on CS2's root and resolve fine (Traffic/RoadBuilder/TTE pattern).
 //     Never declare our own custom props (resolved empty in past testing),
 //     and never rely on var() fallback values (cohtml ignores them).
+//   - var() ONLY in true longhands (color, background-color). Shorthands
+//     (background, border, border-color, border-radius) silently drop the
+//     whole declaration: "Custom CSS expressions are not supported in
+//     shorthand declaration" in Player.log.
+//   - No `position: sticky` — "Unable to parse declaration" in Player.log;
+//     it never worked, the panel scrolls as one block.
 //   - SVG children inherit `color` via `fill: none; stroke: currentColor;`
 //     in IconBase — make sure parent has explicit `color` set if you want
 //     a custom tint. Default color cascades from the panel root.
@@ -24,7 +30,10 @@ import { tokens as T } from "../styles/tokens";
 
 export const Panel = styled.div`
   position: absolute;
-  top: ${T.space2};
+  // 56rem clears the game's own top-right button cluster (advisor + settings,
+  // ~48rem tall) — they live outside the GameTopRight slot and our panel was
+  // overlapping them at top: 8rem.
+  top: 56rem;
   right: ${T.space2};
   width: ${T.panelWidth};
   max-height: ${T.panelMaxHeight};
@@ -41,16 +50,11 @@ export const Panel = styled.div`
   box-shadow: ${T.shadowMd};
 `;
 
-// Sticky chrome — header + meta stay pinned at the panel top while the line
-// list scrolls underneath. The opaque background covers rows scrolling under
-// so the title stays readable. zIndex keeps it above the scrolled content
-// (cohtml needs an explicit stacking context anchor — position:sticky alone
-// is sometimes drawn under siblings).
+// Panel chrome — header, status and the drawing cluster, visually separated
+// from the scrolling lists below. NOT sticky: cohtml can't parse
+// position:sticky at all (Player.log "Unable to parse declaration"), so the
+// panel has always scrolled as one block; this just keeps the divider.
 export const PanelStickyChrome = styled.div`
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: ${T.colorPanelBg};
   padding-bottom: ${T.space2};
   margin-bottom: ${T.space2};
   border-bottom: 1rem solid ${T.colorBorderSoft};
@@ -120,7 +124,8 @@ export const ModeBtn = styled.button<{ $active?: boolean }>`
   align-items: center;
   justify-content: center;
   padding: ${T.space1} ${T.space2};
-  background: ${(p) => (p.$active ? T.colorAccent : T.colorBtnBg)};
+  // background-color (longhand) — the active fill is a var()-based token.
+  background-color: ${(p) => (p.$active ? T.colorAccent : T.colorBtnBg)};
   color: ${(p) => (p.$active ? T.colorTextOnAccent : T.colorTextMuted)};
   border: 1rem solid transparent;
   border-radius: ${T.radiusSm};
@@ -128,7 +133,7 @@ export const ModeBtn = styled.button<{ $active?: boolean }>`
   font-weight: ${T.fontWeightMedium};
   cursor: pointer;
   pointer-events: auto;
-  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
+  transition: background-color ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
 
   > svg {
     margin-right: ${T.space1};
@@ -136,7 +141,7 @@ export const ModeBtn = styled.button<{ $active?: boolean }>`
   }
 
   &:hover {
-    background: ${(p) => (p.$active ? "var(--accentColorNormal-hover)" : T.colorBtnBgHover)};
+    background-color: ${(p) => (p.$active ? "var(--accentColorNormal-hover)" : T.colorBtnBgHover)};
     color: ${(p) => (p.$active ? T.colorTextOnAccent : T.colorTextPrimary)};
   }
 `;
@@ -152,19 +157,6 @@ export const DraftBox = styled.div`
   border-radius: ${T.radiusMd};
   padding: ${T.space2};
   margin: ${T.space2} 0 0;
-`;
-
-export const DraftTitle = styled.div`
-  font-size: ${T.fontSizeSm};
-  font-weight: ${T.fontWeightBold};
-  margin-bottom: ${T.space1};
-`;
-
-export const DraftProgress = styled.div`
-  font-size: ${T.fontSizeSm};
-  color: ${T.colorTextPrimary};
-  margin-bottom: ${T.space1};
-  font-variant-numeric: tabular-nums;
 `;
 
 export const DraftHint = styled.div`
@@ -205,40 +197,94 @@ export const SectionTitle = styled.div`
   margin: ${T.space3} 0 ${T.space1};
 `;
 
-export const PanelMeta = styled.div`
+// Live tool-status line under the header: accent dot + one instruction that
+// tracks MarkingNodeToolSystem.State. This is the panel's "what do I do now"
+// voice — the recomposition's replacement for the old debug-flavoured meta
+// row (node id + counters).
+export const StatusRow = styled.div`
   display: flex;
-  flex-wrap: wrap;
-  // center, not baseline — cohtml can't parse align-items: baseline.
   align-items: center;
-  color: ${T.colorTextMuted};
+  margin-top: ${T.space1};
   font-size: ${T.fontSizeSm};
+  color: ${T.colorTextPrimary};
+`;
 
-  > * {
+export const StatusDot = styled.span`
+  display: block;
+  flex-shrink: 0;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 3rem;
+  // background-color, NOT background: the accent token is a var(), and cohtml
+  // drops var() inside shorthand declarations.
+  background-color: ${T.colorAccent};
+  margin-right: ${T.space2};
+`;
+
+// Label-left / control-right row for stateful node settings (vanilla toggle).
+export const ToggleRow = styled.div`
+  display: flex;
+  align-items: center;
+  margin-top: ${T.space1};
+
+  > *:first-child {
+    flex: 1;
+  }
+`;
+
+// Square icon toggle — the stateful cousin of PopoverBtn ($active = the
+// override is engaged, accent-tinted).
+export const IconToggleBtn = styled.button<{ $active?: boolean }>`
+  width: 26rem;
+  height: 26rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: ${(p) => (p.$active ? T.colorAccentDim : T.colorBtnBg)};
+  color: ${(p) => (p.$active ? T.colorAccent : T.colorTextPrimary)};
+  border: 1rem solid ${(p) => (p.$active ? T.colorAccentSoft : T.colorBorderSoft)};
+  border-radius: ${T.radiusSm};
+  cursor: pointer;
+  pointer-events: auto;
+  padding: 0;
+  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
+
+  &:hover {
+    background: ${(p) => (p.$active ? T.colorAccentDim : T.colorBtnBgHover)};
+    border-color: ${T.colorBorderMid};
+  }
+`;
+
+// Clickable header for the collapsed hotkeys reference — SectionTitle's
+// visual voice plus a chevron and a pointer cursor.
+export const FoldoutHeader = styled.div`
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  font-size: ${T.fontSizeXs};
+  font-weight: ${T.fontWeightBold};
+  color: ${T.colorTextDim};
+  text-transform: uppercase;
+  letter-spacing: 0.6rem;
+  margin: ${T.space3} 0 ${T.space1};
+
+  > *:first-child {
     margin-right: ${T.space1};
   }
-  > *:last-child {
-    margin-right: 0;
+
+  &:hover {
+    color: ${T.colorTextMuted};
   }
 `;
 
-// Emphasized inline value inside PanelMeta — used for the current-style name
-// next to "default style:". Plain <span> instead of <b>/<strong> so cohtml's
-// font cascade doesn't promote it to a heavier face we don't have.
-export const PanelMetaValue = styled.span`
-  color: ${T.colorTextPrimary};
-  font-weight: ${T.fontWeightMedium};
-`;
-
-// Thin vertical separator between PanelMeta items. Pure CSS — no glyph that
-// might fall back to a missing-character square (looking at you, U+00B7).
-// display: block (not inline-block, which cohtml can't parse) — sizing comes
-// from explicit width/height, and the parent flex row handles placement.
-export const PanelMetaSep = styled.span`
-  display: block;
-  width: 1rem;
-  height: 10rem;
-  background: ${T.colorBorderMid};
-  margin: 0 ${T.space1};
+// Quiet entity-id line at the very bottom of the node block — power-user /
+// bug-report material, deliberately the least prominent text on the panel.
+export const NodeIdText = styled.div`
+  margin-top: ${T.space2};
+  font-size: ${T.fontSizeXs};
+  color: ${T.colorTextDim};
+  font-variant-numeric: tabular-nums;
 `;
 
 export const PanelHint = styled.div`
@@ -362,39 +408,58 @@ export const CurvLabel = styled.span`
   color: ${T.colorTextMuted};
 `;
 
-// Disabled look comes from the `disabled` prop directly — cohtml doesn't
-// support the :disabled pseudo-class selector (Player.log warns on it), so a
-// &:disabled rule silently never applied.
-export const CurvBtn = styled.button<{ disabled?: boolean }>`
-  width: 24rem;
-  height: 24rem;
+// Plain numeric text field — <input type=range> turned out non-functional in
+// CS2's cohtml build (thumb never moved), so: type the exact percent, commit
+// on Enter/blur. type="text" + JS digit filter, not type="number" (spinner
+// affordances are similarly untrustworthy here).
+export const CurvInput = styled.input`
+  width: 44rem;
+  flex-shrink: 0;
+  padding: ${T.space1};
+  text-align: right;
+  background: ${T.colorBtnBg};
+  color: ${T.colorTextPrimary};
+  border: 1rem solid ${T.colorBorderMid};
+  border-radius: ${T.radiusSm};
+  font-size: ${T.fontSizeSm};
+  font-variant-numeric: tabular-nums;
+  pointer-events: auto;
+`;
+
+// The "%" unit after the input.
+export const CurvUnit = styled.span`
+  flex-shrink: 0;
+  margin-left: 2rem;
+  color: ${T.colorTextMuted};
+  font-size: ${T.fontSizeSm};
+`;
+
+// Reset-to-default affordance next to the slider; rendered only while the
+// value differs from the 50% default.
+export const CurvResetBtn = styled.button`
+  width: 22rem;
+  height: 22rem;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  margin-left: ${T.space1};
   background: ${T.colorBtnBg};
-  color: ${T.colorTextPrimary};
+  color: ${T.colorTextMuted};
   border: 1rem solid ${T.colorBorderSoft};
   border-radius: ${T.radiusSm};
-  font-size: ${T.fontSizeMd};
-  cursor: ${(p) => (p.disabled ? "default" : "pointer")};
-  opacity: ${(p) => (p.disabled ? 0.35 : 1)};
+  cursor: pointer;
   pointer-events: auto;
   padding: 0;
-  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast}, opacity ${T.transitionFast};
+  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
 
   &:hover {
-    background: ${(p) => (p.disabled ? T.colorBtnBg : T.colorBtnBgHover)};
-    border-color: ${(p) => (p.disabled ? T.colorBorderSoft : T.colorBorderMid)};
-    color: ${(p) => (p.disabled ? T.colorTextPrimary : T.colorAccent)};
+    background: ${T.colorBtnBgHover};
+    border-color: ${T.colorBorderMid};
+    color: ${T.colorTextPrimary};
   }
 `;
 
-export const CurvValue = styled.span`
-  min-width: 40rem;
-  text-align: center;
-  font-size: ${T.fontSizeSm};
-  color: ${T.colorTextPrimary};
-`;
 
 // ── Segment popover (floats in world space via portal) ─────────────────
 
@@ -469,7 +534,16 @@ export const SegmentRow = styled.div<{ $hidden?: boolean }>`
 `;
 
 export const SegmentInfo = styled.span`
-  // tabular-nums for aligned digits without a monospace family — see LineSegCount.
+  flex: 1;
+`;
+
+// Right-aligned segment length, visually separated from the name — "Сегмент 1
+// · 1.5м" in one run of text read as an unparseable jumble.
+export const SegmentLen = styled.span`
+  flex-shrink: 0;
+  margin-right: ${T.space2};
+  color: ${T.colorTextMuted};
+  font-size: ${T.fontSizeXs};
   font-variant-numeric: tabular-nums;
 `;
 

@@ -1,4 +1,6 @@
-import { Component, ErrorInfo, ReactNode, useEffect, useState } from "react";
+// React's KeyboardEvent is aliased — the bare name must keep referring to the
+// DOM type (the document-level hotkey handler below is typed against it).
+import { ChangeEvent, Component, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   useToolState,
@@ -36,15 +38,17 @@ import {
   PanelTitle,
   PanelHeaderRow,
   CloseBtn,
-  PanelMeta,
-  PanelMetaSep,
+  StatusRow,
+  StatusDot,
+  ToggleRow,
+  IconToggleBtn,
+  FoldoutHeader,
+  NodeIdText,
   PanelHint,
   PanelList,
   ModeRow,
   ModeBtn,
   DraftBox,
-  DraftTitle,
-  DraftProgress,
   DraftHint,
   FieldRow,
   FieldLabel,
@@ -62,12 +66,14 @@ import {
   StyleRow,
   CurvRow,
   CurvLabel,
-  CurvBtn,
-  CurvValue,
+  CurvInput,
+  CurvUnit,
+  CurvResetBtn,
   PopoverRoot,
   PopoverBtn,
   SegmentRow,
   SegmentInfo,
+  SegmentLen,
   SegmentIndicator,
   Btn,
   ConfirmRow,
@@ -239,22 +245,45 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   );
 };
 
-// Static footer with the tool's keyboard map. The bindings are configurable in
-// the mod settings, but the defaults cover ~all users; the settings screen is
-// linked from the game's own options, not from here.
-const HotkeyHints = () => {
+// Keyboard reference, collapsed into a one-line foldout by default — a static
+// cheat-sheet must not compete with the working area for a third of the panel.
+// It opens expanded on the "select a node" card (the panel is otherwise empty
+// there, and that's the onboarding moment) and collapsed while editing.
+const HotkeysFoldout = ({ defaultOpen = false }: { defaultOpen?: boolean }) => {
   const t = useT();
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <HintsBox>
-      <SectionTitle style={{ marginTop: 0 }}>{t("hotkeys.title")}</SectionTitle>
-      <HintRow><HintKey>Ctrl+M</HintKey><span>{t("hotkeys.toggle")}</span></HintRow>
-      <HintRow><HintKey>Y</HintKey><span>{t("hotkeys.cycleLine")}</span></HintRow>
-      <HintRow><HintKey>A</HintKey><span>{t("hotkeys.areaMode")}</span></HintRow>
-      <HintRow><HintKey>U</HintKey><span>{t("hotkeys.cycleArea")}</span></HintRow>
-      <HintRow><HintKey>{t("hotkeys.rmb")}</HintKey><span>{t("hotkeys.rmb.desc")}</span></HintRow>
-      <HintRow><HintKey>{t("hotkeys.esc")}</HintKey><span>{t("hotkeys.esc.desc")}</span></HintRow>
+      <FoldoutHeader onClick={() => setOpen(!open)}>
+        <LineChevron $open={open}>
+          <ChevronRight size={10} />
+        </LineChevron>
+        <span>{t("hotkeys.title")}</span>
+      </FoldoutHeader>
+      {open && (
+        <>
+          <HintRow><HintKey>Ctrl+M</HintKey><span>{t("hotkeys.toggle")}</span></HintRow>
+          <HintRow><HintKey>Y</HintKey><span>{t("hotkeys.cycleLine")}</span></HintRow>
+          <HintRow><HintKey>A</HintKey><span>{t("hotkeys.areaMode")}</span></HintRow>
+          <HintRow><HintKey>U</HintKey><span>{t("hotkeys.cycleArea")}</span></HintRow>
+          <HintRow><HintKey>{t("hotkeys.rmb")}</HintKey><span>{t("hotkeys.rmb.desc")}</span></HintRow>
+          <HintRow><HintKey>{t("hotkeys.esc")}</HintKey><span>{t("hotkeys.esc.desc")}</span></HintRow>
+        </>
+      )}
     </HintsBox>
   );
+};
+
+// One instruction line tracking the tool's state machine — the panel's answer
+// to "what do I do now". Data comes straight from the existing VM fields.
+const toolStatus = (t: ReturnType<typeof useT>, state: { toolState: number; areaVertexCount: number }): string => {
+  if (state.toolState === TOOL_STATE.AreaSelecting) {
+    return t("status.area", { n: state.areaVertexCount });
+  }
+  if (state.toolState === TOOL_STATE.SourceSelected) {
+    return t("status.line.second");
+  }
+  return t("status.line.first");
 };
 
 const TownRoadLanePanelInner = () => {
@@ -383,7 +412,8 @@ const TownRoadLanePanelInner = () => {
 
   // Tool active, nothing selected yet: a compact "how to start" card. Without
   // this the tool felt OFF after activation (no visual change anywhere until
-  // the first node click).
+  // the first node click). Hotkeys open expanded here — it's the onboarding
+  // moment and the card is otherwise empty.
   if (state.selectedNodeIndex < 0) {
     return (
       <Panel>
@@ -395,8 +425,11 @@ const TownRoadLanePanelInner = () => {
             </CloseBtn>
           </Tooltip>
         </PanelHeaderRow>
-        <PanelHint>{t("panel.hint.selectNode")}</PanelHint>
-        <HotkeyHints />
+        <StatusRow>
+          <StatusDot />
+          <span>{t("panel.hint.selectNode")}</span>
+        </StatusRow>
+        <HotkeysFoldout defaultOpen />
       </Panel>
     );
   }
@@ -425,14 +458,12 @@ const TownRoadLanePanelInner = () => {
               </CloseBtn>
             </Tooltip>
           </PanelHeaderRow>
-          <PanelMeta>
-            <span>{t("panel.title", { n: state.selectedNodeIndex })}</span>
-            <PanelMetaSep />
-            <span>{t("panel.meta.lines", { n: state.lines.length })}</span>
-            <PanelMetaSep />
-            <span>{t("panel.meta.areas", { n: state.areas.length })}</span>
-          </PanelMeta>
+          <StatusRow>
+            <StatusDot />
+            <span>{toolStatus(t, state)}</span>
+          </StatusRow>
 
+          <SectionTitle>{t("section.drawing")}</SectionTitle>
           <ModeRow>
             <Tooltip content={t("mode.lines.tooltip")}>
               <ModeBtn
@@ -465,8 +496,6 @@ const TownRoadLanePanelInner = () => {
                 />
               </FieldRow>
               <DraftBox>
-                <DraftTitle>{t("area.draft.title")}</DraftTitle>
-                <DraftProgress>{t("area.draft.progress", { n: state.areaVertexCount })}</DraftProgress>
                 <DraftHint>{t("area.draft.hint.add")}</DraftHint>
                 <DraftHint>{t("area.draft.hint.undo")}</DraftHint>
                 <DraftHint>{t("area.draft.hint.close")}</DraftHint>
@@ -487,22 +516,11 @@ const TownRoadLanePanelInner = () => {
               />
             </FieldRow>
           )}
-
-          <Tooltip content={t("vanilla.tooltip")}>
-            <Btn $full onClick={cmdToggleVanillaMarkings}>
-              {state.vanillaHidden ? <EyeOff size={12} /> : <Eye size={12} />}
-              <span>{state.vanillaHidden ? t("vanilla.show") : t("vanilla.hide")}</span>
-            </Btn>
-          </Tooltip>
         </PanelStickyChrome>
-
-        {state.lines.length === 0 && state.areas.length === 0 && (
-          <PanelHint>{t("panel.hint.empty")}</PanelHint>
-        )}
 
         {state.lines.length > 0 && (
           <>
-            <SectionTitle>{t("section.lines")}</SectionTitle>
+            <SectionTitle>{`${t("section.lines")} · ${state.lines.length}`}</SectionTitle>
             <PanelList>
               {state.lines.map((line) => (
                 <LineRow
@@ -523,7 +541,7 @@ const TownRoadLanePanelInner = () => {
 
         {state.areas.length > 0 && (
           <>
-            <SectionTitle>{t("section.areas")}</SectionTitle>
+            <SectionTitle>{`${t("section.areas")} · ${state.areas.length}`}</SectionTitle>
             <PanelList>
               {state.areas.map((area) => (
                 <AreaRow
@@ -540,11 +558,27 @@ const TownRoadLanePanelInner = () => {
           </>
         )}
 
+        {/* Node block — per-intersection settings, deliberately at the bottom:
+            the vanilla override is a stateful toggle (not an action), and the
+            full reset is rare + destructive; neither earns header real estate. */}
+        <SectionTitle>{t("section.node")}</SectionTitle>
+        <ToggleRow>
+          <FieldLabel>{t("node.vanilla.label")}</FieldLabel>
+          <Tooltip content={t("vanilla.tooltip")}>
+            <IconToggleBtn
+              $active={state.vanillaHidden}
+              onClick={cmdToggleVanillaMarkings}
+            >
+              {state.vanillaHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+            </IconToggleBtn>
+          </Tooltip>
+        </ToggleRow>
         {(state.lines.length > 0 || state.areas.length > 0 || state.vanillaHidden) && (
           <ResetNodeButton />
         )}
+        <NodeIdText>{t("panel.title", { n: state.selectedNodeIndex })}</NodeIdText>
 
-        <HotkeyHints />
+        <HotkeysFoldout />
       </Panel>
       {!inAreaMode && popoverLine?.segments.map((seg) => (
         <SegmentPopover
@@ -584,7 +618,8 @@ const LineRow = ({
         <LineChevron $open={isExpanded}>
           <ChevronRight size={10} />
         </LineChevron>
-        <LineTitle>{t("line.title", { n: line.lineIndex })}</LineTitle>
+        {/* 1-based for humans; commands keep the raw index. */}
+        <LineTitle>{t("line.title", { n: line.lineIndex + 1 })}</LineTitle>
         <LineStyleTag>{styleLabel(t, line.style)}</LineStyleTag>
         <LineSegCount>
           {t("line.segCount", { visible: visibleCount, total: line.segments.length })}
@@ -592,7 +627,7 @@ const LineRow = ({
       </LineHeader>
       <LineBody $open={isExpanded}>
         <StyleSelector line={line} />
-        <CurvatureStepper line={line} />
+        <CurvatureInput line={line} />
         {line.segments.map((seg) => (
           <SegmentRowComponent key={`${seg.lineIndex}-${seg.segmentIndex}`} seg={seg} />
         ))}
@@ -634,7 +669,8 @@ const AreaRow = ({
         <LineChevron $open={isExpanded}>
           <ChevronRight size={10} />
         </LineChevron>
-        <LineTitle>{t("area.title", { n: area.areaIndex })}</LineTitle>
+        {/* 1-based for humans; commands keep the raw index. */}
+        <LineTitle>{t("area.title", { n: area.areaIndex + 1 })}</LineTitle>
         <LineStyleTag>{areaStyleLabel(t, area.styleId)}</LineStyleTag>
         <LineSegCount>
           {area.pieceCount > 1
@@ -776,28 +812,53 @@ const DeleteLineButton = ({
   );
 };
 
-// Curvature stepper — 10% steps over the C#-side pull-factor range [0, 0.8].
+// Curvature input — exact percent over the C#-side pull factor [0, 0.8].
 // 0% = straight chord, 50% = default arc (0.4), 100% = maximum roundness.
-// Stepper buttons (not a slider): cohtml's <input type=range> styling is
-// unreliable, and 11 discrete positions are plenty for this control.
-const CURV_STEP = 10;
+// A plain text field (range sliders don't function in CS2's cohtml): digits
+// only, commit on Enter or blur, clamped to [0, 100]. While the user types,
+// the draft string owns the field; otherwise it mirrors the C# value. The
+// reset button shows only while the value is off the 50% default.
+const CURV_DEFAULT = 50;
 
-const CurvatureStepper = ({ line }: { line: LineVM }) => {
+const CurvatureInput = ({ line }: { line: LineVM }) => {
   const t = useT();
-  const set = (v: number) =>
-    cmdSetLineCurvature(line.lineIndex, Math.max(0, Math.min(100, v)));
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const commit = () => {
+    if (draft === null) return;
+    const v = parseInt(draft, 10);
+    if (!isNaN(v)) {
+      cmdSetLineCurvature(line.lineIndex, Math.max(0, Math.min(100, v)));
+    }
+    setDraft(null);
+  };
+
   return (
     <CurvRow>
       <Tooltip content={t("line.curvature.tooltip")}>
         <CurvLabel>{t("line.curvature")}</CurvLabel>
       </Tooltip>
-      <CurvBtn disabled={line.curv <= 0} onClick={() => set(line.curv - CURV_STEP)}>
-        -
-      </CurvBtn>
-      <CurvValue>{line.curv}%</CurvValue>
-      <CurvBtn disabled={line.curv >= 100} onClick={() => set(line.curv + CURV_STEP)}>
-        +
-      </CurvBtn>
+      <CurvInput
+        type="text"
+        value={draft ?? String(line.curv)}
+        onChange={(e: ChangeEvent<HTMLInputElement>) =>
+          setDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))
+        }
+        onBlur={commit}
+        onKeyDown={(e: ReactKeyboardEvent<HTMLInputElement>) => {
+          if (e.key === "Enter") commit();
+        }}
+      />
+      <CurvUnit>%</CurvUnit>
+      {line.curv !== CURV_DEFAULT && (
+        <Tooltip content={t("line.curvature.reset")}>
+          <CurvResetBtn
+            onClick={() => cmdSetLineCurvature(line.lineIndex, CURV_DEFAULT)}
+          >
+            <Cycle size={12} />
+          </CurvResetBtn>
+        </Tooltip>
+      )}
     </CurvRow>
   );
 };
@@ -828,9 +889,10 @@ const SegmentRowComponent = ({ seg }: { seg: SegmentVM }) => {
       $hidden={!seg.visible}
       onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
     >
-      <SegmentInfo>
-        {t("segment.label", { n: seg.segmentIndex })} · {t("segment.length", { m: seg.lengthM.toFixed(1) })}
-      </SegmentInfo>
+      {/* Name left, length right — the old "seg 0 · 1.5m" single run read as
+          an unparseable jumble. 1-based for humans. */}
+      <SegmentInfo>{t("segment.label", { n: seg.segmentIndex + 1 })}</SegmentInfo>
+      <SegmentLen>{t("segment.length", { m: seg.lengthM.toFixed(1) })}</SegmentLen>
       <SegmentIndicator>
         {seg.visible ? <Eye size={12} /> : <EyeOff size={12} />}
       </SegmentIndicator>

@@ -55,12 +55,17 @@ export const tokens = {
   colorTextMuted:      "var(--menuText2Normal)",
   colorTextDim:        "rgba(240, 251, 255, 0.4)",
 
-  // Accents. accentColorNormal follows the player's accent-color setting;
-  // LightHighlight is the game's half-alpha highlight of the same hue.
-  // Status colors are the game's literal values (single-valued in index.css,
-  // and they must stay literals — they feed Icon stroke attributes).
+  // Accents. accentColorNormal follows the player's accent-color setting.
+  // cohtml rejects var() inside SHORTHAND declarations (background, border,
+  // border-color, border-radius — Player.log: "Custom CSS expressions are not
+  // supported in shorthand declaration") — colorAccent may only be used in
+  // true longhands: color, background-color. colorAccentSoft is used in
+  // border shorthands, so it's the literal value of the game's single-valued
+  // --accentColorLightHighlight (#9ee2fc80). Status colors are the game's
+  // literal values (single-valued in index.css, and they must stay literals —
+  // they feed Icon stroke attributes).
   colorAccent:         "var(--accentColorNormal)",
-  colorAccentSoft:     "var(--accentColorLightHighlight)",
+  colorAccentSoft:     "rgba(158, 226, 252, 0.5)",
   colorAccentDim:      "rgba(90, 170, 255, 0.18)",
   colorDanger:         "#e95f4a",
   colorDangerSoft:     "rgba(233, 95, 74, 0.22)",
@@ -81,12 +86,12 @@ export const tokens = {
   space6:  "24rem",
 
   // ── Border radii ──────────────────────────────────────────────────────
-  // Panel-level rounding follows the game theme (--panelRadius is 4–14rem
-  // depending on theme, 0 in the square theme). Sm/Md stay literal — inner
-  // radii up to 12rem would look bloated on our 22–30rem buttons.
+  // All literal: border-radius is a shorthand, and cohtml rejects var() in
+  // shorthands (see the accent comment above), so following the game's
+  // --panelRadius would take four corner longhands for marginal gain.
   radiusSm: "3rem",
   radiusMd: "4rem",
-  radiusLg: "var(--panelRadius)",
+  radiusLg: "6rem",
   radiusXl: "8rem",
 
   // ── Typography ────────────────────────────────────────────────────────
