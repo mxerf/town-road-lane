@@ -72,6 +72,9 @@ namespace TownRoadLane
         // Resolved lazily — G87 surfaces show up ~10 s after game load. Entity.Null = retry next tick.
         private Entity[] _stylePrefabEntities = new Entity[kStyleCount];
 
+        // Surface-prefab count at the last G87 diagnostic dump — see TryResolveAllStyles.
+        private int _lastSurfaceDumpCount = -1;
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -241,6 +244,29 @@ namespace TownRoadLane
                         log.Info($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}");
                     }
                 }
+            }
+
+            // Diagnostic: G87 updates have renamed/restructured their surface prefabs before
+            // (v1.3 merged the UK set into the main package), which silently breaks the
+            // exact-name match above and drops every fill back to concrete. While any style is
+            // still unresolved, dump the runtime names of all G87 surface prefabs whenever the
+            // surface-prefab count changes (assets keep importing ~10 s after load) — the log
+            // then contains exactly what kStyleSurfaceNames needs to say.
+            bool stillMissing = false;
+            for (int i = 0; i < kStyleCount; i++)
+                if (_stylePrefabEntities[i] == Entity.Null) { stillMissing = true; break; }
+            if (stillMissing && ents.Length != _lastSurfaceDumpCount)
+            {
+                _lastSurfaceDumpCount = ents.Length;
+                int g87Count = 0;
+                for (int i = 0; i < ents.Length; i++)
+                {
+                    if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
+                    if (!pb.name.Contains("G87")) continue;
+                    g87Count++;
+                    log.Info($"[area-emission] G87 surface present: '{pb.name}' ({pb.GetType().Name})");
+                }
+                log.Info($"[area-emission] style resolve incomplete — {ents.Length} surface prefab(s) total, {g87Count} G87 among them");
             }
         }
 
