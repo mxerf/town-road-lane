@@ -1,0 +1,539 @@
+// Adapted from RoadBuilder by JadHajjar (MIT License):
+// https://github.com/JadHajjar/RoadBuilder-CSII — Systems/UI/ExtendedUISystemBase.cs
+// Changes vs upstream: TownRoadLane binding group, Attribute.IsDefined instead of the
+// Colossal.Reflection extension, Enum.ToObject in the reader (upstream returned a boxed
+// int, which throws on SetValue into enum fields), fixed an inverted IsAssignableFrom
+// check in ReadGeneric's IJsonReadable branch.
+#nullable enable
+using Colossal.UI.Binding;
+
+using Game.UI;
+
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+
+using Unity.Entities;
+
+using UnityEngine;
+
+namespace TownRoadLane
+{
+    /// <summary>
+    /// UISystemBase with typed-binding conveniences (Stage 5e UI rework, pattern from RoadBuilder):
+    ///
+    ///   - <see cref="CreateBinding{T}(string, T)"/> → <see cref="ValueBindingHelper{T}"/> —
+    ///     a push binding with a dirty buffer: assignments to <c>Value</c> accumulate and a single
+    ///     <c>Binding.Update</c> fires per frame from <see cref="OnUpdate"/>. Cheap to write from
+    ///     anywhere (commands, tool callbacks) without spamming cohtml with per-assignment updates.
+    ///   - <see cref="CreateBinding{T}(string, string, T, Action{T})"/> — same, plus a companion
+    ///     TriggerBinding so JS can write the value back (two-way field).
+    ///   - <see cref="CreateBinding{T}(string, Func{T})"/> → GetterValueBinding re-evaluated every
+    ///     UI tick (for values that live elsewhere and are cheap to poll).
+    ///   - <see cref="CreateTrigger"/> overloads (0–4 args) — JS → C# commands.
+    ///
+    /// All CreateBinding/CreateTrigger calls serialize through <see cref="GenericUIWriter{T}"/> /
+    /// <see cref="GenericUIReader{T}"/> — reflection-based JSON mapping of plain DTOs (public
+    /// props + fields), so binding payload types don't need hand-written IJsonWritable. Types that
+    /// DO implement IJsonWritable/IJsonReadable keep full control (checked first).
+    /// </summary>
+    public abstract partial class ExtendedUISystemBase : UISystemBase
+    {
+        /// <summary>Binding group every key lives under — mirrors the literal used by the
+        /// pre-existing bindings in <see cref="TownRoadLaneUISystem"/>.</summary>
+        public const string BindingGroup = nameof(TownRoadLane);
+
+        private readonly List<Action> _updateCallbacks = new();
+
+        protected override void OnUpdate()
+        {
+            foreach (var action in _updateCallbacks)
+            {
+                action();
+            }
+
+            base.OnUpdate();
+        }
+
+        public ValueBindingHelper<T> CreateBinding<T>(string key, T initialValue)
+        {
+            var helper = new ValueBindingHelper<T>(new(BindingGroup, key, initialValue, new GenericUIWriter<T?>()));
+
+            AddBinding(helper.Binding);
+
+            _updateCallbacks.Add(helper.ForceUpdate);
+
+            return helper;
+        }
+
+        public ValueBindingHelper<T> CreateBinding<T>(string key, string setterKey, T initialValue, Action<T>? updateCallBack = null)
+        {
+            var helper = new ValueBindingHelper<T>(new(BindingGroup, key, initialValue, new GenericUIWriter<T?>()), updateCallBack);
+            var trigger = new TriggerBinding<T>(BindingGroup, setterKey, helper.UpdateCallback, GenericUIReader<T>.Create());
+
+            AddBinding(helper.Binding);
+            AddBinding(trigger);
+
+            _updateCallbacks.Add(helper.ForceUpdate);
+
+            return helper;
+        }
+
+        public GetterValueBinding<T> CreateBinding<T>(string key, Func<T> getterFunc)
+        {
+            var binding = new GetterValueBinding<T>(BindingGroup, key, getterFunc, new GenericUIWriter<T>());
+
+            AddUpdateBinding(binding);
+
+            return binding;
+        }
+
+        public TriggerBinding CreateTrigger(string key, Action action)
+        {
+            var binding = new TriggerBinding(BindingGroup, key, action);
+
+            AddBinding(binding);
+
+            return binding;
+        }
+
+        public TriggerBinding<T1> CreateTrigger<T1>(string key, Action<T1> action)
+        {
+            var binding = new TriggerBinding<T1>(BindingGroup, key, action, GenericUIReader<T1>.Create());
+
+            AddBinding(binding);
+
+            return binding;
+        }
+
+        public TriggerBinding<T1, T2> CreateTrigger<T1, T2>(string key, Action<T1, T2> action)
+        {
+            var binding = new TriggerBinding<T1, T2>(BindingGroup, key, action, GenericUIReader<T1>.Create(), GenericUIReader<T2>.Create());
+
+            AddBinding(binding);
+
+            return binding;
+        }
+
+        public TriggerBinding<T1, T2, T3> CreateTrigger<T1, T2, T3>(string key, Action<T1, T2, T3> action)
+        {
+            var binding = new TriggerBinding<T1, T2, T3>(BindingGroup, key, action, GenericUIReader<T1>.Create(), GenericUIReader<T2>.Create(), GenericUIReader<T3>.Create());
+
+            AddBinding(binding);
+
+            return binding;
+        }
+
+        public TriggerBinding<T1, T2, T3, T4> CreateTrigger<T1, T2, T3, T4>(string key, Action<T1, T2, T3, T4> action)
+        {
+            var binding = new TriggerBinding<T1, T2, T3, T4>(BindingGroup, key, action, GenericUIReader<T1>.Create(), GenericUIReader<T2>.Create(), GenericUIReader<T3>.Create(), GenericUIReader<T4>.Create());
+
+            AddBinding(binding);
+
+            return binding;
+        }
+    }
+
+    /// <summary>Dirty-buffered wrapper over a <see cref="ValueBinding{T}"/>. Writes to
+    /// <see cref="Value"/> are deferred; <see cref="ForceUpdate"/> (called once per frame by
+    /// <see cref="ExtendedUISystemBase.OnUpdate"/>) pushes the last written value to the UI.</summary>
+    public class ValueBindingHelper<T>
+    {
+        private readonly Action<T>? _updateCallBack;
+        private T? valueToUpdate;
+        private bool dirty;
+
+        public ValueBinding<T?> Binding { get; }
+
+        public T? Value
+        {
+            get => dirty ? valueToUpdate : Binding.value;
+            set
+            {
+                dirty = true;
+                valueToUpdate = value;
+            }
+        }
+
+        public ValueBindingHelper(ValueBinding<T?> binding, Action<T>? updateCallBack = null)
+        {
+            Binding = binding;
+            _updateCallBack = updateCallBack;
+        }
+
+        public void ForceUpdate()
+        {
+            if (dirty)
+            {
+                Binding.Update(valueToUpdate);
+
+                dirty = false;
+            }
+        }
+
+        public void UpdateCallback(T value)
+        {
+            Value = value;
+
+            _updateCallBack?.Invoke(value);
+        }
+
+        public static implicit operator T?(ValueBindingHelper<T> helper)
+        {
+            return helper.Value;
+        }
+    }
+
+    /// <summary>Reflection-based JSON writer for arbitrary DTOs: primitives, enums (as int),
+    /// Entity, Color, arrays, IEnumerable, and plain objects (public props + fields, skipping
+    /// [WriterIgnore]). Types implementing IJsonWritable are delegated to their own Write.</summary>
+    public class GenericUIWriter<T> : IWriter<T>
+    {
+        public void Write(IJsonWriter writer, T value)
+        {
+            WriteGeneric(writer, value);
+        }
+
+        private static void WriteObject(IJsonWriter writer, Type type, object obj)
+        {
+            var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
+
+            writer.TypeBegin(type.FullName);
+
+            foreach (var propertyInfo in properties)
+            {
+                if (Attribute.IsDefined(propertyInfo, typeof(WriterIgnoreAttribute)))
+                {
+                    continue;
+                }
+
+                writer.PropertyName(propertyInfo.Name);
+                WriteGeneric(writer, propertyInfo.GetValue(obj));
+            }
+
+            foreach (var fieldInfo in fields)
+            {
+                if (Attribute.IsDefined(fieldInfo, typeof(WriterIgnoreAttribute)))
+                {
+                    continue;
+                }
+
+                writer.PropertyName(fieldInfo.Name);
+                WriteGeneric(writer, fieldInfo.GetValue(obj));
+            }
+
+            writer.TypeEnd();
+        }
+
+        private static void WriteGeneric(IJsonWriter writer, object? obj)
+        {
+            if (obj == null)
+            {
+                writer.WriteNull();
+                return;
+            }
+
+            if (obj is IJsonWritable jsonWritable)
+            {
+                jsonWritable.Write(writer);
+                return;
+            }
+
+            if (obj is int @int)
+            {
+                writer.Write(@int);
+                return;
+            }
+
+            if (obj is bool @bool)
+            {
+                writer.Write(@bool);
+                return;
+            }
+
+            if (obj is uint @uint)
+            {
+                writer.Write(@uint);
+                return;
+            }
+
+            if (obj is float @float)
+            {
+                writer.Write(@float);
+                return;
+            }
+
+            if (obj is double @double)
+            {
+                writer.Write(@double);
+                return;
+            }
+
+            if (obj is string @string)
+            {
+                writer.Write(@string);
+                return;
+            }
+
+            if (obj is Enum @enum)
+            {
+                writer.Write(Convert.ToInt32(@enum));
+                return;
+            }
+
+            if (obj is Entity entity)
+            {
+                writer.Write(entity);
+                return;
+            }
+
+            if (obj is Color color)
+            {
+                writer.Write(color);
+                return;
+            }
+
+            if (obj is Array array)
+            {
+                WriteArray(writer, array);
+                return;
+            }
+
+            if (obj is IEnumerable objects)
+            {
+                WriteEnumerable(writer, objects);
+                return;
+            }
+
+            WriteObject(writer, obj.GetType(), obj);
+        }
+
+        private static void WriteArray(IJsonWriter writer, Array array)
+        {
+            writer.ArrayBegin(array.Length);
+
+            for (var i = 0; i < array.Length; i++)
+            {
+                WriteGeneric(writer, array.GetValue(i));
+            }
+
+            writer.ArrayEnd();
+        }
+
+        private static void WriteEnumerable(IJsonWriter writer, object? obj)
+        {
+            if (obj is not IEnumerable enumerable)
+            {
+                writer.WriteEmptyArray();
+                return;
+            }
+
+            var list = new List<object>();
+
+            foreach (var item in enumerable)
+            {
+                list.Add(item);
+            }
+
+            writer.ArrayBegin(list.Count);
+
+            foreach (var item in list)
+            {
+                WriteGeneric(writer, item);
+            }
+
+            writer.ArrayEnd();
+        }
+    }
+
+    /// <summary>Reflection-based JSON reader — the counterpart to <see cref="GenericUIWriter{T}"/>.
+    /// Vanilla ValueReaders are reused when the game already ships one for the type (looked up
+    /// via the private ValueReaders.s_Readers table, same trick RoadBuilder uses).</summary>
+    public class GenericUIReader<T> : IReader<T>
+    {
+        private static readonly Dictionary<Type, object> _readers = (Dictionary<Type, object>)typeof(ValueReaders)
+            .GetField("s_Readers", BindingFlags.NonPublic | BindingFlags.Static)
+            .GetValue(null);
+
+        public static IReader<T> Create()
+        {
+            var type = typeof(T);
+
+            return (IReader<T>)Create(type);
+        }
+
+        private static object Create(Type type)
+        {
+            if (_readers.TryGetValue(type, out var valueReader))
+            {
+                return valueReader;
+            }
+
+            if (typeof(IJsonReadable).IsAssignableFrom(type))
+            {
+                return Activator.CreateInstance(typeof(ValueReader<>).MakeGenericType(type));
+            }
+
+            return _readers[type] = new GenericUIReader<T>();
+        }
+
+        public void Read(IJsonReader reader, out T value)
+        {
+            value = (T)ReadGeneric(reader, typeof(T));
+        }
+
+        private static object ReadGeneric(IJsonReader reader, Type type)
+        {
+            // Upstream had the check inverted (type.IsAssignableFrom(typeof(IJsonReadable))),
+            // which never matches a concrete DTO — harmless there because Create() routes
+            // IJsonReadable types to ValueReader<> first, but wrong for nested members.
+            if (typeof(IJsonReadable).IsAssignableFrom(type))
+            {
+                var value = (IJsonReadable)Activator.CreateInstance(type);
+
+                value.Read(reader);
+
+                return value;
+            }
+
+            if (type == typeof(int))
+            {
+                reader.Read(out int val);
+
+                return val;
+            }
+
+            if (type == typeof(bool))
+            {
+                reader.Read(out bool val);
+
+                return val;
+            }
+
+            if (type == typeof(uint))
+            {
+                reader.Read(out uint val);
+
+                return val;
+            }
+
+            if (type == typeof(float))
+            {
+                reader.Read(out float val);
+
+                return val;
+            }
+
+            if (type == typeof(double))
+            {
+                reader.Read(out double val);
+
+                return val;
+            }
+
+            if (type == typeof(string))
+            {
+                reader.Read(out string val);
+
+                return val;
+            }
+
+            if (type.IsEnum)
+            {
+                reader.Read(out int val);
+
+                // Box as the actual enum type — a boxed int would blow up on the
+                // reflection SetValue path in ReadObject (and on unbox casts).
+                return Enum.ToObject(type, val);
+            }
+
+            if (type == typeof(Entity))
+            {
+                reader.Read(out Entity val);
+
+                return val;
+            }
+
+            if (type == typeof(Color))
+            {
+                reader.Read(out Color val);
+
+                return val;
+            }
+
+            if (type.IsArray)
+            {
+                var length = (int)reader.ReadArrayBegin();
+                var array = (Array)Activator.CreateInstance(type, length);
+
+                for (var i = 0; i < length; i++)
+                {
+                    reader.ReadArrayElement((ulong)i);
+
+                    array.SetValue(ReadGeneric(reader, type.GetElementType()), i);
+                }
+
+                reader.ReadArrayEnd();
+
+                return array;
+            }
+
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>))
+            {
+                var length = reader.ReadArrayBegin();
+                var genericListType = typeof(List<>).MakeGenericType(type.GenericTypeArguments[0]);
+                var genericList = (IList)Activator.CreateInstance(genericListType);
+
+                for (var i = 0ul; i < length; i++)
+                {
+                    reader.ReadArrayElement(i);
+
+                    genericList.Add(ReadGeneric(reader, type.GenericTypeArguments[0]));
+                }
+
+                reader.ReadArrayEnd();
+
+                return genericList;
+            }
+
+            return ReadObject(reader, type);
+        }
+
+        private static object ReadObject(IJsonReader reader, Type type)
+        {
+            var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
+            var obj = Activator.CreateInstance(type);
+
+            reader.ReadMapBegin();
+
+            foreach (var propertyInfo in properties)
+            {
+                if (!Attribute.IsDefined(propertyInfo, typeof(ReaderIgnoreAttribute)) && reader.ReadProperty(propertyInfo.Name))
+                {
+                    propertyInfo.SetValue(obj, ReadGeneric(reader, propertyInfo.PropertyType));
+                }
+            }
+
+            foreach (var fieldInfo in fields)
+            {
+                if (!Attribute.IsDefined(fieldInfo, typeof(ReaderIgnoreAttribute)) && reader.ReadProperty(fieldInfo.Name))
+                {
+                    fieldInfo.SetValue(obj, ReadGeneric(reader, fieldInfo.FieldType));
+                }
+            }
+
+            reader.ReadMapEnd();
+
+            return obj;
+        }
+    }
+
+    /// <summary>Excludes a public member from <see cref="GenericUIReader{T}"/> deserialization.</summary>
+    public class ReaderIgnoreAttribute : Attribute { }
+
+    /// <summary>Excludes a public member from <see cref="GenericUIWriter{T}"/> serialization.</summary>
+    public class WriterIgnoreAttribute : Attribute { }
+}
