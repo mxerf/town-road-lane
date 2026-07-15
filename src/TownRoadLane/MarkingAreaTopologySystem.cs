@@ -15,12 +15,12 @@ namespace TownRoadLane
     /// <see cref="MarkingAreaPiece"/> relationship. Mirrors <see cref="MarkingTopologySystem"/>
     /// which does the same job for lines (splitting them at intersections with other lines).
     ///
-    /// On every change to either MarkingArea or MarkingLine on a node, recomputes the per-area
-    /// piece set by clipping the area's outer ring against each line's Bezier (sampled into a
-    /// short polyline, then fed to <see cref="PolygonSplitter"/>). Visibility per piece is
-    /// inherited from whichever old piece contained the new piece's centroid — keeps user edits
-    /// stable across topology changes (toggle a piece hidden, then add a line: the hidden state
-    /// survives where it makes sense).
+    /// On every change to either MarkingArea or MarkingLine on a node, rebuilds each area's
+    /// outer ring with the corner-aware builder (curved edges, min-width envelope at sharp
+    /// corners — see <see cref="ResolveOuterRing"/>) and stores it as ONE piece per area.
+    /// Auto-splitting areas along crossing lines is gone (phase 7e) — a line over an area is
+    /// purely cosmetic. Visibility per piece is inherited from whichever old piece contained
+    /// the new piece's centroid — keeps user edits stable across topology changes.
     ///
     /// Trigger: combined hash of MarkingArea + MarkingLine buffer. Skips work when both
     /// unchanged.
@@ -154,7 +154,19 @@ namespace TownRoadLane
                 // visibility survives an area hide→show cycle instead of resetting to default.
                 if (ad.vertexCount < 3) continue;
 
-                var outerRing = ResolveOuterRing(areasSnap[a], areaVertsSnap, endpoints, corners, linesSnap);
+                // The ring builder must never take the whole system down: an exception escaping
+                // OnUpdate would re-fire every tick (log flood, all nodes after this one frozen).
+                // Treat a throwing ring like an unresolvable one — the carried-pieces path below
+                // keeps the cached geometry and the hash write stops the retry loop.
+                List<float3> outerRing = null;
+                try
+                {
+                    outerRing = ResolveOuterRing(areasSnap[a], areaVertsSnap, endpoints, corners, linesSnap);
+                }
+                catch (System.Exception e)
+                {
+                    log.Warn($"area-topology node#{node.Index} area#{a}: ring builder threw ({e.GetType().Name}: {e.Message}), keeping cached pieces");
+                }
                 if (outerRing == null || outerRing.Count < 3)
                 {
                     // Ring permanently unresolvable (a referenced anchor disappeared after a

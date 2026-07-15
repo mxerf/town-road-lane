@@ -14,7 +14,7 @@ A road-marking editor for intersections plus automatic lane markings for ordinar
 ## Marking editor
 Click any intersection and draw your own markings:
 - **Lines** between lane endpoint dots — Solid, Dashed, Double Solid, and G87 line styles, with adjustable curvature and per-segment visibility.
-- **Area fills** over any polygon you outline — junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete.
+- **Area fills** over any polygon you outline — points snap to lane endpoints, kerb corners and line crossings, edges follow line curvature. Junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete.
 - **Hide vanilla markings** per intersection to start from a clean slate.
 - Full in-game panel (English + Russian) and hotkeys: **Ctrl+M** toggle tool, **Y** cycle line style, **A** area mode, **U** cycle area fill.
 
@@ -33,7 +33,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 ## Редактор разметки
 Кликните по любому перекрёстку и нарисуйте свою разметку:
 - **Линии** между точками полос — сплошная, пунктир, двойная сплошная и стили G87; настраиваемая кривизна и видимость отдельных сегментов.
-- **Заливки областей** по обведённому полигону — вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон.
+- **Заливки областей** по обведённому полигону — точки цепляются к концам полос, углам бордюров и пересечениям линий, рёбра повторяют кривизну линий. Вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон.
 - **Скрытие ванильной разметки** на отдельном перекрёстке, чтобы начать с чистого листа.
 - Полноценная панель в игре (английский + русский) и горячие клавиши: **Ctrl+M** — инструмент, **Y** — стиль линии, **A** — режим области, **U** — заливка области.
 
@@ -54,7 +54,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.0.1" />
+	<ModVersion Value="2.1.0" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -69,8 +69,15 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-# 2.0.1
-- Fixed: removed leftover periodic debug (heartbeat) logging that could flood Player.log every ~2 seconds (GitHub issue #1).
+# 2.1.0 — curved area fills
+
+Area fills were rebuilt around the sharp curved "islands" between marking lines:
+- Area points can now snap to **line crossings**, and area edges **follow the curvature** of the marking line they run along — no more chord-cut polygons.
+- Fills no longer silently vanish on areas with very sharp corners (knife-tip islands, medians, gores).
+- Areas are no longer auto-split by lines drawn across them: an area is final once drawn, a line over it is purely cosmetic. On load, previously split areas merge back into a single fill (re-check their visibility toggles).
+- Fixed: deleting a line reset the visibility/style of every segment at the intersection.
+- Fixed: deleting an area could remove the wrong fill and leave a stale one behind.
+- UI: style previews in the line/area dropdowns and row headers, reworked on-map popovers (scale with zoom, expand on hover), and two-way hover — point at an area in the panel to highlight it on the map and vice versa.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />
