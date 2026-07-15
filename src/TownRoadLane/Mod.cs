@@ -122,6 +122,11 @@ namespace TownRoadLane
             // Phase 6c: per-node MarkingArea → vanilla Game.Areas.Area emitter. Same Modification1
             // phase as the line emitter (independent buffers; no ordering required between them).
             updateSystem.UpdateAt<MarkingAreaEmissionSystem>(SystemUpdatePhase.Modification1);
+            // Phase 8: re-triangulate our fills after vanilla Game.Areas.GeometrySystem
+            // (Modification2B, [UpdateAfter] on the class). Replaces its shrink-and-budget
+            // ear-clip — the source of silently invisible fills — with a full triangulation
+            // of the true ring.
+            updateSystem.UpdateAt<MarkingAreaTriangulationSystem>(SystemUpdatePhase.Modification2B);
 
             // Stage 5d: React panel bridge. UISystemBase wants UIUpdate phase.
             updateSystem.UpdateAt<TownRoadLaneUISystem>(SystemUpdatePhase.UIUpdate);
