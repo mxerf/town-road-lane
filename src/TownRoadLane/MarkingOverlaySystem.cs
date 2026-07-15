@@ -74,13 +74,19 @@ namespace TownRoadLane
         private static readonly Color kColPreviewCurve = new Color(1.00f, 1.00f, 1.00f, 0.55f);
 
         // --- Endpoint dots ---
-        // Compact (was 1.10m → now 0.75m). Per-edge tinting: every road approach
-        // gets its own colour from a small qualitative palette, so visually the
-        // user can tell at a glance which dots belong to which approach without
-        // having to trace tangent directions. Style is no longer encoded in dot
-        // colour — the StyleSelector dropdown is the source of truth for that.
-        private const float kDotDiameter        = 0.75f;
-        private const float kDotOutlineWidth    = 0.08f;
+        // Per-edge tinting: every road approach gets its own colour from a small
+        // qualitative palette, so visually the user can tell at a glance which dots
+        // belong to which approach without having to trace tangent directions. Style
+        // is no longer encoded in dot colour — the StyleSelector dropdown owns that.
+        //
+        // Free vs connected convention (UI polish pass): a dot with no committed line
+        // renders as a hollow ring ("empty socket"), a dot that already anchors at
+        // least one MarkingLine renders filled with a small white core ("plugged").
+        private const float kDotDiameter        = 0.65f;
+        private const float kDotOutlineWidth    = 0.10f;
+        private const float kDotFreeFillAlpha   = 0.14f;
+        private const float kDotConnectedCoreDiameter = 0.20f;
+        private static readonly Color kColDotConnectedCore = new Color(1.00f, 1.00f, 1.00f, 0.90f);
         private static readonly Color kColDotOutline      = new Color(0.06f, 0.08f, 0.12f, 0.90f);
         // Source dot (selected as origin for the new line) — bright white, fully filled.
         private static readonly Color kColDotFillSource   = new Color(1.00f, 1.00f, 1.00f, 0.95f);
@@ -112,10 +118,13 @@ namespace TownRoadLane
             int idx = (edge.Index & 0x7fffffff) % kEdgePalette.Length;
             return kEdgePalette[idx];
         }
-        // Intersection markers (the "+" shape at every Bezier crossing on the selected node).
-        private const float kIntersectionMarkerSize  = 0.55f;
-        private const float kIntersectionMarkerWidth = 0.10f;
-        private static readonly Color kColIntersection = new Color(1.00f, 0.30f, 0.30f, 0.75f);
+        // Intersection markers — a small red dot at every Bezier crossing on the selected node.
+        // Was a "+" cross 1.1m across; that read as an alarm icon and buried the road paint.
+        // A compact dot still says "lines cross here" without shouting.
+        private const float kIntersectionDotDiameter     = 0.32f;
+        private const float kIntersectionDotOutlineWidth = 0.06f;
+        private static readonly Color kColIntersection        = new Color(1.00f, 0.30f, 0.30f, 0.60f);
+        private static readonly Color kColIntersectionOutline = new Color(0.25f, 0.05f, 0.05f, 0.80f);
 
         // --- Corner anchors (Phase 6a) ---
         // Sit at intersection corners where kerbs of neighbour edges meet. Visually distinct
@@ -129,19 +138,22 @@ namespace TownRoadLane
         private static readonly Color kColCornerOutline = new Color(0.15f, 0.20f, 0.25f, 0.90f);
 
         // --- Area-tool visuals (Phase 6b) ---
-        // Distinct palette from the line tool. IMT convention:
-        //   • available candidate dots = warm yellow (was IMT's red, but red here would clash
-        //     with our hidden-segment ghost). Yellow = "you can click this."
-        //   • placed contour edges    = solid white (the polygon-so-far, like a chalk outline)
-        //   • live preview edge       = thin white from last placed vertex to cursor
+        // Distinct palette from the line tool. IMT convention, restyled to the same
+        // ring language as the line-mode endpoint dots (UI polish pass):
+        //   • available candidate dots = hollow warm-yellow rings — "you can click this"
+        //     without blanketing the junction in solid candy dots.
+        //   • hovered candidate        = solid bright yellow, slightly larger.
+        //   • placed contour edges     = solid white (the polygon-so-far, chalk outline)
+        //   • live preview edge        = thin white from last placed vertex to cursor
         //   • preview-to-close (cursor over start vertex with ≥3 placed) = bright green
-        //   • start-vertex highlight  = bright outline ring, slightly larger
-        private const float kAreaCandDotDiameter      = 1.05f;
+        //   • start-vertex highlight   = bright outline ring, slightly larger
+        private const float kAreaCandDotDiameter      = 0.90f;
         private const float kAreaCandDotOutlineWidth  = 0.12f;
-        private static readonly Color kColAreaCandFill         = new Color(1.00f, 0.85f, 0.20f, 0.85f);
+        private static readonly Color kColAreaCandFill         = new Color(1.00f, 0.85f, 0.20f, 0.14f);
+        private static readonly Color kColAreaCandRing         = new Color(1.00f, 0.85f, 0.20f, 0.95f);
         private static readonly Color kColAreaCandOutline      = new Color(0.20f, 0.16f, 0.04f, 0.95f);
         private static readonly Color kColAreaHoverFill        = new Color(1.00f, 0.95f, 0.45f, 1.00f);
-        private const float kAreaHoverDotDiameter     = 1.30f;
+        private const float kAreaHoverDotDiameter     = 1.15f;
         // Placed vertices: white with dark outline — stand out against the warm candidate set.
         private const float kAreaPlacedDotDiameter    = 1.10f;
         private static readonly Color kColAreaPlacedFill       = new Color(1.00f, 1.00f, 1.00f, 0.95f);
@@ -332,25 +344,32 @@ namespace TownRoadLane
             }
 
             // 3. Endpoint dots (C1):
-            //    - normal idle: thin dark outline + edge-palette fill, with a gentle
-            //      pulse on diameter (~6% breathing) so the dots read as alive and
-            //      clickable rather than as static decoration.
+            //    - free (no committed line): hollow ring in the edge colour — reads as
+            //      an empty socket you can plug a line into. No pulse — static rings
+            //      look like instrumentation, breathing dots looked like a toy.
+            //    - connected (anchors ≥1 MarkingLine): filled edge colour + small white
+            //      core, so occupied points are obvious at a glance.
             //    - source: bright white solid (anchor for the drag in SourceSelected
             //      state), wrapped in a wider white "selected" ring at lower alpha so
             //      it's instantly distinguishable from a regular dot.
-            //    - hover:  same edge colour but brighter + slightly larger ring.
-            //
-            //    Pulse is keyed off Time.time so all dots breathe in sync — looks
-            //    intentional and less noisy than per-dot phase offsets.
-            // Use UnityEngine.Time explicitly — ComponentSystemBase.Time is a different
-            // (now-deprecated) thing that resolves first due to inheritance.
-            float pulse = 1f + 0.06f * math.sin((float)UnityEngine.Time.timeAsDouble * 2.4f);
+            //    - hover:  same edge colour but solid bright + slightly larger ring.
+            _connectedScratch.Clear();
+            if (node != Entity.Null && EntityManager.HasBuffer<MarkingLine>(node))
+            {
+                var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
+                for (int l = 0; l < lines.Length; l++)
+                {
+                    _connectedScratch.Add((lines[l].sourceEdge, lines[l].sourceGapIndex));
+                    _connectedScratch.Add((lines[l].targetEdge, lines[l].targetGapIndex));
+                }
+            }
             for (int i = 0; i < endpoints.Count; i++)
             {
                 var ep = endpoints[i];
                 Color edgeColor = EdgeDotColor(ep.edge);
+                bool connected = _connectedScratch.Contains((ep.edge, ep.gapIndex));
                 Color fill;
-                Color outline = kColDotOutline;
+                Color outline;
                 float diameter = kDotDiameter;
                 float outlineWidth = kDotOutlineWidth;
 
@@ -372,15 +391,21 @@ namespace TownRoadLane
                 else if (i == hoverIdx)
                 {
                     fill = new Color(edgeColor.r, edgeColor.g, edgeColor.b, 1.00f);
+                    outline = kColDotOutline;
                     diameter = kDotDiameterHover;
                     outlineWidth = kDotOutlineWidthHover;
                 }
-                else
+                else if (connected)
                 {
                     fill = edgeColor;
-                    // Apply the pulse only on idle dots — hover/source already have
-                    // their own size emphasis, no need to add wobble on top.
-                    diameter *= pulse;
+                    outline = kColDotOutline;
+                }
+                else
+                {
+                    // Hollow ring: the edge colour lives on the outline, the middle is
+                    // a barely-there tint so the dot still reads on dark asphalt.
+                    fill = new Color(edgeColor.r, edgeColor.g, edgeColor.b, kDotFreeFillAlpha);
+                    outline = new Color(edgeColor.r, edgeColor.g, edgeColor.b, 0.95f);
                 }
 
                 buf.DrawCircle(
@@ -391,6 +416,18 @@ namespace TownRoadLane
                     direction: new float2(0f, 1f),
                     position: ep.position,
                     diameter: diameter);
+
+                if (connected && i != sourceIdx)
+                {
+                    buf.DrawCircle(
+                        outlineColor: kColTransparent,
+                        fillColor: kColDotConnectedCore,
+                        outlineWidth: 0f,
+                        styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                        direction: new float2(0f, 1f),
+                        position: ep.position,
+                        diameter: kDotConnectedCoreDiameter);
+                }
             }
 
             // 4. Corner anchors (Phase 6a). Currently render-only — not clickable yet. Live
@@ -469,6 +506,11 @@ namespace TownRoadLane
         // Scratch for the sampled draft contour — reused every frame to stay alloc-free.
         private readonly List<float3> _areaContourScratch = new List<float3>();
 
+        // Scratch set of (edge, gapIndex) keys that anchor at least one committed
+        // MarkingLine on the selected node — rebuilt every frame for the free/connected
+        // dot styling, reused to stay alloc-free.
+        private readonly HashSet<(Entity, int)> _connectedScratch = new HashSet<(Entity, int)>();
+
         private void DrawAreaModeOverlay(OverlayRenderSystem.Buffer buf)
         {
             var endpoints = _tool.Endpoints;
@@ -478,13 +520,13 @@ namespace TownRoadLane
             var hover = _tool.AreaHover;
             float3 cursor = _tool.CursorWorldPos;
 
-            // 1. Candidate dots — all selectable anchors. Dimmer when no contour yet (so we don't
-            //    blanket the screen with yellow on first entry); same brightness once the user
-            //    has placed at least one vertex.
+            // 1. Candidate dots — all selectable anchors, drawn as hollow yellow rings
+            //    (the colour lives on the outline, the middle is a barely-there tint) so
+            //    the junction doesn't drown in solid dots.
             for (int i = 0; i < endpoints.Count; i++)
             {
                 buf.DrawCircle(
-                    outlineColor: kColAreaCandOutline,
+                    outlineColor: kColAreaCandRing,
                     fillColor: kColAreaCandFill,
                     outlineWidth: kAreaCandDotOutlineWidth,
                     styleFlags: OverlayRenderSystem.StyleFlags.Projected,
@@ -495,7 +537,7 @@ namespace TownRoadLane
             for (int i = 0; i < corners.Count; i++)
             {
                 buf.DrawCircle(
-                    outlineColor: kColAreaCandOutline,
+                    outlineColor: kColAreaCandRing,
                     fillColor: kColAreaCandFill,
                     outlineWidth: kAreaCandDotOutlineWidth,
                     styleFlags: OverlayRenderSystem.StyleFlags.Projected,
@@ -508,7 +550,7 @@ namespace TownRoadLane
             for (int i = 0; i < crossings.Count; i++)
             {
                 buf.DrawCircle(
-                    outlineColor: kColAreaCandOutline,
+                    outlineColor: kColAreaCandRing,
                     fillColor: kColAreaCandFill,
                     outlineWidth: kAreaCandDotOutlineWidth,
                     styleFlags: OverlayRenderSystem.StyleFlags.Projected,
@@ -598,18 +640,18 @@ namespace TownRoadLane
             }
         }
 
-        /// <summary>Draw a small "+" shape at the intersection point. Projected on terrain so it
+        /// <summary>Draw a small red dot at the intersection point. Projected on terrain so it
         /// stays visible on slopes.</summary>
         private static void DrawIntersectionMarker(OverlayRenderSystem.Buffer buf, float3 p)
         {
-            float s = kIntersectionMarkerSize;
-            // Two perpendicular line segments centred at p, oriented along world XZ axes.
-            buf.DrawLine(kColIntersection,
-                new Line3.Segment(p + new float3(-s, 0f, 0f), p + new float3(s, 0f, 0f)),
-                kIntersectionMarkerWidth);
-            buf.DrawLine(kColIntersection,
-                new Line3.Segment(p + new float3(0f, 0f, -s), p + new float3(0f, 0f, s)),
-                kIntersectionMarkerWidth);
+            buf.DrawCircle(
+                outlineColor: kColIntersectionOutline,
+                fillColor: kColIntersection,
+                outlineWidth: kIntersectionDotOutlineWidth,
+                styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                direction: new float2(0f, 1f),
+                position: p,
+                diameter: kIntersectionDotDiameter);
         }
 
         /// <summary>
