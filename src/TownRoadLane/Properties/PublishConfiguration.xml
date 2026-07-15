@@ -23,7 +23,7 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 
 ## Known limitations
 - **The mod is purely visual.** Markings never affect how vehicles actually drive. To change real lane behavior use the Traffic mod (by krzychu124) — set up lane connections and directions there first, then draw your markings to match. The two mods don't sync automatically.
-- Very sharp contact angles between marking lines (a few degrees) can still produce glitchy fills or slightly misplaced points.
+- Nearly-tangent line contacts (well under ~8°) are treated as a graze rather than a crossing — no anchor dot appears at such touch points (by design; prevents jittery duplicate anchors).
 - Non-standard intersections with strongly stretched connections (e.g. reshaped with Node Controller) can misplace the anchor dots. A fix is planned.
 - After moving or reshaping a road with Move It, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
 
@@ -48,7 +48,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 
 ## Известные ограничения
 - **Мод чисто визуальный.** Разметка не влияет на реальное движение машин. Управлять полосами нужно модом Traffic (от krzychu124): сначала настройте там направления и соединения полос, затем нарисуйте разметку под них. Автоматической синхронизации между модами нет.
-- Очень острые углы соприкосновения линий (единицы градусов) всё ещё могут давать артефакты заливок и слегка смещённые точки.
+- Почти касательные контакты линий (заметно меньше ~8°) считаются скольжением, а не пересечением — точка-якорь в таком месте не появляется (намеренно: защита от дрожащих дублей-якорей).
 - На нестандартных перекрёстках с сильно вытянутыми соединениями (например, после Node Controller) точки-якоря могут располагаться некорректно. Исправление запланировано.
 - После перемещения или изменения дороги через Move It линии подстраиваются под новую геометрию, а заливки областей — не всегда: удалите их и нарисуйте заново.
 
@@ -67,7 +67,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.1.0" />
+	<ModVersion Value="2.2.0" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -82,6 +82,12 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
+# 2.2.0 — reliable fills, exact contours
+
+- **Fixed: areas could deform after loading a save.** Area anchor points were remembered by list position, and the game reshuffles those lists on every load — editing any marking at such an intersection then snapped the area to wrong points. Anchors now use stable identities that survive save/load; existing areas are migrated automatically and conservatively (an area that can't be safely migrated simply keeps its saved shape until redrawn).
+- **The mod now triangulates its own area fills**, bypassing the game's fragile built-in pass. Fills no longer silently vanish on very sharp or very narrow shapes (knife-tip islands, thin medians).
+- **Fills follow the exact drawn contour.** Sharp island corners are no longer slightly fattened to survive the game's renderer — the drawing preview and the final fill now match point for point.
+
 # 2.1.0 — curved area fills
 
 Area fills were rebuilt around the sharp curved "islands" between marking lines:
