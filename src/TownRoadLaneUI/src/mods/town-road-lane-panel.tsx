@@ -114,28 +114,46 @@ const PanelErrorFallback = ({ error, onRetry }: { error: Error; onRetry: () => v
 };
 
 // MarkingStyle enum on the C# side — numeric values must stay in sync.
-const STYLE_VALUES = [0, 1, 2, 3, 4] as const;
+const STYLE_VALUES = [0, 1, 5, 8, 2, 3, 6, 7, 4] as const;
 type StyleValue = typeof STYLE_VALUES[number];
 
 // Lookup table: enum value → i18n string key. Keeps style label rendering
 // alongside the enum mapping rather than scattered across components.
+// STYLE_VALUES order groups related looks together in the dropdown (white
+// solid/dashed variants, then G87 white + yellow, then double) — the numeric
+// enum order is append-only history, not a presentation order.
 const STYLE_KEYS: Record<number, StringKey> = {
   0: "style.solid",
   1: "style.dashed",
   2: "style.g87Solid",
   3: "style.g87Dashed",
   4: "style.doubleSolid",
+  5: "style.dashedDense",
+  6: "style.g87Yellow",
+  7: "style.g87YellowDashed",
+  8: "style.dashedLong",
 };
 
 const styleLabel = (t: ReturnType<typeof useT>, style: number): string =>
   t(STYLE_KEYS[style] ?? "style.unknown");
 
-// Area fill styles — indexes match kStyleSurfaceNames in MarkingAreaEmissionSystem.
-const AREA_STYLE_VALUES = [0, 1, 2, 3, 4, 5, 6] as const;
+// Area fill styles — ids match kStyleSurfaceNames in MarkingAreaEmissionSystem.
+// Ids 7-13 are reserved dead slots (the vanilla grass/sand/tiles experiment —
+// those surfaces can't be made to render on intersections, see the emission
+// catalogue comment) and are hidden here. The numeric id order is append-only
+// serialization history, not a presentation order.
+const AREA_STYLE_VALUES = [0, 14, 1, 2, 3, 4, 5, 6] as const;
+const AREA_STYLE_ID_SET: ReadonlySet<number> = new Set(AREA_STYLE_VALUES);
 
 const areaStyleLabel = (t: ReturnType<typeof useT>, styleId: number): string => {
   const key = `areaStyle.${styleId}` as StringKey;
-  return styleId >= 0 && styleId < AREA_STYLE_VALUES.length ? t(key) : t("style.unknown");
+  return AREA_STYLE_ID_SET.has(styleId) ? t(key) : t("style.unknown");
+};
+
+// Next style in DROPDOWN order (ids are sparse — see the reserved slots above).
+const nextAreaStyle = (styleId: number): number => {
+  const pos = AREA_STYLE_VALUES.indexOf(styleId as (typeof AREA_STYLE_VALUES)[number]);
+  return AREA_STYLE_VALUES[(pos + 1) % AREA_STYLE_VALUES.length];
 };
 
 // Exported wrapper — boundary first, then real panel. moduleRegistry mounts
@@ -322,11 +340,7 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
           <Tooltip
             content={t("segment.cycleStyle.tooltip", { style: areaStyleLabel(t, area.styleId) })}
           >
-            <PopoverBtn
-              onClick={() =>
-                cmdSetAreaStyle(area.areaIndex, (area.styleId + 1) % AREA_STYLE_VALUES.length)
-              }
-            >
+            <PopoverBtn onClick={() => cmdSetAreaStyle(area.areaIndex, nextAreaStyle(area.styleId))}>
               <Cycle size={14} />
             </PopoverBtn>
           </Tooltip>
@@ -417,6 +431,12 @@ const TownRoadLanePanelInner = () => {
   // 3s window actually deletes. The DeleteLineButton mirrors this state so the
   // UI matches what the keyboard is doing.
   const [pendingDelete, setPendingDelete] = useState<number>(-1);
+  // Fold state for the two list sections — on a busy junction the full lists
+  // turn the panel into a wall. Folded = header (with count) plus only the
+  // row that is currently expanded or hovered in game, so orientation
+  // survives without the noise. Sticky across node switches by design.
+  const [linesFolded, setLinesFolded] = useState(false);
+  const [areasFolded, setAreasFolded] = useState(false);
 
   // When the node changes (or the line count drops to 1), default to expanding line 0
   // so the user doesn't have to manually click to see anything useful.
@@ -639,41 +659,67 @@ const TownRoadLanePanelInner = () => {
 
         {state.lines.length > 0 && (
           <>
-            <SectionTitle>{`${t("section.lines")} · ${state.lines.length}`}</SectionTitle>
+            <FoldoutHeader onClick={() => setLinesFolded(!linesFolded)}>
+              <LineChevron $open={!linesFolded}>
+                <ChevronRight size={10} />
+              </LineChevron>
+              <span>{`${t("section.lines")} · ${state.lines.length}`}</span>
+            </FoldoutHeader>
             <PanelList>
-              {state.lines.map((line) => (
-                <LineRow
-                  key={line.lineIndex}
-                  line={line}
-                  isExpanded={expandedLine === line.lineIndex}
-                  isGameHovered={state.hoveredLineInGame === line.lineIndex}
-                  isPendingDelete={pendingDelete === line.lineIndex}
-                  onToggleExpand={() =>
-                    setExpandedLine(expandedLine === line.lineIndex ? -1 : line.lineIndex)
-                  }
-                  onCancelPendingDelete={() => setPendingDelete(-1)}
-                />
-              ))}
+              {state.lines.map((line) => {
+                if (
+                  linesFolded &&
+                  expandedLine !== line.lineIndex &&
+                  state.hoveredLineInGame !== line.lineIndex
+                )
+                  return null;
+                return (
+                  <LineRow
+                    key={line.lineIndex}
+                    line={line}
+                    isExpanded={expandedLine === line.lineIndex}
+                    isGameHovered={state.hoveredLineInGame === line.lineIndex}
+                    isPendingDelete={pendingDelete === line.lineIndex}
+                    onToggleExpand={() =>
+                      setExpandedLine(expandedLine === line.lineIndex ? -1 : line.lineIndex)
+                    }
+                    onCancelPendingDelete={() => setPendingDelete(-1)}
+                  />
+                );
+              })}
             </PanelList>
           </>
         )}
 
         {state.areas.length > 0 && (
           <>
-            <SectionTitle>{`${t("section.areas")} · ${state.areas.length}`}</SectionTitle>
+            <FoldoutHeader onClick={() => setAreasFolded(!areasFolded)}>
+              <LineChevron $open={!areasFolded}>
+                <ChevronRight size={10} />
+              </LineChevron>
+              <span>{`${t("section.areas")} · ${state.areas.length}`}</span>
+            </FoldoutHeader>
             <PanelList>
-              {state.areas.map((area) => (
-                <AreaRow
-                  key={area.areaIndex}
-                  area={area}
-                  isExpanded={expandedArea === area.areaIndex}
-                  isGameHovered={state.hoveredAreaInGame === area.areaIndex}
-                  areaStyleOptions={areaStyleOptions}
-                  onToggleExpand={() =>
-                    setExpandedArea(expandedArea === area.areaIndex ? -1 : area.areaIndex)
-                  }
-                />
-              ))}
+              {state.areas.map((area) => {
+                if (
+                  areasFolded &&
+                  expandedArea !== area.areaIndex &&
+                  state.hoveredAreaInGame !== area.areaIndex
+                )
+                  return null;
+                return (
+                  <AreaRow
+                    key={area.areaIndex}
+                    area={area}
+                    isExpanded={expandedArea === area.areaIndex}
+                    isGameHovered={state.hoveredAreaInGame === area.areaIndex}
+                    areaStyleOptions={areaStyleOptions}
+                    onToggleExpand={() =>
+                      setExpandedArea(expandedArea === area.areaIndex ? -1 : area.areaIndex)
+                    }
+                  />
+                );
+              })}
             </PanelList>
           </>
         )}

@@ -18,11 +18,16 @@ namespace TownRoadLane
     /// </summary>
     public enum MarkingStyle : int
     {
-        Solid       = 0,
-        Dashed      = 1,
-        G87Solid    = 2,
-        G87Dashed   = 3,
-        DoubleSolid = 4,
+        Solid           = 0,
+        Dashed          = 1,
+        G87Solid        = 2,
+        G87Dashed       = 3,
+        DoubleSolid     = 4,
+        // UI polish pass (2.3.0): short/long vanilla dashes + G87 yellow pair.
+        DashedDense     = 5,
+        G87Yellow       = 6,
+        G87YellowDashed = 7,
+        DashedLong      = 8,
     }
 
     public static class MarkingStyleExtensions
@@ -37,9 +42,11 @@ namespace TownRoadLane
         /// </summary>
         public static int DrawPasses(this MarkingStyle style) => style switch
         {
-            MarkingStyle.G87Solid  => 3,
-            MarkingStyle.G87Dashed => 3,
-            _                      => 1,
+            MarkingStyle.G87Solid        => 3,
+            MarkingStyle.G87Dashed       => 3,
+            MarkingStyle.G87Yellow       => 3,
+            MarkingStyle.G87YellowDashed => 3,
+            _                            => 1,
         };
     }
 }

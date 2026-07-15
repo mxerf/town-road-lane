@@ -50,7 +50,7 @@ const enUS = {
   "next.lineStyle":           "New line style",
   "next.lineStyle.tooltip":   "Style applied to the NEXT line you draw (hotkey Y cycles it)",
   "next.areaStyle":           "New area fill",
-  "next.areaStyle.tooltip":   "Fill applied to the NEXT area you close (hotkey U cycles it). Non-concrete fills require the G87 Road Markings mod.",
+  "next.areaStyle.tooltip":   "Fill applied to the NEXT area you close (hotkey U cycles it). Fills marked (G87) need the G87 Road Markings packs; Asphalt needs the separate 'G87 Vanilla Asphalt Pavement' mod. Missing fills fall back to concrete.",
 
   // Sections
   "section.lines":            "Lines",
@@ -73,6 +73,7 @@ const enUS = {
   "areaStyle.4":              "Yellow stripes (G87)",
   "areaStyle.5":              "Green bike lane (G87)",
   "areaStyle.6":              "Red bus lane (G87)",
+  "areaStyle.14":             "Asphalt (G87 VA)",
 
   // Full node reset
   "node.reset":               "Reset all markings",
@@ -118,6 +119,10 @@ const enUS = {
   "style.g87Solid":           "G87 Solid",
   "style.g87Dashed":          "G87 Dashed",
   "style.doubleSolid":        "Double Solid",
+  "style.dashedDense":        "Dashed, short",
+  "style.dashedLong":         "Dashed, long",
+  "style.g87Yellow":          "G87 Yellow",
+  "style.g87YellowDashed":    "G87 Yellow Dashed",
   "style.unknown":            "?",
 } as const;
 
@@ -164,7 +169,7 @@ const ruRU: LocaleDict = {
   "next.lineStyle":           "Стиль новой линии",
   "next.lineStyle.tooltip":   "Стиль СЛЕДУЮЩЕЙ линии, которую вы проведёте (хоткей Y листает по кругу)",
   "next.areaStyle":           "Заливка новой области",
-  "next.areaStyle.tooltip":   "Заливка СЛЕДУЮЩЕЙ замкнутой области (хоткей U листает по кругу). Все стили, кроме бетона, требуют мод G87 Road Markings.",
+  "next.areaStyle.tooltip":   "Заливка СЛЕДУЮЩЕЙ замкнутой области (хоткей U листает по кругу). Стили с пометкой (G87) требуют паки G87 Road Markings; асфальт — отдельный мод «G87 Vanilla Asphalt Pavement». Недоступные стили откатываются к бетону.",
 
   // Sections
   "section.lines":            "Линии",
@@ -187,6 +192,7 @@ const ruRU: LocaleDict = {
   "areaStyle.4":              "Жёлтая штриховка (G87)",
   "areaStyle.5":              "Зелёная велополоса (G87)",
   "areaStyle.6":              "Красная автобусная полоса (G87)",
+  "areaStyle.14":             "Асфальт (G87 VA)",
 
   // Full node reset
   "node.reset":               "Сбросить всю разметку",
@@ -232,6 +238,10 @@ const ruRU: LocaleDict = {
   "style.g87Solid":           "G87 Сплошная",
   "style.g87Dashed":          "G87 Пунктир",
   "style.doubleSolid":        "Двойная сплошная",
+  "style.dashedDense":        "Пунктир, короткий",
+  "style.dashedLong":         "Пунктир, длинный",
+  "style.g87Yellow":          "G87 Жёлтая",
+  "style.g87YellowDashed":    "G87 Жёлтый пунктир",
   "style.unknown":            "?",
 };
 

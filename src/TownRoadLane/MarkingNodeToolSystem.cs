@@ -203,6 +203,8 @@ namespace TownRoadLane
         public void SetCurrentAreaStyle(int styleId)
         {
             _currentAreaStyle = math.clamp(styleId, 0, MarkingAreaEmissionSystem.kStyleCount - 1);
+            if (!MarkingAreaEmissionSystem.IsStyleEnabled(_currentAreaStyle))
+                _currentAreaStyle = MarkingAreaEmissionSystem.kStyleSolidConcrete;
             log.Info($"tool: UI set next-area style → {_currentAreaStyle}");
         }
 
@@ -365,7 +367,7 @@ namespace TownRoadLane
             // pattern as line styles. Range 0..MarkingAreaEmissionSystem.kStyleCount-1.
             if (_cycleAreaStyleAction != null && _cycleAreaStyleAction.WasPerformedThisFrame())
             {
-                _currentAreaStyle = (_currentAreaStyle + 1) % MarkingAreaEmissionSystem.kStyleCount;
+                _currentAreaStyle = MarkingAreaEmissionSystem.NextEnabledStyle(_currentAreaStyle);
                 log.Info($"tool: cycled area style → {_currentAreaStyle}");
             }
 

@@ -65,9 +65,42 @@ namespace TownRoadLane
             "G87 Road Markings SC Misc G87 Stripes 1to1 30cm Yellow Surface",                                    // 4 Yellow Stripes dense
             "G87 UK Road Markings Misc G87 CS2 Green Bike Lane UM Surface",                                      // 5 Green bike
             "G87 UK Road Markings Misc G87 CS2 Red Bus Lane UM Surface",                                         // 6 Red bus
+            // Slots 7-13: RESERVED (dead vanilla-surface experiment, 2026-07-16). Vanilla
+            // grass/sand/pavement/tiles could not be made to render on intersections — every
+            // spawned fill fell back to the grey "Missing Area" prefab no matter what
+            // (decal layer/priority patches, road-capable template material with transplanted
+            // textures, post-load Created re-registration). Full autopsy in project memory
+            // (cs2-vanilla-surface-dead-end). styleId is serialized identity — the numbers
+            // stay burned; empty string = disabled slot (never resolves, spawns concrete,
+            // hidden from UI).
+            "",                                                                                                  // 7 (reserved: Grass)
+            "",                                                                                                  // 8 (reserved: Grass, dark)
+            "",                                                                                                  // 9 (reserved: Sand)
+            "",                                                                                                  // 10 (reserved: Pavement)
+            "",                                                                                                  // 11 (reserved: Tiles 1)
+            "",                                                                                                  // 12 (reserved: Tiles 2)
+            "",                                                                                                  // 13 (reserved: Tiles 3)
+            "G87 Vanilla Asphalt Pavement G87 VA Surface URM Surface",                                           // 14 Asphalt patch (layer=Terrain,Roads)
         };
-        public const int kStyleCount = 7;
+        public const int kStyleCount = 15;
         public const int kStyleSolidConcrete = 0;
+
+        /// <summary>False for reserved (disabled) catalogue slots — they never resolve, are
+        /// hidden from the UI, and the U-hotkey cycle skips them.</summary>
+        public static bool IsStyleEnabled(int id)
+            => id >= 0 && id < kStyleCount && !string.IsNullOrEmpty(kStyleSurfaceNames[id]);
+
+        /// <summary>Next enabled style after <paramref name="current"/>, wrapping — the
+        /// U-hotkey cycle. Falls back to concrete if somehow nothing is enabled.</summary>
+        public static int NextEnabledStyle(int current)
+        {
+            for (int step = 1; step <= kStyleCount; step++)
+            {
+                int candidate = (current + step) % kStyleCount;
+                if (IsStyleEnabled(candidate)) return candidate;
+            }
+            return kStyleSolidConcrete;
+        }
 
         // Resolved lazily — G87 surfaces show up ~10 s after game load. Entity.Null = retry next tick.
         private Entity[] _stylePrefabEntities = new Entity[kStyleCount];
@@ -121,7 +154,7 @@ namespace TownRoadLane
                 // Wait for the full style set (G87 resolves lazily ~10 s after load) so G87
                 // orphans are recognisable too — but not forever, G87 may be missing.
                 bool allResolved = true;
-                for (int i = 0; i < kStyleCount; i++) if (_stylePrefabEntities[i] == Entity.Null) { allResolved = false; break; }
+                for (int i = 0; i < kStyleCount; i++) if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) { allResolved = false; break; }
                 if (allResolved || --_orphanSweepPatience <= 0)
                 {
                     _orphanSweepPending = false;
@@ -328,7 +361,8 @@ namespace TownRoadLane
         private void TryResolveAllStyles()
         {
             bool anyMissing = false;
-            for (int i = 0; i < kStyleCount; i++) if (_stylePrefabEntities[i] == Entity.Null) { anyMissing = true; break; }
+            for (int i = 0; i < kStyleCount; i++)
+                if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) { anyMissing = true; break; }
             if (!anyMissing) return;
 
             var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<SurfaceData>());
@@ -356,7 +390,7 @@ namespace TownRoadLane
             // then contains exactly what kStyleSurfaceNames needs to say.
             bool stillMissing = false;
             for (int i = 0; i < kStyleCount; i++)
-                if (_stylePrefabEntities[i] == Entity.Null) { stillMissing = true; break; }
+                if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) { stillMissing = true; break; }
             if (stillMissing && ents.Length != _lastSurfaceDumpCount)
             {
                 _lastSurfaceDumpCount = ents.Length;
