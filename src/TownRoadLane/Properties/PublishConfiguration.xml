@@ -58,6 +58,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.jpg" />
 	<!--Screenshot, can be set multiple times-->
+	<Screenshot Value="Properties/Screenshots/Screenshot_04.jpg" />
 	<Screenshot Value="Properties/Screenshots/Screenshot_01.jpg" />
 	<Screenshot Value="Properties/Screenshots/Screenshot_02.jpg" />
 	<Screenshot Value="Properties/Screenshots/Screenshot_03.jpg" />

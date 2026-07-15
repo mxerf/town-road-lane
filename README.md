@@ -2,7 +2,7 @@
 
 A road-marking mod for **Cities: Skylines II**: a manual marking editor for intersections plus automatic edge/parking lane markings for ordinary town roads.
 
-![Line editor](src/TownRoadLane/Properties/Screenshots/Screenshot_01.jpg)
+![Intersection markings with curved area fills](src/TownRoadLane/Properties/Screenshots/Screenshot_04.jpg)
 
 ## Features
 
