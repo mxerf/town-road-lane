@@ -21,6 +21,12 @@ Click any intersection and draw your own markings:
 ## Automatic markings
 Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included.
 
+## Known limitations
+- **The mod is purely visual.** Markings never affect how vehicles actually drive. To change real lane behavior use the Traffic mod (by krzychu124) — set up lane connections and directions there first, then draw your markings to match. The two mods don't sync automatically.
+- Very sharp contact angles between marking lines (a few degrees) can still produce glitchy fills or slightly misplaced points.
+- Non-standard intersections with strongly stretched connections (e.g. reshaped with Node Controller) can misplace the anchor dots. A fix is planned.
+- After moving or reshaping a road with Move It, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
+
 ## Requirements
 Both G87 marking packs ship as dependencies and install automatically — they supply the line styles and area fills. Huge thanks to G87 for the marking assets!
 
@@ -39,6 +45,12 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 
 ## Автоматическая разметка
 Обычные городские дороги с полосами 3 м получают краевую разметку — как на шоссе, — поэтому парковка, тротуары и остановки работают корректно. Разметка парковочных полос включена.
+
+## Известные ограничения
+- **Мод чисто визуальный.** Разметка не влияет на реальное движение машин. Управлять полосами нужно модом Traffic (от krzychu124): сначала настройте там направления и соединения полос, затем нарисуйте разметку под них. Автоматической синхронизации между модами нет.
+- Очень острые углы соприкосновения линий (единицы градусов) всё ещё могут давать артефакты заливок и слегка смещённые точки.
+- На нестандартных перекрёстках с сильно вытянутыми соединениями (например, после Node Controller) точки-якоря могут располагаться некорректно. Исправление запланировано.
+- После перемещения или изменения дороги через Move It линии подстраиваются под новую геометрию, а заливки областей — не всегда: удалите их и нарисуйте заново.
 
 ## Зависимости
 Оба пака разметки G87 подключены как зависимости и ставятся автоматически — они дают стили линий и заливки. Спасибо G87 за ассеты!

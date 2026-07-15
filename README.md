@@ -21,6 +21,13 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 
 ![City overview](src/TownRoadLane/Properties/Screenshots/Screenshot_03.jpg)
 
+## Known limitations
+
+- **The mod is purely visual.** Markings never affect how vehicles actually drive. To change real lane behavior use [Traffic](https://github.com/krzychu124/Traffic) — set up lane connections and directions there first, then draw your markings to match. The two mods don't sync automatically.
+- **Very sharp contact angles** between marking lines (a few degrees) can still produce glitchy fills or slightly misplaced points.
+- **Non-standard intersections** with strongly stretched connections (e.g. reshaped with Node Controller) can misplace the anchor dots. A fix is planned.
+- **Move It:** after moving or reshaping a road, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
+
 ## Dependencies
 
 Line styles and area fills come from the G87 marking packs (installed automatically as PDX Mods dependencies):
