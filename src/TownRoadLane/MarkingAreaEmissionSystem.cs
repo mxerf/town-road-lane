@@ -75,6 +75,13 @@ namespace TownRoadLane
         // Surface-prefab count at the last G87 diagnostic dump — see TryResolveAllStyles.
         private int _lastSurfaceDumpCount = -1;
 
+        // Post-load orphan sweep (2.2.0 migration): pre-2.2.0 saves contain our spawned fills
+        // WITHOUT the TRLAreaLink tag (it wasn't serialized), one stacked copy per save/load
+        // cycle. Runs once per load, after styles resolve (or after the patience budget).
+        private bool _orphanSweepPending;
+        private int _orphanSweepPatience;
+        private const int kOrphanSweepMaxWaitTicks = 600; // ≈ tens of seconds of sim ticks
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -92,6 +99,13 @@ namespace TownRoadLane
             });
         }
 
+        protected override void OnGameLoaded(Colossal.Serialization.Entities.Context serializationContext)
+        {
+            base.OnGameLoaded(serializationContext);
+            _orphanSweepPending = true;
+            _orphanSweepPatience = kOrphanSweepMaxWaitTicks;
+        }
+
         protected override void OnUpdate()
         {
             TryResolveAllStyles();
@@ -101,6 +115,19 @@ namespace TownRoadLane
             if (!EntityManager.HasComponent<AreaData>(solidEntity)) return;
             var solidAreaData = EntityManager.GetComponentData<AreaData>(solidEntity);
             if (!solidAreaData.m_Archetype.Valid) return;
+
+            if (_orphanSweepPending)
+            {
+                // Wait for the full style set (G87 resolves lazily ~10 s after load) so G87
+                // orphans are recognisable too — but not forever, G87 may be missing.
+                bool allResolved = true;
+                for (int i = 0; i < kStyleCount; i++) if (_stylePrefabEntities[i] == Entity.Null) { allResolved = false; break; }
+                if (allResolved || --_orphanSweepPatience <= 0)
+                {
+                    _orphanSweepPending = false;
+                    SweepOrphanFills();
+                }
+            }
 
             // 1. Build wanted set: (node, areaIndex, pieceIndex) for every visible piece of every
             //    visible area. Pieces come from MarkingAreaTopologySystem; their vertex positions
@@ -221,6 +248,81 @@ namespace TownRoadLane
                 for (int i = 0; i < kStyleCount; i++) if (_stylePrefabEntities[i] != Entity.Null) resolved++;
                 log.Info($"[area-emission] nodesWithAreas={_nodesWithAreas.CalculateEntityCount()} stylesResolved={resolved}/{kStyleCount} spawned={spawned} deleted={deleted}");
             }
+        }
+
+        /// <summary>One-shot post-load migration: delete untagged copies of OUR fills left by
+        /// pre-2.2.0 saves (TRLAreaLink wasn't serialized then — the game kept the vanilla
+        /// area entity but dropped the tag; every save/load stacked one more copy).
+        ///
+        /// An untagged vanilla area counts as ours when (a) its prefab is one of our style
+        /// surfaces AND (b) the bulk of its ring nodes lie on one of our piece rings (60% of
+        /// nodes within 0.7 m — covers the envelope→true-contour ring change at sharp tips).
+        /// A hand-placed player surface of the same prefab won't trace our contour.</summary>
+        private void SweepOrphanFills()
+        {
+            // All piece-ring points of all marked nodes, one flat list (tiny in practice).
+            var ringPoints = new List<float3>(256);
+            using (var nodes = _nodesWithAreas.ToEntityArray(Allocator.Temp))
+            {
+                for (int n = 0; n < nodes.Length; n++)
+                {
+                    if (!EntityManager.HasBuffer<MarkingAreaPieceVertex>(nodes[n])) continue;
+                    var verts = EntityManager.GetBuffer<MarkingAreaPieceVertex>(nodes[n], isReadOnly: true);
+                    for (int v = 0; v < verts.Length; v++) ringPoints.Add(verts[v].position);
+                }
+            }
+            if (ringPoints.Count == 0) return;
+
+            var ourPrefabs = new HashSet<Entity>();
+            for (int i = 0; i < kStyleCount; i++)
+                if (_stylePrefabEntities[i] != Entity.Null) ourPrefabs.Add(_stylePrefabEntities[i]);
+
+            var candidates = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[]
+                {
+                    ComponentType.ReadOnly<Game.Areas.Area>(),
+                    ComponentType.ReadOnly<Game.Areas.Node>(),
+                    ComponentType.ReadOnly<PrefabRef>(),
+                },
+                None = new[]
+                {
+                    ComponentType.ReadOnly<TRLAreaLink>(),
+                    ComponentType.ReadOnly<Deleted>(),
+                    ComponentType.ReadOnly<Temp>(),
+                },
+            });
+
+            const float kOnContourSq = 0.7f * 0.7f;
+            int removed = 0;
+            var ecb = new EntityCommandBuffer(Allocator.Temp);
+            using (var ents = candidates.ToEntityArray(Allocator.Temp))
+            {
+                for (int i = 0; i < ents.Length; i++)
+                {
+                    var e = ents[i];
+                    if (!ourPrefabs.Contains(EntityManager.GetComponentData<PrefabRef>(e).m_Prefab)) continue;
+                    var areaNodes = EntityManager.GetBuffer<Game.Areas.Node>(e, isReadOnly: true);
+                    if (areaNodes.Length < 3) continue;
+                    int onContour = 0;
+                    for (int v = 0; v < areaNodes.Length; v++)
+                    {
+                        var p = areaNodes[v].m_Position;
+                        for (int r = 0; r < ringPoints.Count; r++)
+                        {
+                            float dx = ringPoints[r].x - p.x, dz = ringPoints[r].z - p.z;
+                            if (dx * dx + dz * dz < kOnContourSq) { onContour++; break; }
+                        }
+                    }
+                    if (onContour * 10 < areaNodes.Length * 6) continue; // < 60% — not ours
+                    ecb.AddComponent<Deleted>(e);
+                    removed++;
+                }
+            }
+            ecb.Playback(EntityManager);
+            ecb.Dispose();
+            if (removed > 0)
+                log.Info($"[area-emission] post-load sweep: removed {removed} orphaned untagged fill(s) from a pre-2.2.0 save");
         }
 
         private void TryResolveAllStyles()

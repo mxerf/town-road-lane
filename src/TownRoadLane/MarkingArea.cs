@@ -131,7 +131,15 @@ namespace TownRoadLane
     /// makes the diff lookup-based (find tagged entities, match by key), no entity-pointer
     /// chase across ECB boundaries.
     /// </summary>
-    public struct TRLAreaLink : IComponentData
+    /// <remarks>
+    /// SERIALIZED since 2.2.0: the spawned vanilla Area entity is saved by the game, and
+    /// without the tag surviving alongside it every load produced an untagged orphan copy —
+    /// the emission diff saw nothing tagged, spawned a fresh fill on top, and delete/hide from
+    /// the panel only ever affected the fresh one (pre-2.2.0 orphans are swept by
+    /// <see cref="MarkingAreaEmissionSystem"/> on load). Lines never had this problem: the
+    /// game does not serialize lanes, so segment spawns die naturally with the save.
+    /// </remarks>
+    public struct TRLAreaLink : IComponentData, ISerializable
     {
         public Entity node;
         public int areaIndex;
@@ -139,5 +147,23 @@ namespace TownRoadLane
         // line that crosses it). Pieces are indexed densely 0..K-1 per area in the
         // MarkingAreaPiece buffer on the host node. = 0 when no lines cross the area.
         public int pieceIndex;
+
+        private const int kVersion = 1;
+
+        public void Serialize<TWriter>(TWriter writer) where TWriter : IWriter
+        {
+            writer.Write(kVersion);
+            writer.Write(node);
+            writer.Write(areaIndex);
+            writer.Write(pieceIndex);
+        }
+
+        public void Deserialize<TReader>(TReader reader) where TReader : IReader
+        {
+            reader.Read(out int _);
+            reader.Read(out node);
+            reader.Read(out areaIndex);
+            reader.Read(out pieceIndex);
+        }
     }
 }

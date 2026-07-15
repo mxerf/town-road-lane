@@ -84,6 +84,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<ChangeLog>
 # 2.2.0 — reliable fills, exact contours
 
+- **Fixed: after loading a save, deleting or hiding an area left the fill in the world.** The link between the mod and its spawned fill wasn't persisted, so every save/load cycle silently stacked one more unmanaged copy. Links are now saved with the fill; stray copies accumulated by older saves are detected and cleaned up automatically on load.
 - **Fixed: areas could deform after loading a save.** Area anchor points were remembered by list position, and the game reshuffles those lists on every load — editing any marking at such an intersection then snapped the area to wrong points. Anchors now use stable identities that survive save/load; existing areas are migrated automatically and conservatively (an area that can't be safely migrated simply keeps its saved shape until redrawn).
 - **The mod now triangulates its own area fills**, bypassing the game's fragile built-in pass. Fills no longer silently vanish on very sharp or very narrow shapes (knife-tip islands, thin medians).
 - **Fills follow the exact drawn contour.** Sharp island corners are no longer slightly fattened to survive the game's renderer — the drawing preview and the final fill now match point for point.
