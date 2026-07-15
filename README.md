@@ -14,12 +14,12 @@ Click any intersection and draw your own markings:
 - **Hide vanilla markings** per intersection to start from a clean slate.
 - In-game panel (English + Russian) and hotkeys: `Ctrl+M` toggle tool, `Y` cycle line style, `A` area mode, `U` cycle area fill.
 
-![Area fills](src/TownRoadLane/Properties/Screenshots/Screenshot_02.jpg)
+![Area fills](src/TownRoadLane/Properties/Screenshots/TRL_a051f879.jpg)
 
 ### Automatic markings
 Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included.
 
-![City overview](src/TownRoadLane/Properties/Screenshots/Screenshot_03.jpg)
+![City overview](src/TownRoadLane/Properties/Screenshots/TRL_4996f529.jpg)
 
 ## Known limitations
 
