@@ -1,5 +1,6 @@
 using Colossal.Serialization.Entities;
 using Unity.Entities;
+using Unity.Mathematics;
 
 namespace TownRoadLane
 {
@@ -56,15 +57,30 @@ namespace TownRoadLane
     [InternalBufferCapacity(0)]
     public struct MarkingAreaVertex : IBufferElementData, ISerializable
     {
-        // Maps onto MarkingNodeToolSystem.AreaAnchorKind: 0 = LaneEndpoint, 1 = NodeCorner.
+        // Maps onto MarkingNodeToolSystem.AreaAnchorKind: 0 = LaneEndpoint, 1 = NodeCorner,
+        // 2 = LineIntersection.
         public byte kind;
-        // Index into the appropriate live list at the host node (lane endpoints regenerate on
-        // every node click — so we re-extract; corner anchors likewise).
+        // kind 2: packed (lineA, lineB, hitIndex) crossing ref — stable across save/load.
+        // kind 0/1: LEGACY v1 identity — raw index into the extracted endpoint/corner list.
+        // List order is NOT deterministic across save loads (lanes are rebuilt by the game and
+        // extraction order follows them), which made saved areas snap to the wrong dots after
+        // reload. v2 vertices carry the stable identity below instead; refIndex remains only
+        // so v1 saves keep resolving the old way.
         public int refIndex;
         // Maps onto MarkingNodeToolSystem.AreaEdgeKind: 0 = Straight, 1 = LineBezier.
         public byte edgeToNext;
+        // v2 stable identity (same scheme that makes MarkingLine survive reloads):
+        //   kind 0: refEdgeA = endpoint's road edge, refGap = its gapIndex;
+        //   kind 1: refEdgeA/refEdgeB = the corner's edge pair (edgeB may be Null);
+        // refPos = draw-time world position — disambiguates standalone kerb corners (two per
+        // edge share the same edgeA+Null identity) and rescues vertices whose composition
+        // changed. Entity.Null in refEdgeA for kind 0/1 marks a v1 vertex (legacy resolve).
+        public Entity refEdgeA;
+        public Entity refEdgeB;
+        public int refGap;
+        public float3 refPos;
 
-        private const int kVersion = 1;
+        private const int kVersion = 2;
 
         public void Serialize<TWriter>(TWriter writer) where TWriter : IWriter
         {
@@ -72,14 +88,32 @@ namespace TownRoadLane
             writer.Write(kind);
             writer.Write(refIndex);
             writer.Write(edgeToNext);
+            writer.Write(refEdgeA);
+            writer.Write(refEdgeB);
+            writer.Write(refGap);
+            writer.Write(refPos);
         }
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
         {
-            reader.Read(out int _);
+            reader.Read(out int version);
             reader.Read(out kind);
             reader.Read(out refIndex);
             reader.Read(out edgeToNext);
+            if (version >= 2)
+            {
+                reader.Read(out refEdgeA);
+                reader.Read(out refEdgeB);
+                reader.Read(out refGap);
+                reader.Read(out refPos);
+            }
+            else
+            {
+                refEdgeA = Entity.Null;
+                refEdgeB = Entity.Null;
+                refGap = 0;
+                refPos = float3.zero;
+            }
         }
     }
 

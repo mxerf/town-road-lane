@@ -880,12 +880,26 @@ namespace TownRoadLane
             for (int i = 0; i < _areaPolygon.Count; i++)
             {
                 var pv = _areaPolygon[i];
-                verts.Add(new MarkingAreaVertex
+                var av = new MarkingAreaVertex
                 {
                     kind = (byte)pv.kind,
                     refIndex = pv.refIndex,
                     edgeToNext = (byte)pv.edgeToNext,
-                });
+                    refPos = pv.position,
+                };
+                // v2 stable identity — raw list indexes don't survive save/load (lane rebuild
+                // reorders extraction), so store the same edge/gap keys MarkingLine uses.
+                if (pv.kind == AreaAnchorKind.LaneEndpoint && pv.refIndex >= 0 && pv.refIndex < _endpoints.Count)
+                {
+                    av.refEdgeA = _endpoints[pv.refIndex].edge;
+                    av.refGap = _endpoints[pv.refIndex].gapIndex;
+                }
+                else if (pv.kind == AreaAnchorKind.NodeCorner && pv.refIndex >= 0 && pv.refIndex < _cornerAnchors.Count)
+                {
+                    av.refEdgeA = _cornerAnchors[pv.refIndex].edgeA;
+                    av.refEdgeB = _cornerAnchors[pv.refIndex].edgeB;
+                }
+                verts.Add(av);
             }
             areas.Add(new MarkingArea
             {

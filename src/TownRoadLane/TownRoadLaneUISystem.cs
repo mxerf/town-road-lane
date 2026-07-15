@@ -497,13 +497,15 @@ namespace TownRoadLane
                 var av = verts[idx];
                 if (av.kind == 0)
                 {
-                    if (av.refIndex < 0 || av.refIndex >= endpoints.Count) return false;
-                    sum += endpoints[av.refIndex].position;
+                    int epIdx = MarkingEndpointExtractor.ResolveEndpointIndex(endpoints, av);
+                    if (epIdx < 0) return false;
+                    sum += endpoints[epIdx].position;
                 }
                 else if (av.kind == 1)
                 {
-                    if (av.refIndex < 0 || av.refIndex >= corners.Count) return false;
-                    sum += corners[av.refIndex].position;
+                    int cIdx = MarkingEndpointExtractor.ResolveCornerIndex(corners, av);
+                    if (cIdx < 0) return false;
+                    sum += corners[cIdx].position;
                 }
                 else if (av.kind == 2) // line crossing — refIndex is the packed (lineA, lineB, hit)
                 {

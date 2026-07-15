@@ -75,6 +75,72 @@ namespace TownRoadLane
             return Extract(em, node, log: false);
         }
 
+        // Stable-identity matches must stay LOCAL — a fallback that grabs a dot metres away
+        // would silently deform the area instead of failing into the carried-pieces path.
+        private const float kAnchorMatchRadiusSq = 1.5f * 1.5f;
+
+        /// <summary>Resolve a saved area vertex (kind 0) to today's endpoint list. v2 vertices
+        /// match by stable (edge, gapIndex) identity — list ORDER is not deterministic across
+        /// save loads, raw indexes are not trustworthy. Falls back to nearest-by-draw-position
+        /// (composition changed), then to the legacy index for v1 saves. Returns -1 when
+        /// nothing matches.</summary>
+        public static int ResolveEndpointIndex(IReadOnlyList<MarkingEndpoint> endpoints, in MarkingAreaVertex av)
+        {
+            if (av.refEdgeA != Entity.Null)
+            {
+                for (int i = 0; i < endpoints.Count; i++)
+                    if (endpoints[i].edge == av.refEdgeA && endpoints[i].gapIndex == av.refGap)
+                        return i;
+                int best = -1;
+                float bestSq = kAnchorMatchRadiusSq;
+                for (int i = 0; i < endpoints.Count; i++)
+                {
+                    float dx = endpoints[i].position.x - av.refPos.x;
+                    float dz = endpoints[i].position.z - av.refPos.z;
+                    float sq = dx * dx + dz * dz;
+                    if (sq < bestSq) { bestSq = sq; best = i; }
+                }
+                return best;
+            }
+            return av.refIndex >= 0 && av.refIndex < endpoints.Count ? av.refIndex : -1;
+        }
+
+        /// <summary>Same for kind 1 corner anchors: match by the (edgeA, edgeB) pair; when the
+        /// pair is ambiguous (standalone kerb corners share edgeA + Null — one per side) or
+        /// missing, the nearest match by draw position wins. Legacy index for v1 saves.</summary>
+        public static int ResolveCornerIndex(IReadOnlyList<MarkingCornerAnchor> corners, in MarkingAreaVertex av)
+        {
+            if (av.refEdgeA != Entity.Null)
+            {
+                int best = -1;
+                float bestSq = kAnchorMatchRadiusSq;
+                int exact = -1, exactCount = 0;
+                for (int i = 0; i < corners.Count; i++)
+                {
+                    if (corners[i].edgeA != av.refEdgeA || corners[i].edgeB != av.refEdgeB) continue;
+                    exact = i;
+                    exactCount++;
+                    float dx = corners[i].position.x - av.refPos.x;
+                    float dz = corners[i].position.z - av.refPos.z;
+                    float sq = dx * dx + dz * dz;
+                    if (sq < bestSq) { bestSq = sq; best = i; }
+                }
+                if (exactCount == 1) return exact;
+                if (best >= 0) return best;
+                // Pair gone entirely (road demolished/rebuilt) — nearest corner of any pair.
+                bestSq = kAnchorMatchRadiusSq;
+                for (int i = 0; i < corners.Count; i++)
+                {
+                    float dx = corners[i].position.x - av.refPos.x;
+                    float dz = corners[i].position.z - av.refPos.z;
+                    float sq = dx * dx + dz * dz;
+                    if (sq < bestSq) { bestSq = sq; best = i; }
+                }
+                return best;
+            }
+            return av.refIndex >= 0 && av.refIndex < corners.Count ? av.refIndex : -1;
+        }
+
         // Two adjacent Road lanes whose inner edges sit further apart than this are treated as
         // separate carriageways (median strip / raised divider / pure-tram reservation between
         // them). Instead of one stitch endpoint at the middle of the divider we emit two — one
