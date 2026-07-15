@@ -17,7 +17,10 @@ namespace TownRoadLane
     ///
     /// gapIndex is a left-to-right running counter over the emitted endpoints (0 = outer-left
     /// kerb, max = outer-right kerb). It is an opaque identity — stable for a given composition,
-    /// but renumbered if the road's lane layout changes.
+    /// but renumbered if the road's lane layout changes. Two extra ranges never renumber the
+    /// classic set: parking-bay edges (the true kerb line on roads with parking) start at
+    /// kExtendedGapBase; setback anchors (the classic row repeated kSetbackDistanceM back along
+    /// the road) start at kSetbackGapBase and mirror the classic gap numbers.
     /// </summary>
     public struct MarkingEndpoint
     {
@@ -147,6 +150,26 @@ namespace TownRoadLane
         // on each carriageway's inner edge, where the physical marking actually belongs.
         // Touching lanes have gap ≈ 0; the narrowest vanilla medians are well above 1m.
         private const float kCarriagewayGapM = 0.75f;
+
+        // gapIndex base for endpoints derived from non-Road cross-section lanes (parking bays
+        // today). The classic car-lane set stays numbered 0..N — inserting new gaps in that
+        // range would renumber saved MarkingLine / area anchors, whose identity IS
+        // (edge, gapIndex). Extended anchors get 1000+running instead: still stable
+        // left-to-right for a given composition, never colliding with the classic range.
+        private const int kExtendedGapBase = 1000;
+
+        // Extended endpoints closer than this (laterally) to an already-emitted one are
+        // dropped — e.g. the parking lane's inner edge coincides with the outer car-lane kerb.
+        private const float kExtendedDedupeM = 0.10f;
+
+        // Setback anchors: a second row of the classic stitches, this far back along the road
+        // from the node cap (sampled on the EdgeGeometry curves, so curved approaches keep the
+        // row on the carriageway). Use case: the solid pre-junction stretch of a lane divider
+        // (no-lane-change zone before the stop line); also gives stretched Node Controller
+        // junctions a usable anchor row behind the deformed cap. gapIndex = kSetbackGapBase +
+        // classic gap — a range of its own, like the parking extension.
+        private const int   kSetbackGapBase   = 2000;
+        private const float kSetbackDistanceM = 8f;
 
         /// <summary>
         /// True when the edge's derived net state is filled in and endpoint extraction would see
@@ -430,14 +453,18 @@ namespace TownRoadLane
 
             if (lanesByX.Count == 0) return;
 
-            // Build the ordered (x, halfWidth) list and emit N+1 endpoints.
+            // Build the ordered (x, halfWidth) list and emit N+1 endpoints. Every emitted
+            // lateral X is recorded so the extended (parking) pass below can dedupe against
+            // the classic set.
             var sorted = new List<(float x, float hw)>(lanesByX.Count);
             foreach (var kv in lanesByX) sorted.Add((kv.Key, kv.Value));
+            var emittedX = new List<float>(sorted.Count + 3);
 
             // gap 0: left kerb. Lateral at first-lane's left edge = first.x - first.hw.
             float xLeftKerb = sorted[0].x - sorted[0].hw;
             int gap = 0;
             outList.Add(MakeEndpoint(edgeEntity, gap++, xLeftKerb, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+            emittedX.Add(xLeftKerb);
 
             // Inner stitches. Touching lanes share one stitch at their common edge; lanes
             // separated by a median (divider strip, tram reservation — anything wider than
@@ -451,11 +478,14 @@ namespace TownRoadLane
                 {
                     outList.Add(MakeEndpoint(edgeEntity, gap++, prevRightEdge, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
                     outList.Add(MakeEndpoint(edgeEntity, gap++, nextLeftEdge, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+                    emittedX.Add(prevRightEdge);
+                    emittedX.Add(nextLeftEdge);
                 }
                 else
                 {
                     float xMid = (sorted[i - 1].x + sorted[i].x) * 0.5f;
                     outList.Add(MakeEndpoint(edgeEntity, gap++, xMid, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+                    emittedX.Add(xMid);
                 }
             }
 
@@ -463,6 +493,75 @@ namespace TownRoadLane
             int last = sorted.Count - 1;
             float xRightKerb = sorted[last].x + sorted[last].hw;
             outList.Add(MakeEndpoint(edgeEntity, gap, xRightKerb, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+            emittedX.Add(xRightKerb);
+
+            // emittedX[i] ↔ classic gap i from here on; the passes below append more entries.
+            int classicCount = emittedX.Count;
+
+            // Setback anchors — mirror every classic stitch kSetbackDistanceM back along the
+            // road, on the cross-section slice of the EdgeGeometry curves at that arc length.
+            // Skipped when the cap-side geometry segment (≈ half the edge) is shorter than the
+            // setback distance: a row past the edge midpoint would collide with the row coming
+            // from the opposite node.
+            if (TryFindParamAtDistance(capLeftCurve, capRightCurve, nodeIsStart, kSetbackDistanceM, out float tSet))
+            {
+                float3 setLeft   = MathUtils.Position(capLeftCurve, tSet);
+                float3 setRight  = MathUtils.Position(capRightCurve, tSet);
+                float3 tanLeft   = MathUtils.Tangent(capLeftCurve, tSet);
+                float3 tanRight  = MathUtils.Tangent(capRightCurve, tSet);
+                for (int i = 0; i < classicCount; i++)
+                {
+                    float f = math.saturate((emittedX[i] + halfWidth) / math.max(0.001f, halfWidth * 2f));
+                    float3 pos  = math.lerp(setLeft, setRight, f);
+                    float3 tan3 = math.lerp(tanLeft, tanRight, f);
+                    // Keep the "tangent points INTO the edge, away from the node" convention:
+                    // start-cap curves head away from the node as t grows; end-cap curves head
+                    // toward it, so flip.
+                    if (!nodeIsStart) tan3 = -tan3;
+                    outList.Add(new MarkingEndpoint
+                    {
+                        edge     = edgeEntity,
+                        gapIndex = kSetbackGapBase + i,
+                        position = pos,
+                        tangent  = math.normalizesafe(tan3.xz),
+                    });
+                }
+            }
+
+            // Extended anchors: parking-bay edges. The classic set above covers only Road
+            // lanes, so on roads with parking the outer endpoints sit at the drive|parking
+            // boundary — metres inside the actual kerb. Emit extra endpoints at the parking
+            // lanes' lateral edges (the true carriageway edge) so lines and areas can start
+            // at the kerb line. Pedestrian / utility lanes stay excluded — no dots on the
+            // sidewalk. gapIndex numbering starts at kExtendedGapBase and always advances
+            // (even across deduped entries) so a marginal composition change can't renumber
+            // the surviving anchors.
+            var extendedEdges = new SortedSet<float>();
+            for (int i = 0; i < compLanes.Length; i++)
+            {
+                var cl = compLanes[i];
+                if ((cl.m_Flags & LaneFlags.Parking) == 0) continue;
+                if ((cl.m_Flags & (LaneFlags.Secondary | LaneFlags.Utility | LaneFlags.Master)) != 0) continue;
+                float hw = 0f;
+                if (em.HasComponent<NetLaneData>(cl.m_Lane))
+                    hw = em.GetComponentData<NetLaneData>(cl.m_Lane).m_Width * 0.5f;
+                if (hw <= 0f) continue;
+                extendedEdges.Add(cl.m_Position.x - hw);
+                extendedEdges.Add(cl.m_Position.x + hw);
+            }
+            int extGap = kExtendedGapBase;
+            foreach (float x in extendedEdges)
+            {
+                bool duplicate = false;
+                for (int i = 0; i < emittedX.Count; i++)
+                {
+                    if (math.abs(emittedX[i] - x) < kExtendedDedupeM) { duplicate = true; break; }
+                }
+                int g = extGap++;
+                if (duplicate) continue;
+                outList.Add(MakeEndpoint(edgeEntity, g, x, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
+                emittedX.Add(x);
+            }
         }
 
         /// <summary>Lerp from the left-cap point to the right-cap point at lateral-fraction t,
@@ -473,6 +572,37 @@ namespace TownRoadLane
             float t = math.saturate((lateralX + halfWidth) / math.max(0.001f, halfWidth * 2f));
             float3 pos = math.lerp(leftAtNode, rightAtNode, t);
             return new MarkingEndpoint { edge = edge, gapIndex = gapIndex, position = pos, tangent = tangent };
+        }
+
+        /// <summary>Find the curve parameter t where the centreline of the cap-side geometry
+        /// segment reaches <paramref name="distance"/> metres of arc length from the node.
+        /// Walks a fixed sample grid on the average of the left/right curves; horizontal (XZ)
+        /// distance only, so steep approaches don't shorten the visible setback. Returns false
+        /// when the segment runs out before the distance is reached.</summary>
+        private static bool TryFindParamAtDistance(in Bezier4x3 left, in Bezier4x3 right, bool fromStart, float distance, out float t)
+        {
+            const int kSamples = 24;
+            t = 0f;
+            float acc = 0f;
+            float prevT = fromStart ? 0f : 1f;
+            float3 prev = (MathUtils.Position(left, prevT) + MathUtils.Position(right, prevT)) * 0.5f;
+            for (int i = 1; i <= kSamples; i++)
+            {
+                float raw = i / (float)kSamples;
+                float tt = fromStart ? raw : 1f - raw;
+                float3 cur = (MathUtils.Position(left, tt) + MathUtils.Position(right, tt)) * 0.5f;
+                float step = math.distance(prev.xz, cur.xz);
+                if (acc + step >= distance)
+                {
+                    float frac = step > 1e-6f ? (distance - acc) / step : 0f;
+                    t = math.lerp(prevT, tt, frac);
+                    return true;
+                }
+                acc += step;
+                prev = cur;
+                prevT = tt;
+            }
+            return false;
         }
     }
 }
