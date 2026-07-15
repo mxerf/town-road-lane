@@ -3,7 +3,7 @@
 **English** | [Русский](README.ru.md)
 
 [![PDX Mods subscribers](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.subscriptions&label=PDX%20Mods&suffix=%20subscribers&color=2d6cdf&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
-[![Rating](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.rating&label=rating&suffix=%2F5&color=f5a623&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
+[![Likes](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.ratingsTotal&label=likes&color=e05d6f&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
 [![Mod version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.userModVersion&label=version&color=3fb950&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
 [![Game version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.requiredVersion&label=Cities%3A%20Skylines%20II&color=8a63d2&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
 
