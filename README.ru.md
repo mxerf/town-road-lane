@@ -1,0 +1,79 @@
+# Town Road Lane — дорожная разметка
+
+[English](README.md) | **Русский**
+
+[![Подписчики PDX Mods](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.subscriptions&label=PDX%20Mods&suffix=%20subscribers&color=2d6cdf&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
+[![Рейтинг](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.rating&label=rating&suffix=%2F5&color=f5a623&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
+[![Версия мода](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.userModVersion&label=version&color=3fb950&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
+[![Версия игры](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.requiredVersion&label=Cities%3A%20Skylines%20II&color=8a63d2&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
+
+Мод дорожной разметки для **Cities: Skylines II**: ручной редактор разметки перекрёстков плюс автоматическая краевая и парковочная разметка обычных городских дорог.
+
+![Разметка перекрёстка с криволинейными заливками](src/TownRoadLane/Properties/Screenshots/Screenshot_04.jpg)
+
+## Возможности
+
+### Редактор разметки
+Кликните по любому перекрёстку и нарисуйте свою разметку:
+
+- **Линии** между точками-якорями — сплошная, пунктир (короткий / обычный / длинный), двойная сплошная, белые и жёлтые стили G87; настраиваемая кривизна и видимость отдельных сегментов.
+- **Точки-якоря везде, где нужны** — на каждой границе полос, на краю проезжей части (в том числе за парковочными полосами) и вторым рядом за 8 м до перекрёстка — для сплошной перед стоп-линией, запрещающей перестроение.
+- **Заливки областей** по обведённому полигону — вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон, асфальтовая заплатка.
+- **Скрытие ванильной разметки** на отдельном перекрёстке, чтобы начать с чистого листа.
+- Панель в игре (английский + русский) и горячие клавиши: `Ctrl+M` — инструмент, `Y` — стиль линии, `A` — режим области, `U` — заливка области.
+
+![Зебра и своя разметка перекрёстка](src/TownRoadLane/Properties/Screenshots/TRL_9f56d721.jpg)
+
+![Y-развязка с направляющей разметкой](src/TownRoadLane/Properties/Screenshots/TRL_f43d4d3e.jpg)
+
+![Заливки областей](src/TownRoadLane/Properties/Screenshots/TRL_a051f879.jpg)
+
+### Автоматическая разметка
+Обычные городские дороги с полосами 3 м получают краевую разметку — как на шоссе, — поэтому парковка, тротуары и остановки работают корректно. Разметка парковочных полос включена.
+
+![Лесная дорога с краевой разметкой](src/TownRoadLane/Properties/Screenshots/TRL_7f19dcc1.jpg)
+
+![Вид города](src/TownRoadLane/Properties/Screenshots/TRL_4996f529.jpg)
+
+## Известные ограничения
+
+- **Мод чисто визуальный.** Разметка не влияет на реальное движение машин. Управлять полосами нужно модом [Traffic](https://github.com/krzychu124/Traffic): сначала настройте там направления и соединения полос, затем нарисуйте разметку под них. Автоматической синхронизации между модами нет.
+- **Почти касательные контакты линий** (заметно меньше ~8°) считаются скольжением, а не пересечением — точка-якорь в таком месте не появляется (намеренно: защита от дрожащих дублей-якорей).
+- **Нестандартные перекрёстки** с сильно вытянутыми соединениями (например, после Node Controller) могут получить некорректные точки-якоря у самого перекрёстка. Обход: второй ряд точек за 8 м до перекрёстка следует геометрии дороги и остаётся пригодным. Полноценное исправление запланировано.
+- **Move It:** после перемещения или изменения дороги линии подстраиваются под новую геометрию, а заливки областей — не всегда: удалите их и нарисуйте заново.
+
+## Зависимости
+
+Стили линий и заливки берутся из паков разметки G87 (ставятся автоматически как зависимости PDX Mods):
+
+- [G87] Road Markings (id 97828)
+- [G87] Road Markings: Stripes and Chevrons (id 98624)
+
+Опционально: заливка **«Асфальт»** использует отдельный мод «G87 Vanilla Asphalt Pavement» — без него она откатывается к бетону.
+
+## Сборка
+
+Нужны официальный тулчейн моддинга CS2 (`CSII_TOOLPATH` настраивается визардом мод-проекта игры) и Node.js для UI-бандла.
+
+```powershell
+cd src/TownRoadLaneUI
+npm install          # один раз
+cd ..
+dotnet build src/TownRoadLane/TownRoadLane.csproj
+```
+
+Сборка компилирует C#-системы, собирает React-UI через webpack и раскладывает всё в локальную папку `Mods/TownRoadLane`.
+
+## Структура проекта
+
+- `src/TownRoadLane/` — C#-мод: ECS-системы топологии разметки, эмиссии, рендера и игровой инструмент.
+- `src/TownRoadLaneUI/` — React (cohtml) UI: панель инструмента, кнопка тулбара, локализация.
+
+## Благодарности
+
+- **G87** — паки префабов разметки, на которых построены стили мода.
+- Автор: **mxerf**
+
+## Лицензия
+
+[GPL-3.0](LICENSE)

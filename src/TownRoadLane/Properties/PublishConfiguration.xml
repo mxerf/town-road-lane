@@ -13,8 +13,8 @@ A road-marking editor for intersections plus automatic lane markings for ordinar
 
 ## Marking editor
 Click any intersection and draw your own markings:
-- **Lines** between lane endpoint dots — Solid, Dashed, Double Solid, and G87 line styles, with adjustable curvature and per-segment visibility.
-- **Area fills** over any polygon you outline — points snap to lane endpoints, kerb corners and line crossings, edges follow line curvature. Junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete.
+- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, and G87 white or yellow styles, with adjustable curvature and per-segment visibility. Dots sit on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction — for the solid no-lane-change stretch in front of the stop line.
+- **Area fills** over any polygon you outline — points snap to lane endpoints, kerb corners and line crossings, edges follow line curvature. Junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete, asphalt patch (needs the separate "G87 Vanilla Asphalt Pavement" mod).
 - **Hide vanilla markings** per intersection to start from a clean slate.
 - Full in-game panel (English + Russian) and hotkeys: **Ctrl+M** toggle tool, **Y** cycle line style, **A** area mode, **U** cycle area fill.
 
@@ -24,7 +24,7 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 ## Known limitations
 - **The mod is purely visual.** Markings never affect how vehicles actually drive. To change real lane behavior use the Traffic mod (by krzychu124) — set up lane connections and directions there first, then draw your markings to match. The two mods don't sync automatically.
 - Nearly-tangent line contacts (well under ~8°) are treated as a graze rather than a crossing — no anchor dot appears at such touch points (by design; prevents jittery duplicate anchors).
-- Non-standard intersections with strongly stretched connections (e.g. reshaped with Node Controller) can misplace the anchor dots. A fix is planned.
+- Non-standard intersections with strongly stretched connections (e.g. reshaped with Node Controller) can misplace the anchor dots at the junction cap. Workaround: the setback dot row 8 m before the junction follows the road geometry and stays usable there. A proper fix is planned.
 - After moving or reshaping a road with Move It, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
 
 ## Requirements
@@ -38,8 +38,8 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 
 ## Редактор разметки
 Кликните по любому перекрёстку и нарисуйте свою разметку:
-- **Линии** между точками полос — сплошная, пунктир, двойная сплошная и стили G87; настраиваемая кривизна и видимость отдельных сегментов.
-- **Заливки областей** по обведённому полигону — точки цепляются к концам полос, углам бордюров и пересечениям линий, рёбра повторяют кривизну линий. Вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон.
+- **Линии** между точками-якорями — сплошная, пунктир (короткий / обычный / длинный), двойная сплошная, белые и жёлтые стили G87; настраиваемая кривизна и видимость отдельных сегментов. Точки стоят на каждой границе полос, на краю проезжей части (в том числе за парковочными полосами) и вторым рядом за 8 м до перекрёстка — для сплошной перед стоп-линией, запрещающей перестроение.
+- **Заливки областей** по обведённому полигону — точки цепляются к концам полос, углам бордюров и пересечениям линий, рёбра повторяют кривизну линий. Вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон, асфальтовая заплатка (нужен отдельный мод «G87 Vanilla Asphalt Pavement»).
 - **Скрытие ванильной разметки** на отдельном перекрёстке, чтобы начать с чистого листа.
 - Полноценная панель в игре (английский + русский) и горячие клавиши: **Ctrl+M** — инструмент, **Y** — стиль линии, **A** — режим области, **U** — заливка области.
 
@@ -49,7 +49,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 ## Известные ограничения
 - **Мод чисто визуальный.** Разметка не влияет на реальное движение машин. Управлять полосами нужно модом Traffic (от krzychu124): сначала настройте там направления и соединения полос, затем нарисуйте разметку под них. Автоматической синхронизации между модами нет.
 - Почти касательные контакты линий (заметно меньше ~8°) считаются скольжением, а не пересечением — точка-якорь в таком месте не появляется (намеренно: защита от дрожащих дублей-якорей).
-- На нестандартных перекрёстках с сильно вытянутыми соединениями (например, после Node Controller) точки-якоря могут располагаться некорректно. Исправление запланировано.
+- На нестандартных перекрёстках с сильно вытянутыми соединениями (например, после Node Controller) точки-якоря у самого перекрёстка могут располагаться некорректно. Обход: второй ряд точек за 8 м до перекрёстка следует геометрии дороги и остаётся пригодным. Полноценное исправление запланировано.
 - После перемещения или изменения дороги через Move It линии подстраиваются под новую геометрию, а заливки областей — не всегда: удалите их и нарисуйте заново.
 
 ## Зависимости
@@ -71,7 +71,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.2.0" />
+	<ModVersion Value="2.3.0" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -86,6 +86,15 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
+# 2.3.0 — more anchor dots, more styles, calmer UI
+
+- **More anchor dots.** Roads with parking lanes get dots on the true carriageway edge (the outer edge of the parking lane, where the kerb line runs). And every approach now grows a second row of dots 8 m before the junction, following the road's curvature — draw the solid "no lane change" stretch in front of the stop line, or use the row as a workaround on stretched intersections where the cap dots sit awkwardly.
+- **4 new line styles:** short dashed, long dashed (highway spacing), G87 yellow solid, G87 yellow dashed.
+- **New area fill: Asphalt patch.** Needs the separate "G87 Vanilla Asphalt Pavement" mod (not installed automatically); without it the fill falls back to concrete. Covers markings and sidewalks nicely.
+- **Calmer overlay.** The big red crosses at line crossings are now small red dots. Anchor dots stopped pulsing: a free dot is a hollow ring, a dot that already anchors a line is filled with a white core; area-mode candidates use the same ring language.
+- A line drawn between two dots of the same lane (setback row → junction) now follows the lane instead of bulging into the intersection.
+- **Panel: the Lines and Areas sections fold.** A folded section shows only the row you're working with (expanded, or hovered on the map) — big junctions no longer turn the panel into an endless scroll.
+
 # 2.2.0 — reliable fills, exact contours
 
 - **Fixed: after loading a save, deleting or hiding an area left the fill in the world.** The link between the mod and its spawned fill wasn't persisted, so every save/load cycle silently stacked one more unmanaged copy. Links are now saved with the fill; stray copies accumulated by older saves are detected and cleaned up automatically on load.

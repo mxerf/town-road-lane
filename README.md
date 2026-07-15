@@ -1,4 +1,11 @@
-﻿# Town Road Lane — Road Markings
+# Town Road Lane — Road Markings
+
+**English** | [Русский](README.ru.md)
+
+[![PDX Mods subscribers](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.subscriptions&label=PDX%20Mods&suffix=%20subscribers&color=2d6cdf&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
+[![Rating](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.rating&label=rating&suffix=%2F5&color=f5a623&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
+[![Mod version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.userModVersion&label=version&color=3fb950&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
+[![Game version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.paradox-interactive.com%2Fmods%3FmodId%3D150863%26os%3Dwindows&query=%24.modDetail.requiredVersion&label=Cities%3A%20Skylines%20II&color=8a63d2&cacheSeconds=3600)](https://mods.paradoxplaza.com/mods/150863/Windows)
 
 A road-marking mod for **Cities: Skylines II**: a manual marking editor for intersections plus automatic edge/parking lane markings for ordinary town roads.
 
@@ -9,15 +16,22 @@ A road-marking mod for **Cities: Skylines II**: a manual marking editor for inte
 ### Marking editor
 Click any intersection and draw your own markings:
 
-- **Lines** between lane endpoint dots — Solid, Dashed, Double Solid, and G87 line styles, with adjustable curvature and per-segment visibility.
-- **Area fills** over any polygon you outline — junction box (yellow box), white/yellow hatching, green bike lane, red bus lane, concrete.
+- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, and G87 white or yellow styles, with adjustable curvature and per-segment visibility.
+- **Anchor dots everywhere you need them** — on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction, so you can draw the solid no-lane-change stretch in front of the stop line.
+- **Area fills** over any polygon you outline — junction box (yellow box), white/yellow hatching, green bike lane, red bus lane, concrete, asphalt patch.
 - **Hide vanilla markings** per intersection to start from a clean slate.
 - In-game panel (English + Russian) and hotkeys: `Ctrl+M` toggle tool, `Y` cycle line style, `A` area mode, `U` cycle area fill.
+
+![Zebra crossing and custom junction markings](src/TownRoadLane/Properties/Screenshots/TRL_9f56d721.jpg)
+
+![Y-junction with custom lane guidance](src/TownRoadLane/Properties/Screenshots/TRL_f43d4d3e.jpg)
 
 ![Area fills](src/TownRoadLane/Properties/Screenshots/TRL_a051f879.jpg)
 
 ### Automatic markings
 Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included.
+
+![Forest road with edge markings](src/TownRoadLane/Properties/Screenshots/TRL_7f19dcc1.jpg)
 
 ![City overview](src/TownRoadLane/Properties/Screenshots/TRL_4996f529.jpg)
 
@@ -25,7 +39,7 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 
 - **The mod is purely visual.** Markings never affect how vehicles actually drive. To change real lane behavior use [Traffic](https://github.com/krzychu124/Traffic) — set up lane connections and directions there first, then draw your markings to match. The two mods don't sync automatically.
 - **Nearly-tangent line contacts** (well under ~8°) are treated as a graze rather than a crossing — no anchor dot appears at such touch points (by design; prevents jittery duplicate anchors).
-- **Non-standard intersections** with strongly stretched connections (e.g. reshaped with Node Controller) can misplace the anchor dots. A fix is planned.
+- **Non-standard intersections** with strongly stretched connections (e.g. reshaped with Node Controller) can misplace the anchor dots at the junction cap. Workaround: the setback dot row 8 m before the junction follows the road geometry and stays usable there. A proper fix is planned.
 - **Move It:** after moving or reshaping a road, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
 
 ## Dependencies
@@ -34,6 +48,8 @@ Line styles and area fills come from the G87 marking packs (installed automatica
 
 - [G87] Road Markings (id 97828)
 - [G87] Road Markings: Stripes and Chevrons (id 98624)
+
+Optional: the **Asphalt patch** area fill uses the separate "G87 Vanilla Asphalt Pavement" mod — without it that fill falls back to concrete.
 
 ## Building
 
