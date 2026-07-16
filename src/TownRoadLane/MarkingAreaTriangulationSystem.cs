@@ -52,6 +52,19 @@ namespace TownRoadLane
         private TerrainSystem _terrainSystem;
         private bool _loaded;
 
+        // Rings our own ear-clip could not solve (self-intersecting): the buffer stays empty,
+        // so without this set the reclaim scan below would retry (and warn) every tick.
+        // Entries are dropped when the entity comes back through the Updated pass — i.e. its
+        // ring actually changed and a retry is meaningful.
+        private readonly System.Collections.Generic.HashSet<Entity> _healFailed =
+            new System.Collections.Generic.HashSet<Entity>();
+
+        // Hash of the triangle indices WE last wrote per fill. A mismatch on the reclaim scan
+        // means someone re-triangulated the fill behind our back without tagging it Updated —
+        // in practice vanilla GeometrySystem's post-load all-areas pass (see ReclaimClobberedFills).
+        private readonly System.Collections.Generic.Dictionary<Entity, int> _ownedFingerprint =
+            new System.Collections.Generic.Dictionary<Entity, int>();
+
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -92,27 +105,129 @@ namespace TownRoadLane
             {
                 query = _updatedOurs;
             }
-            if (query.IsEmptyIgnoreFilter) return;
-
             TerrainHeightData heightData = _terrainSystem.GetHeightData();
-            using var entities = query.ToEntityArray(Allocator.Temp);
-            int done = 0, failed = 0;
-            for (int i = 0; i < entities.Length; i++)
+            if (!query.IsEmptyIgnoreFilter)
             {
+                using var entities = query.ToEntityArray(Allocator.Temp);
+                int done = 0, failed = 0;
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    try
+                    {
+                        if (RewriteTriangles(entities[i], ref heightData))
+                        {
+                            done++;
+                            _healFailed.Remove(entities[i]);
+                            _ownedFingerprint[entities[i]] = Fingerprint(EntityManager.GetBuffer<Triangle>(entities[i], isReadOnly: true));
+                        }
+                        else { failed++; _healFailed.Add(entities[i]); }
+                    }
+                    catch (System.Exception e)
+                    {
+                        // Never break the tick loop: vanilla triangles (possibly empty) stay.
+                        failed++;
+                        _healFailed.Add(entities[i]);
+                        log.Warn($"area-triangulation ent#{entities[i].Index}: {e.GetType().Name}: {e.Message} — keeping vanilla triangles");
+                    }
+                }
+                if (done > 0 || failed > 0)
+                    log.Info($"MarkingAreaTriangulationSystem: rewrote {done} fill(s){(failed > 0 ? $", {failed} left vanilla" : "")}");
+            }
+
+            ReclaimClobberedFills(ref heightData);
+        }
+
+        /// <summary>Order-sensitive hash of the triangle index buffer — identifies a
+        /// triangulation as the one we last wrote (positions don't matter: indices into the
+        /// same ring fully determine the mesh).</summary>
+        private static int Fingerprint(DynamicBuffer<Triangle> tris)
+        {
+            unchecked
+            {
+                int h = 17;
+                for (int i = 0; i < tris.Length; i++)
+                {
+                    int3 idx = tris[i].m_Indices;
+                    h = h * 31 + idx.x;
+                    h = h * 31 + idx.y;
+                    h = h * 31 + idx.z;
+                }
+                return h * 31 + tris.Length;
+            }
+        }
+
+        /// <summary>
+        /// Once the terrain heightmap finishes streaming after a load, vanilla
+        /// <see cref="Game.Areas.GeometrySystem"/> re-triangulates EVERY area
+        /// (<c>TerrainHeightsReadyAfterLoading</c> → its all-areas pass) WITHOUT tagging
+        /// anything <c>Updated</c>. That pass damages our fills two ways:
+        ///  - rings its shrink-and-budget ear-clip can't solve get their Triangle buffer
+        ///    CLEARED — the fill turns invisible;
+        ///  - rings it can solve get vanilla triangles whose ears were chosen on the 0.1 m
+        ///    SHRUNK workspace (sharp vertices fly metres inward) but whose indices render on
+        ///    the true ring — near sharp tips the mesh visibly spills past the drawn contour.
+        /// With no Updated tag, neither we nor the search tree / GPU batches ever hear about
+        /// either case. This scan runs right after GeometrySystem every tick and compares each
+        /// fill's triangle indices against the fingerprint of what WE last wrote: any mismatch
+        /// (cleared or vanilla-overwritten) is rewritten on the spot and tagged Updated so the
+        /// whole downstream pipeline (search tree, AreaBatchSystem upload) refreshes in the
+        /// same frame.
+        /// </summary>
+        private void ReclaimClobberedFills(ref TerrainHeightData heightData)
+        {
+            using var all = _allOurs.ToEntityArray(Allocator.Temp);
+            var toHeal = new NativeList<Entity>(Allocator.Temp);
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (_healFailed.Contains(all[i])) continue;
+                int current = Fingerprint(EntityManager.GetBuffer<Triangle>(all[i], isReadOnly: true));
+                if (!_ownedFingerprint.TryGetValue(all[i], out int owned) || current != owned)
+                    toHeal.Add(all[i]);
+            }
+
+            int healed = 0;
+            for (int i = 0; i < toHeal.Length; i++)
+            {
+                Entity e = toHeal[i];
                 try
                 {
-                    if (RewriteTriangles(entities[i], ref heightData)) done++;
-                    else failed++;
+                    if (RewriteTriangles(e, ref heightData))
+                    {
+                        healed++;
+                        _ownedFingerprint[e] = Fingerprint(EntityManager.GetBuffer<Triangle>(e, isReadOnly: true));
+                    }
+                    else { _healFailed.Add(e); toHeal[i] = Entity.Null; }
                 }
-                catch (System.Exception e)
+                catch (System.Exception ex)
                 {
-                    // Never break the tick loop: vanilla triangles (possibly empty) stay.
-                    failed++;
-                    log.Warn($"area-triangulation ent#{entities[i].Index}: {e.GetType().Name}: {e.Message} — keeping vanilla triangles");
+                    _healFailed.Add(e);
+                    toHeal[i] = Entity.Null;
+                    log.Warn($"area-triangulation ent#{e.Index}: {ex.GetType().Name}: {ex.Message} — reclaim failed");
                 }
             }
-            if (done > 0 || failed > 0)
-                log.Info($"MarkingAreaTriangulationSystem: rewrote {done} fill(s){(failed > 0 ? $", {failed} left vanilla" : "")}");
+
+            if (healed > 0)
+            {
+                // Structural change last: AddComponent invalidates cached buffers.
+                for (int i = 0; i < toHeal.Length; i++)
+                    if (toHeal[i] != Entity.Null)
+                        EntityManager.AddComponent<Updated>(toHeal[i]);
+                log.Info($"MarkingAreaTriangulationSystem: reclaimed {healed} fill(s) re-triangulated behind our back (vanilla post-load terrain pass)");
+            }
+            toHeal.Dispose();
+
+            // The dictionary is keyed by (index, version) so recycled entities never collide,
+            // but dead keys accumulate across respawn cycles — prune when clearly bloated.
+            if (_ownedFingerprint.Count > all.Length * 2 + 32)
+            {
+                var alive = new System.Collections.Generic.HashSet<Entity>();
+                for (int i = 0; i < all.Length; i++) alive.Add(all[i]);
+                var dead = new System.Collections.Generic.List<Entity>();
+                foreach (var kv in _ownedFingerprint)
+                    if (!alive.Contains(kv.Key)) dead.Add(kv.Key);
+                for (int i = 0; i < dead.Count; i++) _ownedFingerprint.Remove(dead[i]);
+                _healFailed.RemoveWhere(e => !alive.Contains(e));
+            }
         }
 
         /// <summary>Replace the entity's triangles with our own triangulation of the true node
