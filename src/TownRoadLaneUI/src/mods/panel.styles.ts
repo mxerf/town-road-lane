@@ -448,6 +448,33 @@ export const CurvUnit = styled.span`
   font-size: ${T.fontSizeSm};
 `;
 
+// −/+ stepper buttons flanking the input: click ±1, Shift ±10, Ctrl ±5.
+export const CurvStepBtn = styled.button`
+  width: 20rem;
+  height: 22rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0 3rem;
+  background: ${T.colorBtnBg};
+  color: ${T.colorTextMuted};
+  border: 1rem solid ${T.colorBorderSoft};
+  border-radius: ${T.radiusSm};
+  cursor: pointer;
+  pointer-events: auto;
+  padding: 0;
+  font-size: ${T.fontSizeSm};
+  line-height: 1;
+  transition: background ${T.transitionFast}, border-color ${T.transitionFast}, color ${T.transitionFast};
+
+  &:hover {
+    background: ${T.colorBtnBgHover};
+    border-color: ${T.colorBorderMid};
+    color: ${T.colorTextPrimary};
+  }
+`;
+
 // Reset-to-default affordance next to the slider; rendered only while the
 // value differs from the 50% default.
 export const CurvResetBtn = styled.button`

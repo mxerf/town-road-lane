@@ -105,6 +105,7 @@ const enUS = {
   "line.curvature":           "Curvature",
   "line.curvature.tooltip":   "Bend of the line: 0% = straight, 50% = default arc, 100% = maximum roundness",
   "line.curvature.reset":     "Reset to the default 50%",
+  "line.curvature.step":      "Step 1 · Shift: 10 · Ctrl: 5",
 
   // Segment row
   "segment.label":            "Segment {n}",
@@ -224,6 +225,7 @@ const ruRU: LocaleDict = {
   "line.curvature":           "Кривизна",
   "line.curvature.tooltip":   "Изгиб линии: 0% — прямая, 50% — стандартная дуга, 100% — максимальное скругление",
   "line.curvature.reset":     "Вернуть стандартные 50%",
+  "line.curvature.step":      "Шаг 1 · Shift: 10 · Ctrl: 5",
 
   // Segment row
   "segment.label":            "Сегмент {n}",

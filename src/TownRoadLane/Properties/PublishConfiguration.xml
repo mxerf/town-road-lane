@@ -71,7 +71,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.3.0" />
+	<ModVersion Value="2.3.1" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -86,6 +86,13 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
+# 2.3.1 — fills that survive loading
+
+- **Fixed: some area fills turned invisible after loading a save** (typically the sharp-cornered ones) until toggled hide/show. The game silently re-triangulates every area once the terrain heightmap finishes loading, and shapes its triangulator can't handle lost their fill. The mod now detects that pass and instantly restores its own triangulation.
+- **Fixed: fills could slightly overflow their contour after loading** (sawtooth spill past the marking line near sharp tips) — same cause, other half: the game's pass replaced the mod's exact triangulation with its approximate one.
+- **Curvature input got −/+ stepper buttons**: click = ±1, Shift+click = ±10, Ctrl+click = ±5.
+- Known limitations clarified: on stretched junction connections (highway ramps/merges) misplaced anchor dots are best fixed by normalizing the junction with the Node Controller mod (strongly recommended).
+
 # 2.3.0 — more anchor dots, more styles, calmer UI
 
 - **More anchor dots.** Roads with parking lanes get dots on the true carriageway edge (the outer edge of the parking lane, where the kerb line runs). And every approach now grows a second row of dots 8 m before the junction, following the road's curvature — draw the solid "no lane change" stretch in front of the stop line, or use the row as a workaround on stretched intersections where the cap dots sit awkwardly.

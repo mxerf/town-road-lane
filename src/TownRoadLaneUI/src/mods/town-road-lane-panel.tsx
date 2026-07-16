@@ -1,6 +1,6 @@
 // React's KeyboardEvent is aliased — the bare name must keep referring to the
 // DOM type (the document-level hotkey handler below is typed against it).
-import { ChangeEvent, Component, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, ReactNode, useEffect, useState } from "react";
+import { ChangeEvent, Component, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   useToolState,
@@ -73,6 +73,7 @@ import {
   CurvInput,
   CurvUnit,
   CurvResetBtn,
+  CurvStepBtn,
   PopoverRoot,
   PopoverBtn,
   PopoverMarker,
@@ -1018,10 +1019,24 @@ const CurvatureInput = ({ line }: { line: LineVM }) => {
     setDraft(null);
   };
 
+  // −/+ stepper: click ±1, Shift ±10, Ctrl ±5. An uncommitted draft is the
+  // base when it parses — stepping from what the user SEES beats silently
+  // stepping from the stale committed value.
+  const step = (dir: 1 | -1, e: ReactMouseEvent<HTMLButtonElement>) => {
+    const mag = e.shiftKey ? 10 : e.ctrlKey ? 5 : 1;
+    const parsed = draft !== null ? parseInt(draft, 10) : NaN;
+    const base = !isNaN(parsed) ? parsed : line.curv;
+    setDraft(null);
+    cmdSetLineCurvature(line.lineIndex, Math.max(0, Math.min(100, base + dir * mag)));
+  };
+
   return (
     <CurvRow>
       <Tooltip content={t("line.curvature.tooltip")}>
         <CurvLabel>{t("line.curvature")}</CurvLabel>
+      </Tooltip>
+      <Tooltip content={t("line.curvature.step")}>
+        <CurvStepBtn onClick={(e: ReactMouseEvent<HTMLButtonElement>) => step(-1, e)}>−</CurvStepBtn>
       </Tooltip>
       <CurvInput
         type="text"
@@ -1034,6 +1049,9 @@ const CurvatureInput = ({ line }: { line: LineVM }) => {
           if (e.key === "Enter") commit();
         }}
       />
+      <Tooltip content={t("line.curvature.step")}>
+        <CurvStepBtn onClick={(e: ReactMouseEvent<HTMLButtonElement>) => step(1, e)}>+</CurvStepBtn>
+      </Tooltip>
       <CurvUnit>%</CurvUnit>
       {line.curv !== CURV_DEFAULT && (
         <Tooltip content={t("line.curvature.reset")}>
