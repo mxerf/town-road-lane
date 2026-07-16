@@ -24,7 +24,7 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 ## Known limitations
 - **The mod is purely visual.** Markings never affect how vehicles actually drive. To change real lane behavior use the Traffic mod (by krzychu124) — set up lane connections and directions there first, then draw your markings to match. The two mods don't sync automatically.
 - Nearly-tangent line contacts (well under ~8°) are treated as a graze rather than a crossing — no anchor dot appears at such touch points (by design; prevents jittery duplicate anchors).
-- Non-standard intersections with strongly stretched connections (e.g. reshaped with Node Controller) can misplace the anchor dots at the junction cap. Workaround: the setback dot row 8 m before the junction follows the road geometry and stays usable there. A proper fix is planned.
+- Stretched junction connections (highway ramps/merges and other junctions where the road/junction boundary is not perpendicular to the road) can misplace the anchor dots relative to the painted lines. Fix: normalize the junction with the Node Controller mod so the connection cross-lines run perpendicular to the road — strongly recommended. The setback dot row 8 m before the junction also stays usable.
 - After moving or reshaping a road with Move It, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
 
 ## Requirements
@@ -49,7 +49,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 ## Известные ограничения
 - **Мод чисто визуальный.** Разметка не влияет на реальное движение машин. Управлять полосами нужно модом Traffic (от krzychu124): сначала настройте там направления и соединения полос, затем нарисуйте разметку под них. Автоматической синхронизации между модами нет.
 - Почти касательные контакты линий (заметно меньше ~8°) считаются скольжением, а не пересечением — точка-якорь в таком месте не появляется (намеренно: защита от дрожащих дублей-якорей).
-- На нестандартных перекрёстках с сильно вытянутыми соединениями (например, после Node Controller) точки-якоря у самого перекрёстка могут располагаться некорректно. Обход: второй ряд точек за 8 м до перекрёстка следует геометрии дороги и остаётся пригодным. Полноценное исправление запланировано.
+- Вытянутые соединения (съезды и слияния шоссе и другие узлы, где граница «дорога/перекрёсток» не перпендикулярна дороге) могут смещать точки-якоря относительно краски. Лечение: нормализуйте перекрёсток модом Node Controller, чтобы поперечные линии соединений стали перпендикулярны дороге, — настоятельно рекомендуется. Второй ряд точек за 8 м до перекрёстка тоже остаётся пригодным.
 - После перемещения или изменения дороги через Move It линии подстраиваются под новую геометрию, а заливки областей — не всегда: удалите их и нарисуйте заново.
 
 ## Зависимости
