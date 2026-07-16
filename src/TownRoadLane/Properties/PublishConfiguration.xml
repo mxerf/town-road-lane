@@ -69,7 +69,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Tag, can be set multiple times-->
 	<Tag Value="Code Mod" />
 	<!--Link to the forum post where the mod can be discussed-->
-	<ForumLink Value="" />
+	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/town-road-lane-road-markings-draw-your-own-lines-area-fills-on-any-intersection.1935028/" />
 	<!--Version of the mod-->
 	<ModVersion Value="2.3.1" />
 	<!--Recommended version of the base game to use the mod-->

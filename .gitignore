@@ -35,3 +35,7 @@ NOTES_local.md
 
 # Local dev tooling (machine-specific remote-build helpers)
 scripts/
+
+.env
+
+.playwright-mcp
