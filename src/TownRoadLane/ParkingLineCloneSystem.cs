@@ -31,8 +31,8 @@ namespace TownRoadLane
     /// K7 (G87 fallback chain), K8 (style=None strips hosting).
     ///
     /// <see cref="ApplyOrUpdate"/> is idempotent: it creates our prefabs on first call and refreshes their
-    /// mesh / SecondaryLane on later calls, so MarkingToggleSystem's reapply button can re-run it after a
-    /// style change. CustomSecondaryLaneSystem handles position / cuts / intersections by itself.
+    /// mesh / SecondaryLane on later calls. CustomSecondaryLaneSystem handles position / cuts /
+    /// intersections by itself.
     /// </summary>
     public partial class ParkingLineCloneSystem : GameSystemBase
     {
@@ -77,29 +77,32 @@ namespace TownRoadLane
             RequireForUpdate(m_LanePrefabQuery);
         }
 
+        // NOTE: no mid-session re-run entry point on purpose — see the note in
+        // EdgeLineCloneSystem.OnUpdate. Runs exactly once per save load.
+
         protected override void OnUpdate()
         {
             if (m_Done) return;
             m_Done = true;
             Enabled = false;
-            if (Mod.Settings != null && !Mod.Settings.ParkingMarkingsEnabled)
-            {
-                log.Info("ParkingLineCloneSystem: disabled in settings — skipping");
-                return;
-            }
+            // NOTE: runs even when ParkingMarkingsEnabled is false. The clones MUST exist in
+            // every session — saved games reference their spawned sublanes by prefab name
+            // ("Unknown prefab ID" spam + stale entities otherwise). The setting only controls
+            // hosting; ApplyOrUpdate applies that distinction itself.
             try { ApplyOrUpdate(); }
             catch (Exception e) { log.Error(e, "ParkingLineCloneSystem failed"); }
         }
 
         /// <summary>
         /// Creates the parking-marking prefabs (first call) or refreshes their mesh/SecondaryLane to match
-        /// the current settings (later calls). Safe to call from MarkingToggleSystem on reapply.
+        /// the current settings (later calls).
         /// </summary>
         public void ApplyOrUpdate()
         {
             string lineMeshName = Mod.Settings?.ParkingLineMeshName() ?? kFallbackLineMesh;
             string endMeshName  = Mod.Settings != null ? Mod.Settings.ParkingEndMeshName() : kFallbackEndMesh;
-            bool wantEnds = endMeshName != null;
+            bool parkingOn = Mod.Settings == null || Mod.Settings.ParkingMarkingsEnabled;
+            bool wantEnds = parkingOn && endMeshName != null;
 
             // Resolve every prefab we need by name in one pass over NetLanePrefab entities.
             var wantedLanes = new HashSet<string>(kCarriagewayLaneNames) { kParkingLaneName };
@@ -125,7 +128,8 @@ namespace TownRoadLane
             int touched = 0;
             foreach (var (srcName, cloneName, role) in kRecipes)
             {
-                if (role == Role.End && !wantEnds) continue; // strip stale hosting below
+                // Every clone is created unconditionally — saved games reference them by name.
+                // The feature toggle / style=None only decide whether hosting gets attached below.
 
                 // Get-or-clone our prefab.
                 if (!laneByName.TryGetValue(cloneName, out var cloneBase) || cloneBase == null)
@@ -140,8 +144,8 @@ namespace TownRoadLane
                 RenderPrefab mesh;
                 if (role == Role.Longitudinal)
                 {
-                    sec.m_LeftLanes = MakeInfos(carriageway);
-                    sec.m_RightLanes = MakeInfos(new[] { parkingLane });
+                    sec.m_LeftLanes = parkingOn ? MakeInfos(carriageway) : Array.Empty<SecondaryLaneInfo>();
+                    sec.m_RightLanes = parkingOn ? MakeInfos(new[] { parkingLane }) : Array.Empty<SecondaryLaneInfo>();
                     sec.m_CrossingLanes = Array.Empty<SecondaryLaneInfo2>();
                     sec.m_FitToParkingSpaces = false;
                     sec.m_CanFlipSides = true;
@@ -151,12 +155,12 @@ namespace TownRoadLane
                 {
                     sec.m_LeftLanes = Array.Empty<SecondaryLaneInfo>();
                     sec.m_RightLanes = Array.Empty<SecondaryLaneInfo>();
-                    sec.m_CrossingLanes = MakeCrossInfos(new[] { parkingLane });
+                    sec.m_CrossingLanes = wantEnds ? MakeCrossInfos(new[] { parkingLane }) : Array.Empty<SecondaryLaneInfo2>();
                     sec.m_FitToParkingSpaces = true;
                     sec.m_CanFlipSides = true;
                     sec.m_LengthOffset = new Unity.Mathematics.float2(-0.1f, 0f);
                     sec.m_PositionOffset = new Unity.Mathematics.float3(0.1f, 0f, 0f);
-                    mesh = endMesh;
+                    mesh = endMesh ?? lineMesh;
                 }
 
                 int swapped = SwapMesh(cloneBase, mesh);
@@ -165,24 +169,7 @@ namespace TownRoadLane
                 log.Info($"applied '{cloneName}' ({role}): mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
             }
 
-            // K8: if ends are NOT wanted but an End prefab was created earlier (e.g. earlier session
-            // picked a tick style and the user now switched to None), strip its hosting so it stops drawing.
-            if (!wantEnds)
-                foreach (var (_, cloneName, role) in kRecipes)
-                {
-                    if (role != Role.End) continue;
-                    if (laneByName.TryGetValue(cloneName, out var p) && p != null && p.TryGet<SecondaryLane>(out var sec2))
-                    {
-                        if (sec2.m_CrossingLanes != null && sec2.m_CrossingLanes.Length > 0)
-                        {
-                            sec2.m_CrossingLanes = Array.Empty<SecondaryLaneInfo2>();
-                            m_PrefabSystem.UpdatePrefab(p);
-                            log.Info($"cleared end-tick hosting on '{cloneName}' (style = None)");
-                        }
-                    }
-                }
-
-            log.Info($"ParkingLineCloneSystem: applied {touched} prefab(s) (line='{lineMeshName}', end='{endMeshName ?? "(none)"}')");
+            log.Info($"ParkingLineCloneSystem: applied {touched} prefab(s) (enabled={parkingOn}, line='{lineMeshName}', end='{endMeshName ?? "(none)"}')");
         }
 
         private static int SwapMesh(NetLanePrefab prefab, RenderPrefab mesh)

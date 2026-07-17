@@ -13,22 +13,26 @@ namespace TownRoadLane
     /// and resolved against the loaded mesh prefab set; "G87 …" options gracefully fall back
     /// to vanilla if the G87 Road Markings mod isn't installed (see K7 in IMPLEMENTATION_PLAN.md).
     ///
-    /// Reapply Markings button triggers MarkingToggleSystem, which re-runs both clone systems'
-    /// ApplyOrUpdate before mass-marking every road edge Updated so live roads pick up the change.
+    /// All changes take effect on the next save load (see the note above the keybind group on
+    /// why there is no runtime reapply).
     /// </summary>
     [FileLocation(nameof(TownRoadLane))]
-    [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup, kReapplyGroup, kKeybindGroup)]
-    [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup, kReapplyGroup, kKeybindGroup)]
+    [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup, kKeybindGroup)]
+    [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup, kKeybindGroup)]
     [SettingsUIKeyboardAction(ToggleMarkingTool, Usages.kDefaultUsage, Usages.kEditorUsage, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(CycleMarkingStyle, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(EnterAreaMode, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(CycleAreaStyle, Usages.kToolUsage)]
-    public class Setting : ModSetting
+    // The class name MUST be globally unique among installed mods: Setting.ApplyAndSave() saves via
+    // AssetDatabase.SaveSpecificSetting(GetType().Name), which matches settings by bare type name
+    // across ALL mods and takes the first hit. With the template name "Setting" and another
+    // template-derived mod installed, every checkbox change saved the OTHER mod's file and ours
+    // never persisted (forum report: parking toggle back on after every game restart).
+    public class TownRoadLaneSetting : ModSetting
     {
         public const string kSection = "Main";
         public const string kEdgeGroup = "EdgeLine";
         public const string kParkingGroup = "ParkingMarkings";
-        public const string kReapplyGroup = "Reapply";
         public const string kKeybindGroup = "Keybinds";
 
         // Action name used by MarkingToolHotkeySystem to resolve the ProxyAction. Must match the
@@ -49,7 +53,7 @@ namespace TownRoadLane
         // get tangled during AreaSelecting).
         public const string CycleAreaStyle = "CycleAreaStyle";
 
-        public Setting(IMod mod) : base(mod) { }
+        public TownRoadLaneSetting(IMod mod) : base(mod) { }
 
         // --- Edge line (curb-side line on city 3 m roads) ---
 
@@ -57,7 +61,7 @@ namespace TownRoadLane
         public bool EdgeLineEnabled { get; set; } = true;
 
         [SettingsUISection(kSection, kEdgeGroup)]
-        [SettingsUIDisableByCondition(typeof(Setting), nameof(IsEdgeDisabled))]
+        [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsEdgeDisabled))]
         public EdgeLineStyleEnum EdgeLineStyle { get; set; } = EdgeLineStyleEnum.WhiteSolid;
 
         // --- Parallel street-parking markings ---
@@ -66,25 +70,23 @@ namespace TownRoadLane
         public bool ParkingMarkingsEnabled { get; set; } = true;
 
         [SettingsUISection(kSection, kParkingGroup)]
-        [SettingsUIDisableByCondition(typeof(Setting), nameof(IsParkingDisabled))]
-        public ParkingLineStyleEnum ParkingLineStyle { get; set; } = ParkingLineStyleEnum.WhiteDashedDense;
+        [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsParkingDisabled))]
+        // Default is the G87 dashed decal (best-looking option; G87 ships as a hard dependency
+        // anyway). PickMesh in ParkingLineCloneSystem falls back to the vanilla dense dashed
+        // mesh when G87 isn't loaded, so the default is safe without it.
+        public ParkingLineStyleEnum ParkingLineStyle { get; set; } = ParkingLineStyleEnum.WhiteDashed_G87;
 
         [SettingsUISection(kSection, kParkingGroup)]
-        [SettingsUIDisableByCondition(typeof(Setting), nameof(IsParkingDisabled))]
+        [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsParkingDisabled))]
         public ParkingEndStyleEnum ParkingEndStyle { get; set; } = ParkingEndStyleEnum.WhiteSolid;
 
-        // --- Reapply (single button covers both features) ---
-
-        [SettingsUIButton]
-        [SettingsUISection(kSection, kReapplyGroup)]
-        public bool ReapplyMarkings
-        {
-            set
-            {
-                Mod.log.Info("Reapply markings requested from settings");
-                MarkingToggleSystem.RequestReapply();
-            }
-        }
+        // NOTE: there is deliberately NO runtime "reapply" button. Refreshing the clone prefabs
+        // (UpdatePrefab) while a world is live leaves existing sublanes with stale PrefabRefs;
+        // the next SecondaryLane rebuild (road edit, even a bulldozer hover creating Temp roads)
+        // then dies natively in a Burst job — three crashes on 2026-07-17 before the feature was
+        // cut. Settings changes apply after a game restart (observed: a save reload within the
+        // same game process is not enough — the clone prefabs persist per process), where
+        // ApplyOrUpdate runs in a world with no live references yet. Safe, exercised every boot.
 
         // --- Phase 4 tool: settings button (always works) + keybind (may conflict with other mods) ---
 
@@ -123,7 +125,7 @@ namespace TownRoadLane
             EdgeLineEnabled = true;
             EdgeLineStyle = EdgeLineStyleEnum.WhiteSolid;
             ParkingMarkingsEnabled = true;
-            ParkingLineStyle = ParkingLineStyleEnum.WhiteDashedDense;
+            ParkingLineStyle = ParkingLineStyleEnum.WhiteDashed_G87;
             ParkingEndStyle = ParkingEndStyleEnum.WhiteSolid;
         }
 
@@ -212,91 +214,86 @@ namespace TownRoadLane
 
     public class LocaleEN : IDictionarySource
     {
-        private readonly Setting m_Setting;
-        public LocaleEN(Setting setting) { m_Setting = setting; }
+        private readonly TownRoadLaneSetting m_Setting;
+        public LocaleEN(TownRoadLaneSetting setting) { m_Setting = setting; }
 
         public IEnumerable<KeyValuePair<string, string>> ReadEntries(IList<IDictionaryEntryError> errors, Dictionary<string, int> indexCounts)
         {
             return new Dictionary<string, string>
             {
                 { m_Setting.GetSettingsLocaleID(), "Town Road Lane" },
-                { m_Setting.GetOptionTabLocaleID(Setting.kSection), "Main" },
+                { m_Setting.GetOptionTabLocaleID(TownRoadLaneSetting.kSection), "Main" },
 
-                { m_Setting.GetOptionGroupLocaleID(Setting.kEdgeGroup), "Curb-side edge line" },
-                { m_Setting.GetOptionGroupLocaleID(Setting.kParkingGroup), "Parallel parking markings" },
-                { m_Setting.GetOptionGroupLocaleID(Setting.kReapplyGroup), "Apply to existing roads" },
-                { m_Setting.GetOptionGroupLocaleID(Setting.kKeybindGroup), "Keybinds" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kEdgeGroup), "Curb-side edge line" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kParkingGroup), "Parallel parking markings" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kKeybindGroup), "Keybinds" },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EdgeLineEnabled)), "Edge line on city roads" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EdgeLineEnabled)),
-                    "Adds the curb-side edge line to ordinary city roads (3 m car lanes), the way highway roads have it. Takes effect on the next road update — for live roads, use the Reapply button below." },
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EdgeLineEnabled)), "Edge line on city roads" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EdgeLineEnabled)),
+                    "Adds the curb-side edge line to ordinary city roads (3 m car lanes), the way highway roads have it. Changes take effect after the game is restarted." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EdgeLineStyle)), "Edge line style" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EdgeLineStyle)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)), "Edge line style" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)),
                     "The mesh style used for the curb-side edge line. \"G87\" options require the [G87] Road Markings mod; if it isn't installed they fall back to vanilla." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingMarkingsEnabled)), "Mark parallel parking zones" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingMarkingsEnabled)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)), "Mark parallel parking zones" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)),
                     "Draws a line along parallel street-parking zones with a cross tick at each end of the block. Roads without a Parking Lane 2 sublane (oneway 3-lane, asymmetric variants) remain unmarked — same coverage as v1.1." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingLineStyle)), "Parking line style" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingLineStyle)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingLineStyle)), "Parking line style" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingLineStyle)),
                     "The longitudinal line drawn along the parking zone. \"G87\" options require the [G87] Road Markings mod." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingEndStyle)), "Parking end-tick style" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingEndStyle)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)), "Parking end-tick style" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)),
                     "The short perpendicular tick at the start and end of a parking block. \"None\" disables the ticks. \"G87\" options require the [G87] Road Markings mod." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ReapplyMarkings)), "Reapply markings now" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ReapplyMarkings)),
-                    "Applies the chosen STYLES to markings already drawn in the city immediately (the visuals refresh over a second or two). Enabling or disabling a feature (lines appearing on / disappearing from existing roads) takes effect on the next save load." },
-
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ActivateMarkingTool)), "Activate marking tool" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ActivateMarkingTool)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ActivateMarkingTool)), "Activate marking tool" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ActivateMarkingTool)),
                     "Toggles the per-node marking customisation tool. Same as the keyboard shortcut below, but always works (button cannot be intercepted by other mods)." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ToggleMarkingToolBinding)), "Toggle marking tool (hotkey)" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleMarkingToolBinding)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ToggleMarkingToolBinding)), "Toggle marking tool (hotkey)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ToggleMarkingToolBinding)),
                     "Activates or deactivates the per-node marking customisation tool. Default Ctrl+M. If the hotkey doesn't work (other mod intercepts), use the button above instead." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.CycleMarkingStyleBinding)), "Cycle marking style (hotkey)" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.CycleMarkingStyleBinding)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.CycleMarkingStyleBinding)), "Cycle marking style (hotkey)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.CycleMarkingStyleBinding)),
                     "While the marking tool is active, cycles through Solid → Dashed → … The chosen style is used for the NEXT line you draw. Default Y. The colour of the endpoint dots reflects the current style." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EnterAreaModeBinding)), "Start area polygon (hotkey)" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EnterAreaModeBinding)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EnterAreaModeBinding)), "Start area polygon (hotkey)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EnterAreaModeBinding)),
                     "With a node selected, starts the polygon-area mode: click anchor dots to build a filled region. Press the same key again or Esc to cancel. Default A." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.CycleAreaStyleBinding)), "Cycle area style (hotkey)" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.CycleAreaStyleBinding)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.CycleAreaStyleBinding)), "Cycle area style (hotkey)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.CycleAreaStyleBinding)),
                     "While the marking tool is active, cycles the fill style for the NEXT area you close (Solid → Junction Box → White Stripes → Yellow Stripes → Green Bike → Red Bus → back). Default U. G87 styles fall back to Solid when G87 isn't installed." },
 
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid), "White solid" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolidThick), "White solid (thick)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteDashed), "White dashed" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.YellowSolid), "Yellow solid" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid_G87), "White solid (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteDashed_G87), "White dashed (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.YellowSolid_G87), "Yellow solid (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteSolid), "White solid" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteSolidThick), "White solid (thick)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteDashed), "White dashed" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.YellowSolid), "Yellow solid" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteSolid_G87), "White solid (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteDashed_G87), "White dashed (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.YellowSolid_G87), "Yellow solid (G87)" },
 
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashedDense), "White dashed (dense)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashed), "White dashed" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteSolid), "White solid" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowDashed), "Yellow dashed" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowSolid), "Yellow solid" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteSolid_G87), "White solid (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashed_G87), "White dashed (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowSolid_G87), "Yellow solid (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowDashed_G87), "Yellow dashed (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.BlueSolid_G87), "Blue solid (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.BlueDashed_G87), "Blue dashed (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteDashedDense), "White dashed (dense)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteDashed), "White dashed" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteSolid), "White solid" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.YellowDashed), "Yellow dashed" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.YellowSolid), "Yellow solid" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteSolid_G87), "White solid (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteDashed_G87), "White dashed (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.YellowSolid_G87), "Yellow solid (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.YellowDashed_G87), "Yellow dashed (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.BlueSolid_G87), "Blue solid (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.BlueDashed_G87), "Blue dashed (G87)" },
 
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.None), "None" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.WhiteSolid), "White solid" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.WhiteSolidThick), "White solid (thick)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.WhiteTerminal_G87), "White terminal line (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.YellowTerminal_G87), "Yellow terminal line (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.BlueSolid_G87), "Blue solid (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.None), "None" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.WhiteSolid), "White solid" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.WhiteSolidThick), "White solid (thick)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.WhiteTerminal_G87), "White terminal line (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.YellowTerminal_G87), "Yellow terminal line (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.BlueSolid_G87), "Blue solid (G87)" },
             };
         }
 
@@ -305,91 +302,86 @@ namespace TownRoadLane
 
     public class LocaleRU : IDictionarySource
     {
-        private readonly Setting m_Setting;
-        public LocaleRU(Setting setting) { m_Setting = setting; }
+        private readonly TownRoadLaneSetting m_Setting;
+        public LocaleRU(TownRoadLaneSetting setting) { m_Setting = setting; }
 
         public IEnumerable<KeyValuePair<string, string>> ReadEntries(IList<IDictionaryEntryError> errors, Dictionary<string, int> indexCounts)
         {
             return new Dictionary<string, string>
             {
                 { m_Setting.GetSettingsLocaleID(), "Town Road Lane" },
-                { m_Setting.GetOptionTabLocaleID(Setting.kSection), "Основное" },
+                { m_Setting.GetOptionTabLocaleID(TownRoadLaneSetting.kSection), "Основное" },
 
-                { m_Setting.GetOptionGroupLocaleID(Setting.kEdgeGroup), "Краевая линия у бордюра" },
-                { m_Setting.GetOptionGroupLocaleID(Setting.kParkingGroup), "Разметка параллельной парковки" },
-                { m_Setting.GetOptionGroupLocaleID(Setting.kReapplyGroup), "Применение к существующим дорогам" },
-                { m_Setting.GetOptionGroupLocaleID(Setting.kKeybindGroup), "Горячие клавиши" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kEdgeGroup), "Краевая линия у бордюра" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kParkingGroup), "Разметка параллельной парковки" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kKeybindGroup), "Горячие клавиши" },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EdgeLineEnabled)), "Краевая линия на городских дорогах" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EdgeLineEnabled)),
-                    "Добавляет краевую линию у бордюра обычным городским дорогам (полосы 3 м) — так же, как на шоссе. Применяется при следующем обновлении дороги; для уже построенных дорог используйте кнопку «Переприменить» ниже." },
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EdgeLineEnabled)), "Краевая линия на городских дорогах" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EdgeLineEnabled)),
+                    "Добавляет краевую линию у бордюра обычным городским дорогам (полосы 3 м) — так же, как на шоссе. Изменения вступают в силу после перезапуска игры." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EdgeLineStyle)), "Стиль краевой линии" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EdgeLineStyle)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)), "Стиль краевой линии" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)),
                     "Стиль меша краевой линии. Варианты «G87» требуют мод [G87] Road Markings; без него используется ванильный стиль." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingMarkingsEnabled)), "Размечать зоны параллельной парковки" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingMarkingsEnabled)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)), "Размечать зоны параллельной парковки" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)),
                     "Рисует линию вдоль зон параллельной уличной парковки с поперечной чертой на концах квартала. Дороги без сублейна Parking Lane 2 (односторонние трёхполосные, асимметричные варианты) остаются без разметки — то же покрытие, что и в v1.1." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingLineStyle)), "Стиль линии парковки" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingLineStyle)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingLineStyle)), "Стиль линии парковки" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingLineStyle)),
                     "Продольная линия вдоль парковочной зоны. Варианты «G87» требуют мод [G87] Road Markings." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ParkingEndStyle)), "Стиль концевой черты парковки" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ParkingEndStyle)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)), "Стиль концевой черты парковки" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)),
                     "Короткая поперечная черта в начале и конце парковочного квартала. «Нет» отключает черты. Варианты «G87» требуют мод [G87] Road Markings." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ReapplyMarkings)), "Переприменить разметку сейчас" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ReapplyMarkings)),
-                    "Мгновенно применяет выбранные СТИЛИ к уже нарисованной в городе разметке (визуал обновляется за секунду-две). Включение/выключение фич (появление или исчезновение линий на существующих дорогах) вступает в силу при следующей загрузке сейва." },
-
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ActivateMarkingTool)), "Активировать инструмент разметки" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ActivateMarkingTool)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ActivateMarkingTool)), "Активировать инструмент разметки" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ActivateMarkingTool)),
                     "Включает/выключает инструмент настройки разметки перекрёстков. То же, что горячая клавиша ниже, но работает всегда (кнопку не может перехватить другой мод)." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ToggleMarkingToolBinding)), "Инструмент разметки (клавиша)" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleMarkingToolBinding)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ToggleMarkingToolBinding)), "Инструмент разметки (клавиша)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ToggleMarkingToolBinding)),
                     "Включает или выключает инструмент настройки разметки перекрёстков. По умолчанию Ctrl+M. Если клавиша не срабатывает (перехвачена другим модом), используйте кнопку выше." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.CycleMarkingStyleBinding)), "Стиль линии по кругу (клавиша)" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.CycleMarkingStyleBinding)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.CycleMarkingStyleBinding)), "Стиль линии по кругу (клавиша)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.CycleMarkingStyleBinding)),
                     "При активном инструменте листает стили: сплошная → пунктир → … Выбранный стиль применяется к СЛЕДУЮЩЕЙ линии. По умолчанию Y. Цвет точек-якорей отражает текущий стиль." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.EnterAreaModeBinding)), "Режим области (клавиша)" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.EnterAreaModeBinding)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EnterAreaModeBinding)), "Режим области (клавиша)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EnterAreaModeBinding)),
                     "При выбранном узле запускает режим полигональной области: кликайте по опорным точкам, чтобы построить заливку. Повторное нажатие или Esc — отмена. По умолчанию A." },
 
-                { m_Setting.GetOptionLabelLocaleID(nameof(Setting.CycleAreaStyleBinding)), "Стиль области по кругу (клавиша)" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.CycleAreaStyleBinding)),
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.CycleAreaStyleBinding)), "Стиль области по кругу (клавиша)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.CycleAreaStyleBinding)),
                     "При активном инструменте листает стиль заливки для СЛЕДУЮЩЕЙ замкнутой области (бетон → вафельная разметка → белая штриховка → жёлтая штриховка → велополоса → автобусная полоса → сначала). По умолчанию U. Стили G87 без установленного мода G87 заменяются бетоном." },
 
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid), "Белая сплошная" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolidThick), "Белая сплошная (толстая)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteDashed), "Белый пунктир" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.YellowSolid), "Жёлтая сплошная" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteSolid_G87), "Белая сплошная (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.WhiteDashed_G87), "Белый пунктир (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.EdgeLineStyleEnum.YellowSolid_G87), "Жёлтая сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteSolid), "Белая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteSolidThick), "Белая сплошная (толстая)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteDashed), "Белый пунктир" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.YellowSolid), "Жёлтая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteSolid_G87), "Белая сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.WhiteDashed_G87), "Белый пунктир (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.EdgeLineStyleEnum.YellowSolid_G87), "Жёлтая сплошная (G87)" },
 
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashedDense), "Белый пунктир (частый)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashed), "Белый пунктир" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteSolid), "Белая сплошная" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowDashed), "Жёлтый пунктир" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowSolid), "Жёлтая сплошная" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteSolid_G87), "Белая сплошная (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.WhiteDashed_G87), "Белый пунктир (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowSolid_G87), "Жёлтая сплошная (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.YellowDashed_G87), "Жёлтый пунктир (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.BlueSolid_G87), "Синяя сплошная (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingLineStyleEnum.BlueDashed_G87), "Синий пунктир (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteDashedDense), "Белый пунктир (частый)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteDashed), "Белый пунктир" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteSolid), "Белая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.YellowDashed), "Жёлтый пунктир" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.YellowSolid), "Жёлтая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteSolid_G87), "Белая сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.WhiteDashed_G87), "Белый пунктир (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.YellowSolid_G87), "Жёлтая сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.YellowDashed_G87), "Жёлтый пунктир (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.BlueSolid_G87), "Синяя сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingLineStyleEnum.BlueDashed_G87), "Синий пунктир (G87)" },
 
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.None), "Нет" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.WhiteSolid), "Белая сплошная" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.WhiteSolidThick), "Белая сплошная (толстая)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.WhiteTerminal_G87), "Белая концевая линия (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.YellowTerminal_G87), "Жёлтая концевая линия (G87)" },
-                { m_Setting.GetEnumValueLocaleID(Setting.ParkingEndStyleEnum.BlueSolid_G87), "Синяя сплошная (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.None), "Нет" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.WhiteSolid), "Белая сплошная" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.WhiteSolidThick), "Белая сплошная (толстая)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.WhiteTerminal_G87), "Белая концевая линия (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.YellowTerminal_G87), "Жёлтая концевая линия (G87)" },
+                { m_Setting.GetEnumValueLocaleID(TownRoadLaneSetting.ParkingEndStyleEnum.BlueSolid_G87), "Синяя сплошная (G87)" },
             };
         }
 

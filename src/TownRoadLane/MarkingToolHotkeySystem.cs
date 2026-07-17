@@ -44,15 +44,15 @@ namespace TownRoadLane
             // session and reflects rebinds the user makes through the mod's settings UI.
             if (Mod.Settings != null)
             {
-                _toggleAction = Mod.Settings.GetAction(Setting.ToggleMarkingTool);
+                _toggleAction = Mod.Settings.GetAction(TownRoadLaneSetting.ToggleMarkingTool);
                 if (_toggleAction != null)
                 {
                     _toggleAction.shouldBeEnabled = true;
-                    log.Info($"MarkingToolHotkeySystem: OnCreate — action '{Setting.ToggleMarkingTool}' resolved, enabled");
+                    log.Info($"MarkingToolHotkeySystem: OnCreate — action '{TownRoadLaneSetting.ToggleMarkingTool}' resolved, enabled");
                 }
                 else
                 {
-                    log.Warn($"MarkingToolHotkeySystem: OnCreate — GetAction('{Setting.ToggleMarkingTool}') returned null");
+                    log.Warn($"MarkingToolHotkeySystem: OnCreate — GetAction('{TownRoadLaneSetting.ToggleMarkingTool}') returned null");
                 }
             }
             else

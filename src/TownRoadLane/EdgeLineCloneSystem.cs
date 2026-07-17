@@ -178,23 +178,30 @@ namespace TownRoadLane
             RequireForUpdate(m_LanePrefabQuery);
         }
 
+        // NOTE: no mid-session re-run entry point on purpose. UpdatePrefab in a LIVE world —
+        // regardless of phase — leaves existing sublanes with stale PrefabRefs, and the next
+        // SecondaryLane rebuild (any road edit, even bulldozer hover) crashes natively in a
+        // Burst job. The system runs exactly once per save load, before the world spawns lanes.
+
         protected override void OnUpdate()
         {
             if (m_Done) return;
             m_Done = true;
             Enabled = false;
-            if (Mod.Settings != null && !Mod.Settings.EdgeLineEnabled)
-            {
-                log.Info("EdgeLineCloneSystem: disabled in settings — skipping");
-                return;
-            }
+            // NOTE: runs even when EdgeLineEnabled is false. The clones MUST exist in every
+            // session — saved games reference them by name (manual segment sublanes spawn from
+            // these prefabs as style archetypes), and MarkingSegmentEmissionSystem resolves the
+            // Solid clone every tick. The setting only controls AUTO hosting on city lanes;
+            // ApplyOrUpdate applies that distinction itself. Skipping creation here left saves
+            // with "Unknown prefab ID", a headless manual editor, and ultimately a native crash
+            // in the emission ECB (2026-07-17).
             try { ApplyOrUpdate(); }
             catch (Exception e) { log.Error(e, "EdgeLineCloneSystem failed"); }
         }
 
         /// <summary>
         /// Creates (or refreshes) every style clone defined in <see cref="kStyleRecipes"/>.
-        /// Idempotent — safe to call from MarkingToggleSystem on reapply.
+        /// Idempotent.
         /// When EdgeLineEnabled is false (set externally then reapply triggered), call
         /// <see cref="StripHostingIfDisabled"/> instead to clear hosting without recreating prefabs.
         /// </summary>
@@ -204,6 +211,7 @@ namespace TownRoadLane
             // always uses its fallback. When per-style mesh dropdowns are added in a future stage,
             // this picks per-recipe.
             string solidMeshName = Mod.Settings?.EdgeLineMeshName() ?? "White Solid Line Mesh";
+            bool autoEdgeOn = Mod.Settings == null || Mod.Settings.EdgeLineEnabled;
 
             // Resolve every prefab we need by name in one pass over NetLanePrefab entities.
             var wantedLanes = new HashSet<string>(kCityLaneNames);
@@ -249,10 +257,12 @@ namespace TownRoadLane
                 sec.m_CanFlipSides = false;
 
                 int hostCount = 0;
-                if (recipe.hostOnCityLanes)
+                if (recipe.hostOnCityLanes && autoEdgeOn)
                 {
                     // Edge-line recipe (v1.1 behaviour): host on Car Drive Lane 3 + variants, both
                     // RequireSafe entry and RequireMerge+RequireSafeMaster entry per lane.
+                    // With EdgeLineEnabled off the clone still exists (manual lines + saved games
+                    // depend on it) but hosts nothing, so the auto edge line stops drawing.
                     sec.m_LeftLanes = MakeCityLaneInfos(cityLanes);
                     sec.m_CanFlipSides = true;
                     hostCount = cityLanes.Count * 2;
@@ -269,36 +279,6 @@ namespace TownRoadLane
             }
 
             log.Info($"EdgeLineCloneSystem: applied {touched} prefab(s)");
-        }
-
-        /// <summary>
-        /// K8 OFF→ON→OFF path: if the user disabled the feature after an earlier session created our
-        /// clones, this strips their hosting so they stop drawing without removing the prefab entities.
-        /// Called by MarkingToggleSystem when EdgeLineEnabled is false at reapply time.
-        /// </summary>
-        public void StripHostingIfDisabled()
-        {
-            if (Mod.Settings != null && Mod.Settings.EdgeLineEnabled) return; // still on, nothing to do
-
-            var wantedLanes = new HashSet<string>();
-            foreach (var r in kStyleRecipes) wantedLanes.Add(r.cloneName);
-            var laneEnts = m_LanePrefabQuery.ToEntityArray(Allocator.Temp);
-            int stripped = 0;
-            for (int i = 0; i < laneEnts.Length; i++)
-            {
-                if (!m_PrefabSystem.TryGetPrefab<NetLanePrefab>(laneEnts[i], out var lane) || lane == null) continue;
-                if (!wantedLanes.Contains(lane.name)) continue;
-                if (!lane.TryGet<SecondaryLane>(out var sec)) continue;
-                if (sec.m_LeftLanes != null && sec.m_LeftLanes.Length > 0)
-                {
-                    sec.m_LeftLanes = Array.Empty<SecondaryLaneInfo>();
-                    m_PrefabSystem.UpdatePrefab(lane);
-                    stripped++;
-                    log.Info($"cleared edge-line hosting on '{lane.name}' (feature disabled)");
-                }
-            }
-            laneEnts.Dispose();
-            log.Info($"EdgeLineCloneSystem: stripped {stripped} clone(s)");
         }
 
         private static int SwapMesh(NetLanePrefab prefab, RenderPrefab mesh)

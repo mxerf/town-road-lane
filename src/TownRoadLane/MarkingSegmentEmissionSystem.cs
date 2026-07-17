@@ -40,6 +40,7 @@ namespace TownRoadLane
         private EntityQuery _nodesWithLines;
         private EntityQuery _ourSubLanes;
         private EntityQuery _legacyPairSubLanes;
+        private readonly System.Text.StringBuilder _churnDetail = new System.Text.StringBuilder();
         private PrefabSystem _prefabSystem;
         private EdgeLineCloneSystem _edgeLineSys;
         private CityConfigurationSystem _cityConfig;
@@ -204,7 +205,14 @@ namespace TownRoadLane
                                 wanted.Remove(key);
                                 var spawned = SpawnSegmentSublane(ecb, node, seg.lineIndex, segIdx, p,
                                     fullBeziers[seg.lineIndex], seg.tStart, seg.tEnd, pair.prefab, pair.arch);
-                                if (spawned != Entity.Null) created++;
+                                if (spawned != Entity.Null)
+                                {
+                                    created++;
+                                    // Churn diagnostics: a small steady trickle of re-creations
+                                    // means something keeps deleting these exact sublanes.
+                                    if (created <= 12)
+                                        _churnDetail.Append(created > 1 ? ", " : "").Append($"node#{node.Index} L{seg.lineIndex} S{segIdx} P{p} {style}");
+                                }
                             }
                         }
                     }
@@ -213,7 +221,12 @@ namespace TownRoadLane
             }
 
             if (created > 0 || deleted > 0)
+            {
                 log.Info($"segment-emission: +{created} created, -{deleted} deleted (wanted={wanted.Count} unmet, existing={_ourSubLanes.CalculateEntityCount()})");
+                if (_churnDetail.Length > 0 && created <= 12)
+                    log.Info($"segment-emission detail: {_churnDetail}");
+            }
+            _churnDetail.Clear();
 
             ecb.Playback(EntityManager);
             ecb.Dispose();

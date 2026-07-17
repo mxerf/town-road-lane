@@ -18,7 +18,7 @@ namespace TownRoadLane
     {
         public static ILog log = LogManager.GetLogger($"{nameof(TownRoadLane)}.{nameof(Mod)}").SetShowsErrorsInUI(false);
 
-        public static Setting Settings { get; private set; }
+        public static TownRoadLaneSetting Settings { get; private set; }
         // Singleton handle to the live mod instance — needed by TownRoadLaneUISystem so it can
         // resolve its own ExecutableAsset path to read the React bundle. ModManager indexes
         // assets by mod instance; using a fresh new Mod() would lose that mapping.
@@ -32,7 +32,7 @@ namespace TownRoadLane
             if (GameManager.instance.modManager.TryGetExecutableAsset(this, out var asset))
                 log.Info($"Current mod asset at {asset.path}");
 
-            Settings = new Setting(this);
+            Settings = new TownRoadLaneSetting(this);
             // RegisterKeyBindings must run BEFORE GetAction() resolves anything. Without this call
             // the ProxyAction for ToggleMarkingTool never fires (silent — no warn). Traffic's
             // Mod.cs:56-57 does the same: RegisterKeyBindings before RegisterInOptionsUI.
@@ -40,7 +40,7 @@ namespace TownRoadLane
             Settings.RegisterInOptionsUI();
             GameManager.instance.localizationManager.AddSource("en-US", new LocaleEN(Settings));
             GameManager.instance.localizationManager.AddSource("ru-RU", new LocaleRU(Settings));
-            AssetDatabase.global.LoadSettings(nameof(TownRoadLane), Settings, new Setting(this));
+            AssetDatabase.global.LoadSettings(nameof(TownRoadLane), Settings, new TownRoadLaneSetting(this));
 
             // Read-only structural dump, useful when something changes between game patches.
             updateSystem.UpdateAt<RoadPrefabDumpSystem>(SystemUpdatePhase.PrefabUpdate);
@@ -72,10 +72,11 @@ namespace TownRoadLane
             updateSystem.UpdateAt<CustomSecondaryLaneSystem>(SystemUpdatePhase.Modification4B);
             log.Info($"CustomSecondaryLaneSystem registered at Modification4B");
 
-            // "Reapply markings" button handler. Idle until the user clicks; re-runs both clone systems'
-            // ApplyOrUpdate then mass-marks edges/nodes Updated. Modification1 is fine here (no
-            // SafeCommandBufferSystem dance needed — we touch EntityManager directly).
-            updateSystem.UpdateAt<MarkingToggleSystem>(SystemUpdatePhase.Modification1);
+            // No runtime "reapply" system: refreshing clone prefabs (UpdatePrefab) in a live
+            // world leaves existing sublanes with stale PrefabRefs and the next SecondaryLane
+            // rebuild crashes natively in a Burst job (three crashes on 2026-07-17, see
+            // Setting.cs). Settings apply on the next save load via the clone systems'
+            // regular PrefabUpdate pass.
 
             // Phase 4 tool: per-node marking customisation. ToolBaseSystem self-registers with
             // ToolSystem.tools in its OnCreate; we just need to instantiate it. Update phase per
