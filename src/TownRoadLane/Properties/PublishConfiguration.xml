@@ -101,32 +101,6 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 - **Fixed: fills could slightly overflow their contour after loading** (sawtooth spill past the marking line near sharp tips) — same cause, other half: the game's pass replaced the mod's exact triangulation with its approximate one.
 - **Curvature input got −/+ stepper buttons**: click = ±1, Shift+click = ±10, Ctrl+click = ±5.
 - Known limitations clarified: on stretched junction connections (highway ramps/merges) misplaced anchor dots are best fixed by normalizing the junction with the Node Controller mod (strongly recommended).
-
-# 2.3.0 — more anchor dots, more styles, calmer UI
-
-- **More anchor dots.** Roads with parking lanes get dots on the true carriageway edge (the outer edge of the parking lane, where the kerb line runs). And every approach now grows a second row of dots 8 m before the junction, following the road's curvature — draw the solid "no lane change" stretch in front of the stop line, or use the row as a workaround on stretched intersections where the cap dots sit awkwardly.
-- **4 new line styles:** short dashed, long dashed (highway spacing), G87 yellow solid, G87 yellow dashed.
-- **New area fill: Asphalt patch.** Needs the separate "G87 Vanilla Asphalt Pavement" mod (not installed automatically); without it the fill falls back to concrete. Covers markings and sidewalks nicely.
-- **Calmer overlay.** The big red crosses at line crossings are now small red dots. Anchor dots stopped pulsing: a free dot is a hollow ring, a dot that already anchors a line is filled with a white core; area-mode candidates use the same ring language.
-- A line drawn between two dots of the same lane (setback row → junction) now follows the lane instead of bulging into the intersection.
-- **Panel: the Lines and Areas sections fold.** A folded section shows only the row you're working with (expanded, or hovered on the map) — big junctions no longer turn the panel into an endless scroll.
-
-# 2.2.0 — reliable fills, exact contours
-
-- **Fixed: after loading a save, deleting or hiding an area left the fill in the world.** The link between the mod and its spawned fill wasn't persisted, so every save/load cycle silently stacked one more unmanaged copy. Links are now saved with the fill; stray copies accumulated by older saves are detected and cleaned up automatically on load.
-- **Fixed: areas could deform after loading a save.** Area anchor points were remembered by list position, and the game reshuffles those lists on every load — editing any marking at such an intersection then snapped the area to wrong points. Anchors now use stable identities that survive save/load; existing areas are migrated automatically and conservatively (an area that can't be safely migrated simply keeps its saved shape until redrawn).
-- **The mod now triangulates its own area fills**, bypassing the game's fragile built-in pass. Fills no longer silently vanish on very sharp or very narrow shapes (knife-tip islands, thin medians).
-- **Fills follow the exact drawn contour.** Sharp island corners are no longer slightly fattened to survive the game's renderer — the drawing preview and the final fill now match point for point.
-
-# 2.1.0 — curved area fills
-
-Area fills were rebuilt around the sharp curved "islands" between marking lines:
-- Area points can now snap to **line crossings**, and area edges **follow the curvature** of the marking line they run along — no more chord-cut polygons.
-- Fills no longer silently vanish on areas with very sharp corners (knife-tip islands, medians, gores).
-- Areas are no longer auto-split by lines drawn across them: an area is final once drawn, a line over it is purely cosmetic. On load, previously split areas merge back into a single fill (re-check their visibility toggles).
-- Fixed: deleting a line reset the visibility/style of every segment at the intersection.
-- Fixed: deleting an area could remove the wrong fill and leave a stale one behind.
-- UI: style previews in the line/area dropdowns and row headers, reworked on-map popovers (scale with zoom, expand on hover), and two-way hover — point at an area in the panel to highlight it on the map and vice versa.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />
