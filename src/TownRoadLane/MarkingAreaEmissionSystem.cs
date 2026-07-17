@@ -437,9 +437,24 @@ namespace TownRoadLane
             var nodeBuf = ecb.AddBuffer<GameAreas.Node>(e);
             for (int i = 0; i < positions.Count; i++)
             {
-                var node = new GameAreas.Node(positions[i], float.MinValue);
-                node = GameAreas.AreaUtils.AdjustPosition(node, ref terrainHeights);
-                nodeBuf.Add(node);
+                // Anchor positions carry the true road-surface height. On ground-level junctions
+                // we keep the vanilla terrain-follow convention (elevation = float.MinValue +
+                // snap to terrain) so terraforming under the fill keeps working. On elevated
+                // decks (bridges, ramps) that snap would drop the fill to the ground below the
+                // structure — keep the deck Y and store the height offset in m_Elevation:
+                // GroundHeightSystem only re-snaps nodes whose elevation == float.MinValue.
+                float ground = Game.Simulation.TerrainUtils.SampleHeight(ref terrainHeights, positions[i]);
+                float dy = positions[i].y - ground;
+                if (dy > 0.75f)
+                {
+                    nodeBuf.Add(new GameAreas.Node(positions[i], dy));
+                }
+                else
+                {
+                    var node = new GameAreas.Node(positions[i], float.MinValue);
+                    node = GameAreas.AreaUtils.AdjustPosition(node, ref terrainHeights);
+                    nodeBuf.Add(node);
+                }
             }
         }
     }

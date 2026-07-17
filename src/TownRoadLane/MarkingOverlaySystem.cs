@@ -4,6 +4,7 @@ using Colossal.Mathematics;
 using Game;
 using Game.Net;
 using Game.Rendering;
+using Game.Simulation;
 using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
@@ -33,6 +34,9 @@ namespace TownRoadLane
         private OverlayRenderSystem _overlayRenderSystem;
         private TownRoadLaneUISystem _uiSystem;
         private EntityQuery _nodesWithPairsQuery;
+        private TerrainSystem _terrainSystem;
+        // Refreshed once per OnUpdate; used by DotStyle to decide projected-vs-absolute per dot.
+        private TerrainHeightData _heightData;
 
         // ============================================================================
         // Overlay design — Phase A polish pass.
@@ -186,6 +190,7 @@ namespace TownRoadLane
             _tool = World.GetOrCreateSystemManaged<MarkingNodeToolSystem>();
             _overlayRenderSystem = World.GetOrCreateSystemManaged<OverlayRenderSystem>();
             _uiSystem = World.GetOrCreateSystemManaged<TownRoadLaneUISystem>();
+            _terrainSystem = World.GetOrCreateSystemManaged<TerrainSystem>();
             // Every node that has at least one user-configured MarkingLine — used to render
             // a faint "this node has custom markings" ring while the tool is active. Buffer is
             // empty on most nodes so query stays cheap.
@@ -194,10 +199,23 @@ namespace TownRoadLane
                 ComponentType.ReadOnly<MarkingLine>());
         }
 
+        /// <summary>Style for a dot/ring at the given position. Ground-level roads keep
+        /// <see cref="OverlayRenderSystem.StyleFlags.Projected"/> so the marker hugs terrain on
+        /// slopes; on elevated decks (bridges, ramps) projection would drop the marker to the
+        /// ground below the structure — those draw absolute, at the true 3D position.</summary>
+        private OverlayRenderSystem.StyleFlags DotStyle(float3 pos)
+        {
+            float ground = TerrainUtils.SampleHeight(ref _heightData, pos);
+            return pos.y - ground > 0.75f
+                ? (OverlayRenderSystem.StyleFlags)0
+                : OverlayRenderSystem.StyleFlags.Projected;
+        }
+
         protected override void OnUpdate()
         {
             if (_tool == null || _toolSystem.activeTool != _tool) return;
 
+            _heightData = _terrainSystem.GetHeightData();
             var buf = _overlayRenderSystem.GetBuffer(out JobHandle deps);
             JobHandle our = JobHandle.CombineDependencies(deps, Dependency);
 
@@ -383,7 +401,7 @@ namespace TownRoadLane
                         outlineColor: new Color(1f, 1f, 1f, 0.55f),
                         fillColor: kColTransparent,
                         outlineWidth: 0.10f,
-                        styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                        styleFlags: DotStyle(ep.position),
                         direction: new float2(0f, 1f),
                         position: ep.position,
                         diameter: kDotDiameter * 2.2f);
@@ -412,7 +430,7 @@ namespace TownRoadLane
                     outlineColor: outline,
                     fillColor: fill,
                     outlineWidth: outlineWidth,
-                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    styleFlags: DotStyle(ep.position),
                     direction: new float2(0f, 1f),
                     position: ep.position,
                     diameter: diameter);
@@ -423,7 +441,7 @@ namespace TownRoadLane
                         outlineColor: kColTransparent,
                         fillColor: kColDotConnectedCore,
                         outlineWidth: 0f,
-                        styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                        styleFlags: DotStyle(ep.position),
                         direction: new float2(0f, 1f),
                         position: ep.position,
                         diameter: kDotConnectedCoreDiameter);
@@ -443,7 +461,7 @@ namespace TownRoadLane
                         outlineColor: kColCornerOutline,
                         fillColor: kColCornerFill,
                         outlineWidth: kCornerDotOutlineWidth,
-                        styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                        styleFlags: DotStyle(corners[i].position),
                         direction: new float2(0f, 1f),
                         position: corners[i].position,
                         diameter: kCornerDotDiameter);
@@ -460,7 +478,7 @@ namespace TownRoadLane
         /// shape — all the actual math lives in the shared builder.
         /// </summary>
         private static Bezier4x3 BuildSmoothCurve(float3 a, float2 ta, float3 b, float2 tb)
-            => MarkingCurveBuilder.Build(a, ta, b, tb);
+            => MarkingCurveBuilder.Build(a, ta, b, tb, MarkingCurveBuilder.AdaptivePullFactor(a, ta, b, tb));
 
         /// <summary>
         /// Phase 6b: overlay while the user is collecting vertices for an area polygon.
@@ -529,7 +547,7 @@ namespace TownRoadLane
                     outlineColor: kColAreaCandRing,
                     fillColor: kColAreaCandFill,
                     outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    styleFlags: DotStyle(endpoints[i].position),
                     direction: new float2(0f, 1f),
                     position: endpoints[i].position,
                     diameter: kAreaCandDotDiameter);
@@ -540,7 +558,7 @@ namespace TownRoadLane
                     outlineColor: kColAreaCandRing,
                     fillColor: kColAreaCandFill,
                     outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    styleFlags: DotStyle(corners[i].position),
                     direction: new float2(0f, 1f),
                     position: corners[i].position,
                     diameter: kAreaCandDotDiameter);
@@ -553,7 +571,7 @@ namespace TownRoadLane
                     outlineColor: kColAreaCandRing,
                     fillColor: kColAreaCandFill,
                     outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    styleFlags: DotStyle(crossings[i].position),
                     direction: new float2(0f, 1f),
                     position: crossings[i].position,
                     diameter: kAreaCandDotDiameter);
@@ -607,7 +625,7 @@ namespace TownRoadLane
                     outlineColor: kColAreaCandOutline,
                     fillColor: kColAreaPlacedFill,
                     outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    styleFlags: DotStyle(polygon[i].position),
                     direction: new float2(0f, 1f),
                     position: polygon[i].position,
                     diameter: kAreaPlacedDotDiameter);
@@ -620,7 +638,7 @@ namespace TownRoadLane
                     outlineColor: kColAreaPreviewClose,
                     fillColor: kColTransparent,
                     outlineWidth: kAreaStartRingWidth,
-                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    styleFlags: DotStyle(polygon[0].position),
                     direction: new float2(0f, 1f),
                     position: polygon[0].position,
                     diameter: kAreaStartRingDiameter);
@@ -633,22 +651,22 @@ namespace TownRoadLane
                     outlineColor: kColAreaCandOutline,
                     fillColor: kColAreaHoverFill,
                     outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                    styleFlags: DotStyle(hp),
                     direction: new float2(0f, 1f),
                     position: hp,
                     diameter: kAreaHoverDotDiameter);
             }
         }
 
-        /// <summary>Draw a small red dot at the intersection point. Projected on terrain so it
-        /// stays visible on slopes.</summary>
-        private static void DrawIntersectionMarker(OverlayRenderSystem.Buffer buf, float3 p)
+        /// <summary>Draw a small red dot at the intersection point. Projected on terrain at
+        /// ground level (visible on slopes), absolute on elevated decks.</summary>
+        private void DrawIntersectionMarker(OverlayRenderSystem.Buffer buf, float3 p)
         {
             buf.DrawCircle(
                 outlineColor: kColIntersectionOutline,
                 fillColor: kColIntersection,
                 outlineWidth: kIntersectionDotOutlineWidth,
-                styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                styleFlags: DotStyle(p),
                 direction: new float2(0f, 1f),
                 position: p,
                 diameter: kIntersectionDotDiameter);
@@ -680,7 +698,7 @@ namespace TownRoadLane
                 outlineColor: ringColor,
                 fillColor: kColTransparent,
                 outlineWidth: outlineWidth,
-                styleFlags: OverlayRenderSystem.StyleFlags.Projected,
+                styleFlags: DotStyle(pos),
                 direction: new float2(0f, 1f),
                 position: pos,
                 diameter: diameter);

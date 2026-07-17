@@ -245,9 +245,9 @@ namespace TownRoadLane
             // doesn't intercept Y when our tool isn't active.
             if (Mod.Settings != null)
             {
-                _cycleStyleAction = Mod.Settings.GetAction(Setting.CycleMarkingStyle);
-                _enterAreaAction = Mod.Settings.GetAction(Setting.EnterAreaMode);
-                _cycleAreaStyleAction = Mod.Settings.GetAction(Setting.CycleAreaStyle);
+                _cycleStyleAction = Mod.Settings.GetAction(TownRoadLaneSetting.CycleMarkingStyle);
+                _enterAreaAction = Mod.Settings.GetAction(TownRoadLaneSetting.EnterAreaMode);
+                _cycleAreaStyleAction = Mod.Settings.GetAction(TownRoadLaneSetting.CycleAreaStyle);
             }
             log.Info($"MarkingNodeToolSystem: OnCreate — toolID='{toolID}' registered with ToolSystem.tools (count={m_ToolSystem.tools.Count}), cycleStyleAction={(_cycleStyleAction != null ? "OK" : "NULL")}, enterAreaAction={(_enterAreaAction != null ? "OK" : "NULL")}, cycleAreaStyleAction={(_cycleAreaStyleAction != null ? "OK" : "NULL")}");
         }
@@ -956,7 +956,7 @@ namespace TownRoadLane
                 sourceEdge = src.edge, sourceGapIndex = src.gapIndex,
                 targetEdge = dst.edge, targetGapIndex = dst.gapIndex,
                 style = (int)_currentStyle,
-                curvature = MarkingCurveBuilder.kPullFactor,
+                curvature = MarkingCurveBuilder.AdaptivePullFactor(src, dst),
             });
             if (!EntityManager.HasComponent<Updated>(_selectedNode))
                 EntityManager.AddComponent<Updated>(_selectedNode);

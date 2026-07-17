@@ -282,6 +282,12 @@ namespace TownRoadLane
 
             var geometry = new Geometry { m_Bounds = new Bounds3(float.MaxValue, float.MinValue) };
             float bestCentreScore = -1f;
+            // Elevated fill (bridge deck): any node carries an explicit elevation instead of the
+            // terrain-follow sentinel. Affects the height range (decal projection volume) and the
+            // centre position below.
+            bool elevated = false;
+            for (int i = 0; i < nodes.Length; i++)
+                if (nodes[i].m_Elevation != float.MinValue) { elevated = true; break; }
             for (int i = 0; i < triangles.Length; i++)
             {
                 Triangle tri = triangles[i];
@@ -292,14 +298,28 @@ namespace TownRoadLane
                 // triangle; the AABB superset only ever widens the range — culling-safe).
                 Bounds3 triBounds = MathUtils.Bounds(tri3);
                 Bounds1 offsetBounds = new Bounds1(math.min(0f, heightOffset), math.max(0f, heightOffset));
-                Bounds1 terrain = TerrainUtils.GetHeightRange(ref heightData, triBounds);
-                if (terrain.min <= terrain.max)
+                if (elevated)
                 {
-                    tri.m_HeightRange = new Bounds1(terrain.min - triBounds.max.y, terrain.max - triBounds.min.y) | offsetBounds;
+                    // The height range is the DECAL PROJECTION volume (AreaBatchSystem feeds it
+                    // into m_YMinMax), not just a culling bound. Extending it down to terrain
+                    // painted the fill on both the deck AND the ground under the bridge — keep
+                    // it tight around the deck surface instead.
+                    tri.m_HeightRange = new Bounds1(-0.5f, 0.5f) | offsetBounds;
                 }
                 else
                 {
-                    tri.m_HeightRange = offsetBounds;
+                    // Ground-level fill: terrain min/max over the triangle's world AABB, relative
+                    // to the triangle's own vertical extent (vanilla rasterises the exact
+                    // triangle; the AABB superset only ever widens the range — culling-safe).
+                    Bounds1 terrain = TerrainUtils.GetHeightRange(ref heightData, triBounds);
+                    if (terrain.min <= terrain.max)
+                    {
+                        tri.m_HeightRange = new Bounds1(terrain.min - triBounds.max.y, terrain.max - triBounds.min.y) | offsetBounds;
+                    }
+                    else
+                    {
+                        tri.m_HeightRange = offsetBounds;
+                    }
                 }
 
                 // Vanilla MinLod: candidate points near the triangle's interior (midpoints of
@@ -319,7 +339,12 @@ namespace TownRoadLane
                     geometry.m_CenterPosition = centreCandidate;
                 }
             }
-            geometry.m_CenterPosition.y = TerrainUtils.SampleHeight(ref heightData, geometry.m_CenterPosition);
+            // centreCandidate.y is already interpolated from the node heights. For ground-level
+            // fills snap it to terrain (vanilla convention); for elevated fills keep the deck
+            // height — a terrain sample would put the area popover and culling centre on the
+            // ground under the structure.
+            if (!elevated)
+                geometry.m_CenterPosition.y = TerrainUtils.SampleHeight(ref heightData, geometry.m_CenterPosition);
 
             if (EntityManager.HasComponent<Geometry>(entity))
                 EntityManager.SetComponentData(entity, geometry);
