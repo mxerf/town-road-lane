@@ -25,6 +25,7 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 - **The mod is purely visual.** Markings never affect how vehicles actually drive. To change real lane behavior use the Traffic mod (by krzychu124) — set up lane connections and directions there first, then draw your markings to match. The two mods don't sync automatically.
 - Nearly-tangent line contacts (well under ~8°) are treated as a graze rather than a crossing — no anchor dot appears at such touch points (by design; prevents jittery duplicate anchors).
 - Stretched junction connections (highway ramps/merges and other junctions where the road/junction boundary is not perpendicular to the road) can misplace the anchor dots relative to the painted lines. Fix: normalize the junction with the Node Controller mod so the connection cross-lines run perpendicular to the road — strongly recommended. The setback dot row 8 m before the junction also stays usable.
+- Area fill edges curve along a line only when that line was drawn with this mod. The game's own markings are not traced — along them the fill edge stays a straight segment between its points.
 - After moving or reshaping a road with Move It, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
 
 ## Requirements
@@ -50,6 +51,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 - **Мод чисто визуальный.** Разметка не влияет на реальное движение машин. Управлять полосами нужно модом Traffic (от krzychu124): сначала настройте там направления и соединения полос, затем нарисуйте разметку под них. Автоматической синхронизации между модами нет.
 - Почти касательные контакты линий (заметно меньше ~8°) считаются скольжением, а не пересечением — точка-якорь в таком месте не появляется (намеренно: защита от дрожащих дублей-якорей).
 - Вытянутые соединения (съезды и слияния шоссе и другие узлы, где граница «дорога/перекрёсток» не перпендикулярна дороге) могут смещать точки-якоря относительно краски. Лечение: нормализуйте перекрёсток модом Node Controller, чтобы поперечные линии соединений стали перпендикулярны дороге, — настоятельно рекомендуется. Второй ряд точек за 8 м до перекрёстка тоже остаётся пригодным.
+- Рёбра заливок изгибаются вдоль линии, только если линия нарисована этим модом. Ванильную разметку заливка не огибает — вдоль неё ребро остаётся прямым отрезком между точками.
 - После перемещения или изменения дороги через Move It линии подстраиваются под новую геометрию, а заливки областей — не всегда: удалите их и нарисуйте заново.
 
 ## Зависимости
@@ -71,7 +73,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/town-road-lane-road-markings-draw-your-own-lines-area-fills-on-any-intersection.1935028/" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.3.2" />
+	<ModVersion Value="2.3.3" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -86,6 +88,11 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
+# 2.3.3 — maintenance
+
+- Build housekeeping — no gameplay or feature changes. Debug info in the shipped binaries now uses tidy relative source paths, so stack traces in logs are shorter and cleaner.
+- Docs: known limitations now note that area fill edges curve only along lines drawn with this mod — the game's own markings are not traced (the fill edge stays straight along them).
+
 # 2.3.2 — settings that stick, markings that stay on the bridge
 
 - **Fixed: mod settings could silently fail to save** (reported as the parking-markings toggle turning itself back on after every game restart). The settings class shared its name with other mods built from the same template, and the game matches settings by bare class name when saving — with such a mod installed, this mod's settings file was never written.
@@ -94,13 +101,6 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 - **Fixed: with "Edge line on city roads" disabled, manually drawn lines could stop rendering after loading a save** (with log spam), and in the worst case crash the game. The style prefabs now always exist; the settings toggles only control the automatic markings.
 - **Default line curvature now adapts to the connection angle** — a line between diverging ramp lanes gets a default curve that actually hugs the carriageway edge instead of a too-flat one. Existing lines keep their saved curvature.
 - Default parking line style is now the G87 dashed decal (falls back to the vanilla dashed line if G87 isn't installed).
-
-# 2.3.1 — fills that survive loading
-
-- **Fixed: some area fills turned invisible after loading a save** (typically the sharp-cornered ones) until toggled hide/show. The game silently re-triangulates every area once the terrain heightmap finishes loading, and shapes its triangulator can't handle lost their fill. The mod now detects that pass and instantly restores its own triangulation.
-- **Fixed: fills could slightly overflow their contour after loading** (sawtooth spill past the marking line near sharp tips) — same cause, other half: the game's pass replaced the mod's exact triangulation with its approximate one.
-- **Curvature input got −/+ stepper buttons**: click = ±1, Shift+click = ±10, Ctrl+click = ±5.
-- Known limitations clarified: on stretched junction connections (highway ramps/merges) misplaced anchor dots are best fixed by normalizing the junction with the Node Controller mod (strongly recommended).
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />
