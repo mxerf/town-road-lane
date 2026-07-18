@@ -423,6 +423,11 @@ namespace TownRoadLane
             for (int i = 0; i < compLanes.Length; i++)
             {
                 var cl = compLanes[i];
+                if (log)
+                {
+                    float w = em.HasComponent<NetLaneData>(cl.m_Lane) ? em.GetComponentData<NetLaneData>(cl.m_Lane).m_Width : 0f;
+                    Mod.log.Info($"    comp lane[{i}]: x={cl.m_Position.x:F2} w={w:F2} flags={cl.m_Flags}");
+                }
                 // Only "Road" carriageway lanes — pedestrian / parking / utility / track / secondary skipped.
                 if ((cl.m_Flags & LaneFlags.Road) == 0) continue;
                 // Drop Secondary (marking) and Utility (power/water).
@@ -483,7 +488,10 @@ namespace TownRoadLane
                 }
                 else
                 {
-                    float xMid = (sorted[i - 1].x + sorted[i].x) * 0.5f;
+                    // Midpoint of the shared EDGE, not of the lane centres — for equal-width
+                    // lanes they coincide, but a bike lane (1.5 m) next to a car lane (3 m)
+                    // would otherwise pull the dot 0.375 m off the paint into the wider lane.
+                    float xMid = (prevRightEdge + nextLeftEdge) * 0.5f;
                     outList.Add(MakeEndpoint(edgeEntity, gap++, xMid, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
                     emittedX.Add(xMid);
                 }
