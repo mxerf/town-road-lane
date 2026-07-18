@@ -566,6 +566,14 @@ export const PopoverBtn = styled.button<{ $active?: boolean }>`
   }
 `;
 
+// Fixed-width slot for the style Dropdown inside a popover button row. The
+// Dropdown itself is width:100% (sized by its parent everywhere else), and a
+// flex row would otherwise let it collapse to content or blow the row wide.
+export const PopoverDropdownWrap = styled.div`
+  width: 170rem;
+  margin-right: 3rem;
+`;
+
 // ── Segment row inside expanded line ───────────────────────────────────
 
 // Hidden state (C5): in addition to dimming, paint a red left border + tint so

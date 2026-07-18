@@ -34,6 +34,11 @@ export interface DropdownProps<V> {
   options: DropdownOption<V>[];
   onChange: (next: V) => void;
   placeholder?: string;
+  /** Fires on menu open/close. Popover hosts need it: the menu is portalled to
+   *  document.body, so the cursor travelling into it leaves the host element —
+   *  without this signal a hover-expanded popover collapses and unmounts the
+   *  dropdown mid-interaction. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 const Container = styled.div`
@@ -119,8 +124,12 @@ const itemSelectedStyle = {
   color: T.colorTextPrimary,
 };
 
-export const Dropdown = <V,>({ value, options, onChange, placeholder = "—" }: DropdownProps<V>) => {
+export const Dropdown = <V,>({ value, options, onChange, placeholder = "—", onOpenChange }: DropdownProps<V>) => {
   const [isOpen, setIsOpen] = useState(false);
+  const setOpen = (next: boolean) => {
+    setIsOpen(next);
+    onOpenChange?.(next);
+  };
   const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLDivElement>(null);
@@ -151,7 +160,7 @@ export const Dropdown = <V,>({ value, options, onChange, placeholder = "—" }: 
         if ((n as HTMLElement).dataset?.trlDropdownMenu === "1") return;
         n = (n as HTMLElement).parentNode;
       }
-      setIsOpen(false);
+      setOpen(false);
     };
     // Defer attach so the click that opened the menu doesn't immediately close it.
     const id = window.setTimeout(() => document.addEventListener("click", handler), 0);
@@ -165,12 +174,12 @@ export const Dropdown = <V,>({ value, options, onChange, placeholder = "—" }: 
 
   const handleSelect = (v: V) => {
     onChange(v);
-    setIsOpen(false);
+    setOpen(false);
   };
 
   return (
     <Container ref={containerRef}>
-      <Toggle ref={toggleRef} onClick={() => setIsOpen(!isOpen)}>
+      <Toggle ref={toggleRef} onClick={() => setOpen(!isOpen)}>
         {selected?.preview && <Preview>{selected.preview}</Preview>}
         <Label>{selected ? selected.label : placeholder}</Label>
         <Arrow>{isOpen ? "▲" : "▼"}</Arrow>

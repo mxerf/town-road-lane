@@ -77,6 +77,7 @@ import {
   PopoverRoot,
   PopoverBtn,
   PopoverMarker,
+  PopoverDropdownWrap,
   SegmentRow,
   SegmentInfo,
   SegmentLen,
@@ -151,11 +152,20 @@ const areaStyleLabel = (t: ReturnType<typeof useT>, styleId: number): string => 
   return AREA_STYLE_ID_SET.has(styleId) ? t(key) : t("style.unknown");
 };
 
-// Next style in DROPDOWN order (ids are sparse — see the reserved slots above).
-const nextAreaStyle = (styleId: number): number => {
-  const pos = AREA_STYLE_VALUES.indexOf(styleId as (typeof AREA_STYLE_VALUES)[number]);
-  return AREA_STYLE_VALUES[(pos + 1) % AREA_STYLE_VALUES.length];
-};
+// Shared option lists for every style picker (panel rows + in-world popovers).
+const makeLineStyleOptions = (t: ReturnType<typeof useT>): DropdownOption<StyleValue>[] =>
+  STYLE_VALUES.map((s) => ({
+    value: s,
+    label: styleLabel(t, s),
+    preview: <LineStylePreview style={s} width={28} height={8} />,
+  }));
+
+const makeAreaStyleOptions = (t: ReturnType<typeof useT>): DropdownOption<number>[] =>
+  AREA_STYLE_VALUES.map((s) => ({
+    value: s,
+    label: areaStyleLabel(t, s),
+    preview: <AreaStylePreview styleId={s} size={12} />,
+  }));
 
 // Exported wrapper — boundary first, then real panel. moduleRegistry mounts
 // this into GameTopRight, so the boundary protects the game UI from our bugs.
@@ -185,6 +195,11 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   const t = useT();
   const key = segKey(seg.lineIndex, seg.segmentIndex);
   const [expanded, setExpanded] = useState(false);
+  // The style dropdown's menu is portalled to document.body — while it's open
+  // the cursor legitimately lives outside PopoverRoot, so the popover must not
+  // collapse (that would unmount the dropdown mid-pick).
+  const [styleOpen, setStyleOpen] = useState(false);
+  const showButtons = expanded || styleOpen;
   // Two-press delete state, local to each popover. First click flips on; second
   // click within the window dispatches. Resets on timeout or when the segment
   // changes (popovers re-render with new keys when the line is rebuilt).
@@ -199,8 +214,8 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   // camera-distance scale to ≥1 while the buttons are up. The unregister path
   // (ref callback with null) clears the flag on unmount.
   useEffect(() => {
-    setAnchorExpanded(key, expanded);
-  }, [key, expanded]);
+    setAnchorExpanded(key, showButtons);
+  }, [key, showButtons]);
 
   // Portal into document.body — our panel mounts inside GameTopRight which
   // likely has CSS transform/will-change set up by CS2, creating a containing
@@ -218,14 +233,17 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
         cmdSetHoveredSegment(seg.lineIndex, seg.segmentIndex);
       }}
       onMouseLeave={() => {
-        setExpanded(false);
-        cmdSetHoveredSegment(-1, -1);
         // Cancel pending delete if the user moves away — avoids the confirm
         // state lingering after the user gave up.
         setConfirmingDelete(false);
+        // Cursor heading into the portalled style menu also "leaves" the root —
+        // keep the row alive while the menu is open (it closes via onOpenChange).
+        if (styleOpen) return;
+        setExpanded(false);
+        cmdSetHoveredSegment(-1, -1);
       }}
     >
-      {!expanded ? (
+      {!showButtons ? (
         <PopoverMarker $hidden={!seg.visible} />
       ) : (
         <>
@@ -241,17 +259,23 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
               {seg.visible ? <Eye size={14} /> : <EyeOff size={14} />}
             </PopoverBtn>
           </Tooltip>
-          <Tooltip
-            content={t("segment.cycleStyle.tooltip", { style: styleLabel(t, seg.style) })}
-          >
-            <PopoverBtn
-              onClick={() =>
-                cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, (seg.style + 1) % STYLE_VALUES.length)
-              }
-            >
-              <Cycle size={14} />
-            </PopoverBtn>
-          </Tooltip>
+          <PopoverDropdownWrap>
+            <Dropdown
+              value={seg.style as StyleValue}
+              options={makeLineStyleOptions(t)}
+              onChange={(s) => cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, s)}
+              onOpenChange={(open) => {
+                setStyleOpen(open);
+                // Menu closed with the cursor possibly over the (portalled)
+                // menu, i.e. outside the root — collapse explicitly; hovering
+                // the popover again re-expands it.
+                if (!open) {
+                  setExpanded(false);
+                  cmdSetHoveredSegment(-1, -1);
+                }
+              }}
+            />
+          </PopoverDropdownWrap>
           <Tooltip
             content={
               confirmingDelete ? t("line.delete.confirm.btn") : t("line.delete")
@@ -297,6 +321,10 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
   const t = useT();
   const key = areaKey(area.areaIndex);
   const [expanded, setExpanded] = useState(false);
+  // Same contract as SegmentPopover: keep the row mounted while the portalled
+  // style menu is open.
+  const [styleOpen, setStyleOpen] = useState(false);
+  const showButtons = expanded || styleOpen;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   useEffect(() => {
     if (!confirmingDelete) return;
@@ -305,8 +333,8 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
   }, [confirmingDelete]);
 
   useEffect(() => {
-    setAnchorExpanded(key, expanded);
-  }, [key, expanded]);
+    setAnchorExpanded(key, showButtons);
+  }, [key, showButtons]);
 
   return createPortal(
     <PopoverRoot
@@ -317,12 +345,13 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
         cmdSetHoveredArea(area.areaIndex);
       }}
       onMouseLeave={() => {
+        setConfirmingDelete(false);
+        if (styleOpen) return;
         setExpanded(false);
         cmdClearHoveredArea(area.areaIndex);
-        setConfirmingDelete(false);
       }}
     >
-      {!expanded ? (
+      {!showButtons ? (
         area.visible ? (
           <AreaStylePreview styleId={area.styleId} size={12} />
         ) : (
@@ -338,13 +367,20 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
               {area.visible ? <Eye size={14} /> : <EyeOff size={14} />}
             </PopoverBtn>
           </Tooltip>
-          <Tooltip
-            content={t("segment.cycleStyle.tooltip", { style: areaStyleLabel(t, area.styleId) })}
-          >
-            <PopoverBtn onClick={() => cmdSetAreaStyle(area.areaIndex, nextAreaStyle(area.styleId))}>
-              <Cycle size={14} />
-            </PopoverBtn>
-          </Tooltip>
+          <PopoverDropdownWrap>
+            <Dropdown
+              value={area.styleId}
+              options={makeAreaStyleOptions(t)}
+              onChange={(s) => cmdSetAreaStyle(area.areaIndex, s)}
+              onOpenChange={(open) => {
+                setStyleOpen(open);
+                if (!open) {
+                  setExpanded(false);
+                  cmdClearHoveredArea(area.areaIndex);
+                }
+              }}
+            />
+          </PopoverDropdownWrap>
           <Tooltip content={confirmingDelete ? t("line.delete.confirm.btn") : t("area.delete")}>
             <PopoverBtn
               $active={confirmingDelete}
@@ -575,16 +611,8 @@ const TownRoadLanePanelInner = () => {
     expandedLine >= 0 && expandedLine < state.lines.length ? state.lines[expandedLine] : null;
   const popoverArea = state.areas.find((a) => a.areaIndex === expandedArea) ?? null;
 
-  const lineStyleOptions: DropdownOption<StyleValue>[] = STYLE_VALUES.map((s) => ({
-    value: s,
-    label: styleLabel(t, s),
-    preview: <LineStylePreview style={s} width={28} height={8} />,
-  }));
-  const areaStyleOptions: DropdownOption<number>[] = AREA_STYLE_VALUES.map((s) => ({
-    value: s,
-    label: areaStyleLabel(t, s),
-    preview: <AreaStylePreview styleId={s} size={12} />,
-  }));
+  const lineStyleOptions = makeLineStyleOptions(t);
+  const areaStyleOptions = makeAreaStyleOptions(t);
 
   return (
     <>
@@ -1070,16 +1098,11 @@ const CurvatureInput = ({ line }: { line: LineVM }) => {
 // on each render so they pick up locale changes (cheap — 5 entries).
 const StyleSelector = ({ line }: { line: LineVM }) => {
   const t = useT();
-  const options: DropdownOption<StyleValue>[] = STYLE_VALUES.map((s) => ({
-    value: s,
-    label: styleLabel(t, s),
-    preview: <LineStylePreview style={s} width={28} height={8} />,
-  }));
   return (
     <StyleRow>
       <Dropdown
         value={line.style as StyleValue}
-        options={options}
+        options={makeLineStyleOptions(t)}
         onChange={(s) => cmdSetLineStyle(line.lineIndex, s)}
       />
     </StyleRow>

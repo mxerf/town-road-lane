@@ -112,7 +112,6 @@ const enUS = {
   "segment.length":           "{m}m",
   "segment.hide.tooltip":     "Hide segment",
   "segment.show.tooltip":     "Show segment",
-  "segment.cycleStyle.tooltip": "Cycle style (current: {style})",
 
   // Styles
   "style.solid":              "Solid",
@@ -232,7 +231,6 @@ const ruRU: LocaleDict = {
   "segment.length":           "{m} м",
   "segment.hide.tooltip":     "Скрыть сегмент",
   "segment.show.tooltip":     "Показать сегмент",
-  "segment.cycleStyle.tooltip": "Сменить стиль (сейчас: {style})",
 
   // Styles
   "style.solid":              "Сплошная",
