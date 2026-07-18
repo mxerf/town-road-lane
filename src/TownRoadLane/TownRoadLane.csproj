@@ -21,6 +21,12 @@
 	     surface is modern. -->
 	<PropertyGroup>
 		<LangVersion>latest</LangVersion>
+		<!-- The portable .pdb ships to PDX next to the .dll, so absolute source paths from the
+		     build machine end up in every user's stack traces. PathMap keeps file:line intact
+		     but replaces the personal path with a neutral prefix. SourceLink (auto-embedded by
+		     the SDK) would still leak the raw local repo path in its JSON map key — off. -->
+		<PathMap>$(MSBuildProjectDirectory)=TownRoadLane</PathMap>
+		<EnableSourceLink>false</EnableSourceLink>
 	</PropertyGroup>
 
 	<ItemGroup>
