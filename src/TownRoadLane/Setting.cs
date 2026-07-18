@@ -3,6 +3,7 @@ using Colossal.IO.AssetDatabase;
 using Game.Input;
 using Game.Modding;
 using Game.Settings;
+using Game.UI;
 using System.Collections.Generic;
 
 namespace TownRoadLane
@@ -17,8 +18,8 @@ namespace TownRoadLane
     /// why there is no runtime reapply).
     /// </summary>
     [FileLocation(nameof(TownRoadLane))]
-    [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup, kKeybindGroup)]
-    [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup, kKeybindGroup)]
+    [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup, kSegmentGroup, kSegmentDevGroup, kKeybindGroup)]
+    [SettingsUIShowGroupName(kEdgeGroup, kParkingGroup, kSegmentGroup, kSegmentDevGroup, kKeybindGroup)]
     [SettingsUIKeyboardAction(ToggleMarkingTool, Usages.kDefaultUsage, Usages.kEditorUsage, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(CycleMarkingStyle, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(EnterAreaMode, Usages.kToolUsage)]
@@ -33,6 +34,8 @@ namespace TownRoadLane
         public const string kSection = "Main";
         public const string kEdgeGroup = "EdgeLine";
         public const string kParkingGroup = "ParkingMarkings";
+        public const string kSegmentGroup = "SegmentSplit";
+        public const string kSegmentDevGroup = "SegmentSplitDev";
         public const string kKeybindGroup = "Keybinds";
 
         // Action name used by MarkingToolHotkeySystem to resolve the ProxyAction. Must match the
@@ -79,6 +82,26 @@ namespace TownRoadLane
         [SettingsUISection(kSection, kParkingGroup)]
         [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsParkingDisabled))]
         public ParkingEndStyleEnum ParkingEndStyle { get; set; } = ParkingEndStyleEnum.WhiteSolid;
+
+        // ── Segment splitting thresholds (marking editor) ──
+        // Feed MarkingTopologySystem's split filters. Unlike the style prefabs above, this is
+        // pure runtime data — no game restart needed: a junction re-segments the next time its
+        // lines change, and every junction re-segments on save load (topology hash isn't saved).
+        [SettingsUISlider(min = 0.2f, max = 3f, step = 0.1f, unit = Unit.kFloatSingleFraction)]
+        [SettingsUISection(kSection, kSegmentGroup)]
+        public float SegmentMinLengthM { get; set; } = MarkingTopologySystem.kDefaultMinSegmentLengthM;
+
+        [SettingsUISlider(min = 0f, max = 4f, step = 0.1f, unit = Unit.kFloatSingleFraction)]
+        [SettingsUISection(kSection, kSegmentGroup)]
+        public float SegmentAnchorDeadZoneM { get; set; } = MarkingTopologySystem.kDefaultEndpointMarginM;
+
+        [SettingsUISlider(min = 0, max = 20, step = 1, unit = Unit.kInteger)]
+        [SettingsUISection(kSection, kSegmentDevGroup)]
+        public int SegmentMinCrossingAngleDeg { get; set; } = MarkingTopologySystem.kDefaultMinCrossingAngleDeg;
+
+        [SettingsUISlider(min = 0.25f, max = 3f, step = 0.25f, unit = Unit.kFloatSingleFraction)]
+        [SettingsUISection(kSection, kSegmentDevGroup)]
+        public float SegmentHitClusterM { get; set; } = MarkingTopologySystem.kDefaultHitClusterM;
 
         // NOTE: there is deliberately NO runtime "reapply" button. Refreshing the clone prefabs
         // (UpdatePrefab) while a world is live leaves existing sublanes with stale PrefabRefs;
@@ -127,6 +150,10 @@ namespace TownRoadLane
             ParkingMarkingsEnabled = true;
             ParkingLineStyle = ParkingLineStyleEnum.WhiteDashed_G87;
             ParkingEndStyle = ParkingEndStyleEnum.WhiteSolid;
+            SegmentMinLengthM = MarkingTopologySystem.kDefaultMinSegmentLengthM;
+            SegmentAnchorDeadZoneM = MarkingTopologySystem.kDefaultEndpointMarginM;
+            SegmentMinCrossingAngleDeg = MarkingTopologySystem.kDefaultMinCrossingAngleDeg;
+            SegmentHitClusterM = MarkingTopologySystem.kDefaultHitClusterM;
         }
 
         // G87 RenderPrefab name prefixes — full names are very long; build them once.
@@ -226,6 +253,8 @@ namespace TownRoadLane
 
                 { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kEdgeGroup), "Curb-side edge line" },
                 { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kParkingGroup), "Parallel parking markings" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kSegmentGroup), "Marking editor — segment splitting" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kSegmentDevGroup), "Segment splitting — fine tuning" },
                 { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kKeybindGroup), "Keybinds" },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EdgeLineEnabled)), "Edge line on city roads" },
@@ -247,6 +276,22 @@ namespace TownRoadLane
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)), "Parking end-tick style" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)),
                     "The short perpendicular tick at the start and end of a parking block. \"None\" disables the ticks. \"G87\" options require the [G87] Road Markings mod." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentMinLengthM)), "Minimum segment length (m)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentMinLengthM)),
+                    "When drawn lines cross, they are split into segments (each can be hidden or restyled). Segments shorter than this merge into their neighbour. Lower = finer segments on densely packed markings; higher = fewer slivers from lines that merely graze each other. Default: 1.0 m. Applies to a junction the next time its lines are edited, and everywhere after reloading the save." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentAnchorDeadZoneM)), "Dead zone around anchor dots (m)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentAnchorDeadZoneM)),
+                    "Crossings closer than this to a line's endpoint don't split the line. Lines that leave the same anchor dot overlap for the first metre or two — without the dead zone that overlap spawns phantom micro-segments. Lower = splits allowed closer to the dots; higher = calmer behaviour around anchors. Default: 2.0 m. Applies to a junction the next time its lines are edited, and everywhere after reloading the save." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentMinCrossingAngleDeg)), "Minimum crossing angle (°)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentMinCrossingAngleDeg)),
+                    "Two lines meeting at less than this angle count as a graze, not a crossing — no split. At 0° every touch splits, and near-parallel lines can produce clusters of micro-segments. Default: 8°. Applies to a junction the next time its lines are edited, and everywhere after reloading the save." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentHitClusterM)), "Crossing cluster radius (m)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentHitClusterM)),
+                    "A shallow crossing is reported as several near-identical intersection points; points within this radius collapse into a single split. Lower = more of those near-duplicates survive as separate splits. Default: 1.5 m. Applies to a junction the next time its lines are edited, and everywhere after reloading the save." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ActivateMarkingTool)), "Activate marking tool" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ActivateMarkingTool)),
@@ -314,6 +359,8 @@ namespace TownRoadLane
 
                 { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kEdgeGroup), "Краевая линия у бордюра" },
                 { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kParkingGroup), "Разметка параллельной парковки" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kSegmentGroup), "Редактор разметки — разрезание на сегменты" },
+                { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kSegmentDevGroup), "Разрезание сегментов — тонкая настройка" },
                 { m_Setting.GetOptionGroupLocaleID(TownRoadLaneSetting.kKeybindGroup), "Горячие клавиши" },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EdgeLineEnabled)), "Краевая линия на городских дорогах" },
@@ -335,6 +382,22 @@ namespace TownRoadLane
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)), "Стиль концевой черты парковки" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)),
                     "Короткая поперечная черта в начале и конце парковочного квартала. «Нет» отключает черты. Варианты «G87» требуют мод [G87] Road Markings." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentMinLengthM)), "Минимальная длина сегмента (м)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentMinLengthM)),
+                    "Пересекаясь, нарисованные линии режутся на сегменты (каждый можно скрыть или перекрасить). Сегменты короче этого значения сливаются с соседним. Меньше — более дробные сегменты на плотной разметке; больше — меньше «щепок» от линий, которые лишь слегка задевают друг друга. По умолчанию: 1,0 м. Применяется к перекрёстку при следующей правке его линий, а ко всему — после перезагрузки сохранения." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentAnchorDeadZoneM)), "Мёртвая зона у точек-якорей (м)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentAnchorDeadZoneM)),
+                    "Пересечения ближе этого расстояния к концу линии не режут её. Линии, выходящие из одной точки-якоря, первые метр-два идут внахлёст — без мёртвой зоны этот нахлёст порождает фантомные микросегменты. Меньше — резы разрешены ближе к точкам; больше — спокойнее возле якорей. По умолчанию: 2,0 м. Применяется к перекрёстку при следующей правке его линий, а ко всему — после перезагрузки сохранения." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentMinCrossingAngleDeg)), "Минимальный угол пересечения (°)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentMinCrossingAngleDeg)),
+                    "Линии, встречающиеся под углом меньше этого, считаются скользящим касанием, а не пересечением — без реза. При 0° режет любое касание, и почти параллельные линии могут дать пачку микросегментов. По умолчанию: 8°. Применяется к перекрёстку при следующей правке его линий, а ко всему — после перезагрузки сохранения." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentHitClusterM)), "Радиус склейки пересечений (м)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentHitClusterM)),
+                    "Пологое пересечение распознаётся как несколько почти совпадающих точек; точки в этом радиусе склеиваются в один рез. Меньше — больше таких почти-дублей выживает отдельными резами. По умолчанию: 1,5 м. Применяется к перекрёстку при следующей правке его линий, а ко всему — после перезагрузки сохранения." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ActivateMarkingTool)), "Активировать инструмент разметки" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ActivateMarkingTool)),

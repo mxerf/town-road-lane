@@ -42,25 +42,31 @@ namespace TownRoadLane
 
         private EntityQuery _nodesWithLines;
 
+        // The four split-filter thresholds are user-tunable since 2.3.4 (Settings → segment
+        // splitting; the values below are the defaults, referenced by TownRoadLaneSetting).
+        // They are read per node-recompute, so a change applies to a junction the next time
+        // its lines are edited — and to everything on save load (the topology hash isn't
+        // serialized, so loading recomputes every node).
+
         // Intersections within this world-space radius of any line endpoint are dropped.
         // 2.0m = typical 3m drive lane width / 1.5 — covers the "two lines from one dot" overlap
         // without eating real splits between independent lines. Stable across line length.
-        private const float kEndpointMarginM = 2.0f;
+        public const float kDefaultEndpointMarginM = 2.0f;
 
-        // Filter D: minimum crossing angle for a hit to count as a segment split. sin(8°) ≈
-        // 0.139 — below that the contact is a near-tangent graze (merge-lane geometry), and
-        // splitting it only produces micro-segments. Anchor extraction for the AREA tool
+        // Filter D: minimum crossing angle for a hit to count as a segment split. Below 8°
+        // the contact is a near-tangent graze (merge-lane geometry), and splitting it only
+        // produces micro-segments. Anchor extraction for the AREA tool
         // (MarkingIntersectionExtractor) deliberately does NOT share this filter — island tips
         // ARE shallow crossings and must stay clickable.
-        private const float kMinCrossingSin = 0.139f;
+        public const int kDefaultMinCrossingAngleDeg = 8;
         // Filter E: world-space radius within which multiple reported hits of one line pair
         // collapse to the first — near-tangent contact yields hit clusters.
-        private const float kHitClusterM = 1.5f;
+        public const float kDefaultHitClusterM = 1.5f;
 
         // Segments shorter than this are merged with their neighbour by removing the internal
         // boundary. Catches tangential grazes that survive the endpoint filter — typical case is
         // two slightly-different curves that touch in the middle for ~50cm.
-        private const float kMinSegmentLengthM = 1.0f;
+        public const float kDefaultMinSegmentLengthM = 1.0f;
 
         protected override void OnCreate()
         {
@@ -161,6 +167,14 @@ namespace TownRoadLane
                 b.Add(0f); b.Add(1f);
                 boundaries.Add(b);
             }
+            // Split-filter thresholds — user-tunable, defaults above. Settings is null only
+            // during early startup, before any node can have lines.
+            var st = Mod.Settings;
+            float endpointMarginM = st?.SegmentAnchorDeadZoneM ?? kDefaultEndpointMarginM;
+            float minCrossingSin = math.sin(math.radians((float)(st?.SegmentMinCrossingAngleDeg ?? kDefaultMinCrossingAngleDeg)));
+            float hitClusterM = st?.SegmentHitClusterM ?? kDefaultHitClusterM;
+            float minSegmentLengthM = st?.SegmentMinLengthM ?? kDefaultMinSegmentLengthM;
+
             // Pairwise intersection. n is tiny in practice (≤ 20).
             //
             // Filter B (endpoint margin): two lines that share a dot inevitably "overlap" for the
@@ -186,12 +200,12 @@ namespace TownRoadLane
                     for (int h = 0; h < hits.Count; h++)
                     {
                         var hit = hits[h];
-                        if (IsNearAnyEndpoint(hit.point, beziers[i], beziers[j])) continue;
+                        if (IsNearAnyEndpoint(hit.point, beziers[i], beziers[j], endpointMarginM)) continue;
                         var ta = MathUtils.Tangent(beziers[i], hit.tA).xz;
                         var tb = MathUtils.Tangent(beziers[j], hit.tB).xz;
                         float denom = math.max(math.length(ta) * math.length(tb), 1e-6f);
                         float sinAngle = math.abs(ta.x * tb.y - ta.y * tb.x) / denom;
-                        if (sinAngle < kMinCrossingSin) continue;
+                        if (sinAngle < minCrossingSin) continue;
                         kept.Add(hit);
                     }
                     kept.Sort((x, y) => x.tA.CompareTo(y.tA));
@@ -200,7 +214,7 @@ namespace TownRoadLane
                     for (int h = 0; h < kept.Count; h++)
                     {
                         var hit = kept[h];
-                        if (haveLast && math.distancesq(hit.point.xz, lastPoint.xz) < kHitClusterM * kHitClusterM)
+                        if (haveLast && math.distancesq(hit.point.xz, lastPoint.xz) < hitClusterM * hitClusterM)
                             continue;
                         lastPoint = hit.point;
                         haveLast = true;
@@ -224,7 +238,7 @@ namespace TownRoadLane
             for (int i = 0; i < lineCount; i++)
             {
                 if (!bezierValid[i]) continue;
-                EnforceMinSegmentLength(boundaries[i], beziers[i], kMinSegmentLengthM);
+                EnforceMinSegmentLength(boundaries[i], beziers[i], minSegmentLengthM);
             }
 
             // Build the new flat segments list. Each new segment inherits visibility AND style
@@ -368,12 +382,12 @@ namespace TownRoadLane
                 em.SetComponentData(node, new MarkingTopologyState { linesHash = 0 });
         }
 
-        /// <summary>True if the world-space point sits within <see cref="kEndpointMarginM"/> of
+        /// <summary>True if the world-space point sits within <paramref name="marginM"/> of
         /// either endpoint of either curve. Distance compared in XZ — Y is irrelevant for road
         /// markings (everything is on-or-near the road surface). Squared compare for speed.</summary>
-        private static bool IsNearAnyEndpoint(float3 p, Bezier4x3 a, Bezier4x3 b)
+        private static bool IsNearAnyEndpoint(float3 p, Bezier4x3 a, Bezier4x3 b, float marginM)
         {
-            float rSq = kEndpointMarginM * kEndpointMarginM;
+            float rSq = marginM * marginM;
             return DistSqXZ(p, a.a) < rSq || DistSqXZ(p, a.d) < rSq
                 || DistSqXZ(p, b.a) < rSq || DistSqXZ(p, b.d) < rSq;
         }
