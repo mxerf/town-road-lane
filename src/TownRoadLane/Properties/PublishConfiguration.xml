@@ -73,7 +73,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/town-road-lane-road-markings-draw-your-own-lines-area-fills-on-any-intersection.1935028/" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.3.3" />
+	<ModVersion Value="2.3.4" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -88,6 +88,13 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
+# 2.3.4 — bike lanes, real style pickers, splitting knobs
+
+- **Fixed: anchor dots next to bike lanes sat slightly off the paint line** (forum report: a line hugs one side of the bike lane but leaves a gap on the other). The dot between two lanes of DIFFERENT widths (bike 1.5 m next to car 3 m) was placed at the midpoint of the lane centres instead of on their shared edge. Existing lines drawn to the offset dots snap to the corrected position automatically.
+- **Per-segment style is now a proper dropdown.** The segment popover always could restyle a single segment, but the control was an unlabeled cycle button nobody discovered — one forum user rebuilt the feature by hand with two overlapping lines. Both in-world popovers (segment style, area fill) now use the same swatch picker as the panel.
+- **New settings: segment splitting.** How drawn lines split into segments where they cross is now tunable — minimum segment length and the dead zone around anchor dots in the main group; minimum crossing angle and crossing cluster radius under fine tuning. Changes apply to a junction on its next line edit, or everywhere after reloading the save — no game restart needed. Defaults match previous behaviour.
+- Diagnostics: clicking a junction with the marking tool now logs each connected road's full lane composition — makes marking issues on unusual/modded roads much easier to report.
+
 # 2.3.3 — maintenance
 
 - Build housekeeping — no gameplay or feature changes. Debug info in the shipped binaries now uses tidy relative source paths, so stack traces in logs are shorter and cleaner.
