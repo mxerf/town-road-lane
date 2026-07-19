@@ -91,9 +91,13 @@ def build(theme, rows):
     # last value: dot + direct label in text ink (never the series color)
     lts, lv = rows[-1]
     parts.append(f'<circle cx="{x(lts):.1f}" cy="{y(lv):.1f}" r="3.5" fill="{LINE}"/>')
+    # thin-space the thousands BEFORE interpolating — a blanket .replace on
+    # the finished SVG string also eats the commas in font-family, and the
+    # single-name fallback renders in the browser's default serif
+    label = f"{lv:,}".replace(",", " ")
     parts.append(
         f'<text x="{x(lts) + 9:.1f}" y="{y(lv) + 4:.1f}" font-family="{FONT}" '
-        f'font-size="12" font-weight="600" fill="{ink}">{lv:,}</text>'.replace(",", " ")
+        f'font-size="12" font-weight="600" fill="{ink}">{label}</text>'
     )
     parts.append("</svg>")
     return "\n".join(parts)
