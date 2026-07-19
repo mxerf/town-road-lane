@@ -130,7 +130,7 @@ const enUS = {
   "style.dashedLong":         "Dashed, long",
   "style.g87Yellow":          "G87 Yellow",
   "style.g87YellowDashed":    "G87 Yellow Dashed",
-  "style.curb":               "Curb (G87 VC)",
+  "style.curb":               "Curb",
   "style.unknown":            "?",
 } as const;
 
@@ -257,7 +257,7 @@ const ruRU: LocaleDict = {
   "style.dashedLong":         "Пунктир, длинный",
   "style.g87Yellow":          "G87 Жёлтая",
   "style.g87YellowDashed":    "G87 Жёлтый пунктир",
-  "style.curb":               "Бордюр (G87 VC)",
+  "style.curb":               "Бордюр",
   "style.unknown":            "?",
 };
 

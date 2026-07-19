@@ -28,11 +28,11 @@ namespace TownRoadLane
         G87Yellow       = 6,
         G87YellowDashed = 7,
         DashedLong      = 8,
-        // Vanilla curb texture from the optional "[G87] Vanilla Curb" mod (elGendo87).
-        // Candidate history (2026-07-19): VA "Road Border VFX GND" — Terrain-only decal mask,
-        // invisible on the road deck; PVM "Vanilla Pavement 01 XS" — renders, but 0.88 m reads
-        // as a pavement strip, not a curb. Degrades to the source prefab's own mesh when the
-        // mod isn't installed — see EdgeLineCloneSystem.PickMesh.
+        // Vanilla curb texture from the "[G87] Vanilla Curb" pack (elGendo87) — a hard PDX
+        // dependency since 2.4.0, so it's always present in practice; PickMesh still degrades
+        // to the source prefab's own mesh if it somehow isn't. Candidate history (2026-07-19):
+        // VA "Road Border VFX GND" — Terrain-only decal mask, invisible on the road deck;
+        // PVM "Vanilla Pavement 01 XS" — renders, but 0.88 m reads as a pavement strip.
         Curb            = 9,
     }
 

@@ -97,8 +97,8 @@ namespace TownRoadLane
         private const string kG87DashedMesh       = kG87Prefix + "UK Carriageway Line White Dashed NetLaneDecal_RenderPrefab";
         private const string kG87YellowMesh       = kG87Prefix + "UK Carriageway Line Yellow NetLaneDecal_RenderPrefab";
         private const string kG87YellowDashedMesh = kG87Prefix + "UK Carriageway Line Yellow Dashed NetLaneDecal_RenderPrefab";
-        // From the optional "[G87] Vanilla Curb" mod (not our hard deps). Missing mod →
-        // PickMesh keeps the source prefab's own mesh.
+        // From the "[G87] Vanilla Curb" pack — a hard PDX dependency since 2.4.0. Missing
+        // pack (local/manual installs) → PickMesh keeps the source prefab's own mesh.
         private const string kCurbMesh = "G87 Vanilla Curb Misc G87 Vanilla Curb NetLane_RenderPrefab";
 
         private static readonly StyleRecipe[] kStyleRecipes =

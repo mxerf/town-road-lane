@@ -13,7 +13,7 @@ A road-marking editor for intersections plus automatic lane markings for ordinar
 
 ## Marking editor
 Click any intersection and draw your own markings:
-- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, G87 white or yellow styles, and a curb line (needs the free "[G87] Vanilla Curb" mod), with adjustable curvature and per-segment visibility. Dots sit on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction — for the solid no-lane-change stretch in front of the stop line.
+- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, G87 white or yellow styles, and a curb line, with adjustable curvature and per-segment visibility. Dots sit on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction — for the solid no-lane-change stretch in front of the stop line.
 - **Area fills** over any polygon you outline — points snap to lane endpoints, kerb corners and line crossings, edges follow line curvature. Junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete, grass, sand, pavement, tiles, asphalt patch (needs the separate "G87 Vanilla Asphalt Pavement" mod).
 - **Hide vanilla markings** per intersection to start from a clean slate.
 - **Pin favourite styles** — star any entry in a style dropdown to keep it at the top of every list.
@@ -31,7 +31,7 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 - After moving or reshaping a road with Move It, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
 
 ## Requirements
-Both G87 marking packs ship as dependencies and install automatically — they supply the line styles and area fills. Huge thanks to G87 for the marking assets!
+The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and install automatically — they supply the line styles, area fills and the curb texture. Huge thanks to G87 for the assets!
 
 ---
 
@@ -41,7 +41,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 
 ## Редактор разметки
 Кликните по любому перекрёстку и нарисуйте свою разметку:
-- **Линии** между точками-якорями — сплошная, пунктир (короткий / обычный / длинный), двойная сплошная, белые и жёлтые стили G87, бордюр (нужен бесплатный мод «[G87] Vanilla Curb»); настраиваемая кривизна и видимость отдельных сегментов. Точки стоят на каждой границе полос, на краю проезжей части (в том числе за парковочными полосами) и вторым рядом за 8 м до перекрёстка — для сплошной перед стоп-линией, запрещающей перестроение.
+- **Линии** между точками-якорями — сплошная, пунктир (короткий / обычный / длинный), двойная сплошная, белые и жёлтые стили G87, бордюр; настраиваемая кривизна и видимость отдельных сегментов. Точки стоят на каждой границе полос, на краю проезжей части (в том числе за парковочными полосами) и вторым рядом за 8 м до перекрёстка — для сплошной перед стоп-линией, запрещающей перестроение.
 - **Заливки областей** по обведённому полигону — точки цепляются к концам полос, углам бордюров и пересечениям линий, рёбра повторяют кривизну линий. Вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон, трава, песок, тротуарная плитка, плитка, асфальтовая заплатка (нужен отдельный мод «G87 Vanilla Asphalt Pavement»).
 - **Скрытие ванильной разметки** на отдельном перекрёстке, чтобы начать с чистого листа.
 - **Пины любимых стилей** — звёздочка в любом дропдауне стилей закрепляет стиль наверху всех списков.
@@ -59,7 +59,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 - После перемещения или изменения дороги через Move It линии подстраиваются под новую геометрию, а заливки областей — не всегда: удалите их и нарисуйте заново.
 
 ## Зависимости
-Оба пака разметки G87 подключены как зависимости и ставятся автоматически — они дают стили линий и заливки. Спасибо G87 за ассеты!
+Паки разметки G87 и пак «[G87] Vanilla Curb» подключены как зависимости и ставятся автоматически — они дают стили линий, заливки и текстуру бордюра. Спасибо G87 за ассеты!
 	</LongDescription>
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.jpg" />
@@ -83,13 +83,15 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
-	    Both G87 packs supply the render prefabs our styles reference:
+	    The G87 packs supply the render prefabs our styles reference:
 	    97828 = [G87] Road Markings (includes UK Set)  - line styles, junction box, bike/bus fills
 	    98624 = [G87] Road Markings: Stripes and Chevrons - stripe area fills
-	    The mod degrades gracefully without them (vanilla/concrete fallbacks), but every
-	    non-default style needs them, so they ship as hard deps for install-and-it-works.-->
+	    99062 = [G87] Vanilla Curb - the Curb line style's netlane mesh (<1 MB)
+	    The mod degrades gracefully without them (vanilla/concrete fallbacks), but the styles
+	    need them, so they ship as hard deps for install-and-it-works.-->
 	<Dependency Id="97828" />
 	<Dependency Id="98624" />
+	<Dependency Id="99062" />
 	<!--Required DLC, can be set multiple times. Supported values are "Landmark Buildings", "San Fransisco Set", "Beach Properties", "Urban Promenades", "Modern Architecture"-->
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
@@ -97,7 +99,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 # 2.4.0 — vanilla surface fills, curb lines, pinned favourites
 
 - **New area fills: the game's own surfaces.** Grass (regular + dark), sand, pavement and three tile styles can now be used as junction fills — no extra mods needed. These vanilla surfaces previously could not render on roads at all; big thanks to the ExtraAssetsImporter source code for showing the way.
-- **New line style: Curb.** Draws the vanilla curb texture along any segment — outline traffic islands and medians with a proper curb edge. Needs the free "[G87] Vanilla Curb" mod; without it the style falls back to a plain line.
+- **New line style: Curb.** Draws the vanilla curb texture along any segment — outline traffic islands and medians with a proper curb edge. Uses the "[G87] Vanilla Curb" pack, now included as a dependency (installs automatically, under 1 MB).
 - **Pin your favourite styles.** Every style dropdown (panel and in-world popovers) now shows a star on each entry — pinned styles stay at the top of every list. Pins persist across game restarts.
 - UI: style dropdown menus now size to their longest entry, so nothing clips; fill styles from the auto-installed G87 packs dropped the "(G87)" suffix — the marker stays only on styles that need optional mods (Asphalt — G87 VA, Curb — G87 VC).
 - Diagnostics: the startup survey now also logs every net-lane mesh with its dimensions — useful when reporting issues with modded road assets.

@@ -16,7 +16,7 @@ A road-marking mod for **Cities: Skylines II**: a manual marking editor for inte
 ### Marking editor
 Click any intersection and draw your own markings:
 
-- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, G87 white or yellow styles, and a curb line (needs the free "[G87] Vanilla Curb" mod), with adjustable curvature and per-segment visibility.
+- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, G87 white or yellow styles, and a curb line, with adjustable curvature and per-segment visibility.
 - **Anchor dots everywhere you need them** — on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction, so you can draw the solid no-lane-change stretch in front of the stop line.
 - **Area fills** over any polygon you outline — junction box (yellow box), white/yellow hatching, green bike lane, red bus lane, concrete, grass, sand, pavement, tiles, asphalt patch.
 - **Hide vanilla markings** per intersection to start from a clean slate.
@@ -56,10 +56,11 @@ Snapshotted every 6 hours from the public PDX Mods API into the [`stats`](https:
 
 ## Dependencies
 
-Line styles and area fills come from the G87 marking packs (installed automatically as PDX Mods dependencies):
+Line styles, area fills and the curb texture come from the G87 packs (installed automatically as PDX Mods dependencies):
 
 - [G87] Road Markings (id 97828)
 - [G87] Road Markings: Stripes and Chevrons (id 98624)
+- [G87] Vanilla Curb (id 99062)
 
 Optional: the **Asphalt patch** area fill uses the separate "G87 Vanilla Asphalt Pavement" mod — without it that fill falls back to concrete.
 
