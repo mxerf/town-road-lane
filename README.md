@@ -16,10 +16,11 @@ A road-marking mod for **Cities: Skylines II**: a manual marking editor for inte
 ### Marking editor
 Click any intersection and draw your own markings:
 
-- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, and G87 white or yellow styles, with adjustable curvature and per-segment visibility.
+- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, G87 white or yellow styles, and a curb line (needs the free "[G87] Vanilla Curb" mod), with adjustable curvature and per-segment visibility.
 - **Anchor dots everywhere you need them** — on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction, so you can draw the solid no-lane-change stretch in front of the stop line.
-- **Area fills** over any polygon you outline — junction box (yellow box), white/yellow hatching, green bike lane, red bus lane, concrete, asphalt patch.
+- **Area fills** over any polygon you outline — junction box (yellow box), white/yellow hatching, green bike lane, red bus lane, concrete, grass, sand, pavement, tiles, asphalt patch.
 - **Hide vanilla markings** per intersection to start from a clean slate.
+- **Pin favourite styles** — star any entry in a style dropdown to keep it at the top of every list.
 - In-game panel (English + Russian) and hotkeys: `Ctrl+M` toggle tool, `Y` cycle line style, `A` area mode, `U` cycle area fill.
 
 ![Zebra crossing and custom junction markings](src/TownRoadLane/Properties/Screenshots/TRL_9f56d721.jpg)

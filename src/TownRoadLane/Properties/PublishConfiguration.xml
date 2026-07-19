@@ -13,9 +13,10 @@ A road-marking editor for intersections plus automatic lane markings for ordinar
 
 ## Marking editor
 Click any intersection and draw your own markings:
-- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, and G87 white or yellow styles, with adjustable curvature and per-segment visibility. Dots sit on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction — for the solid no-lane-change stretch in front of the stop line.
-- **Area fills** over any polygon you outline — points snap to lane endpoints, kerb corners and line crossings, edges follow line curvature. Junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete, asphalt patch (needs the separate "G87 Vanilla Asphalt Pavement" mod).
+- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, G87 white or yellow styles, and a curb line (needs the free "[G87] Vanilla Curb" mod), with adjustable curvature and per-segment visibility. Dots sit on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction — for the solid no-lane-change stretch in front of the stop line.
+- **Area fills** over any polygon you outline — points snap to lane endpoints, kerb corners and line crossings, edges follow line curvature. Junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete, grass, sand, pavement, tiles, asphalt patch (needs the separate "G87 Vanilla Asphalt Pavement" mod).
 - **Hide vanilla markings** per intersection to start from a clean slate.
+- **Pin favourite styles** — star any entry in a style dropdown to keep it at the top of every list.
 - Full in-game panel (English + Russian) and hotkeys: **Ctrl+M** toggle tool, **Y** cycle line style, **A** area mode, **U** cycle area fill.
 
 ## Automatic markings
@@ -40,9 +41,10 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 
 ## Редактор разметки
 Кликните по любому перекрёстку и нарисуйте свою разметку:
-- **Линии** между точками-якорями — сплошная, пунктир (короткий / обычный / длинный), двойная сплошная, белые и жёлтые стили G87; настраиваемая кривизна и видимость отдельных сегментов. Точки стоят на каждой границе полос, на краю проезжей части (в том числе за парковочными полосами) и вторым рядом за 8 м до перекрёстка — для сплошной перед стоп-линией, запрещающей перестроение.
-- **Заливки областей** по обведённому полигону — точки цепляются к концам полос, углам бордюров и пересечениям линий, рёбра повторяют кривизну линий. Вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон, асфальтовая заплатка (нужен отдельный мод «G87 Vanilla Asphalt Pavement»).
+- **Линии** между точками-якорями — сплошная, пунктир (короткий / обычный / длинный), двойная сплошная, белые и жёлтые стили G87, бордюр (нужен бесплатный мод «[G87] Vanilla Curb»); настраиваемая кривизна и видимость отдельных сегментов. Точки стоят на каждой границе полос, на краю проезжей части (в том числе за парковочными полосами) и вторым рядом за 8 м до перекрёстка — для сплошной перед стоп-линией, запрещающей перестроение.
+- **Заливки областей** по обведённому полигону — точки цепляются к концам полос, углам бордюров и пересечениям линий, рёбра повторяют кривизну линий. Вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон, трава, песок, тротуарная плитка, плитка, асфальтовая заплатка (нужен отдельный мод «G87 Vanilla Asphalt Pavement»).
 - **Скрытие ванильной разметки** на отдельном перекрёстке, чтобы начать с чистого листа.
+- **Пины любимых стилей** — звёздочка в любом дропдауне стилей закрепляет стиль наверху всех списков.
 - Полноценная панель в игре (английский + русский) и горячие клавиши: **Ctrl+M** — инструмент, **Y** — стиль линии, **A** — режим области, **U** — заливка области.
 
 ## Автоматическая разметка
@@ -77,7 +79,7 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/town-road-lane-road-markings-draw-your-own-lines-area-fills-on-any-intersection.1935028/" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.3.4" />
+	<ModVersion Value="2.4.0" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -92,26 +94,13 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-# 2.3.4 — bike lanes, real style pickers, splitting knobs
+# 2.4.0 — vanilla surface fills, curb lines, pinned favourites
 
-- **Fixed: anchor dots next to bike lanes sat slightly off the paint line** (forum report: a line hugs one side of the bike lane but leaves a gap on the other). The dot between two lanes of DIFFERENT widths (bike 1.5 m next to car 3 m) was placed at the midpoint of the lane centres instead of on their shared edge. Existing lines drawn to the offset dots snap to the corrected position automatically.
-- **Per-segment style is now a proper dropdown.** The segment popover always could restyle a single segment, but the control was an unlabeled cycle button nobody discovered — one forum user rebuilt the feature by hand with two overlapping lines. Both in-world popovers (segment style, area fill) now use the same swatch picker as the panel.
-- **New settings: segment splitting.** How drawn lines split into segments where they cross is now tunable — minimum segment length and the dead zone around anchor dots in the main group; minimum crossing angle and crossing cluster radius under fine tuning. Changes apply to a junction on its next line edit, or everywhere after reloading the save — no game restart needed. Defaults match previous behaviour.
-- Diagnostics: clicking a junction with the marking tool now logs each connected road's full lane composition — makes marking issues on unusual/modded roads much easier to report.
-
-# 2.3.3 — maintenance
-
-- Build housekeeping — no gameplay or feature changes. Debug info in the shipped binaries now uses tidy relative source paths, so stack traces in logs are shorter and cleaner.
-- Docs: known limitations now note that area fill edges curve only along lines drawn with this mod — the game's own markings are not traced (the fill edge stays straight along them).
-
-# 2.3.2 — settings that stick, markings that stay on the bridge
-
-- **Fixed: mod settings could silently fail to save** (reported as the parking-markings toggle turning itself back on after every game restart). The settings class shared its name with other mods built from the same template, and the game matches settings by bare class name when saving — with such a mod installed, this mod's settings file was never written.
-- **Fixed: markings drawn on elevated roads rendered on the ground under the structure.** Anchor dots and area fills on bridges/ramps now sit on the road deck. Area fills drawn on bridges before this update stay on the ground until you hide/show them once (or redraw).
-- **Fixed: possible game crash after pressing "Reapply markings" and then editing roads.** The reapply button is removed — refreshing marking prefabs in a live world cannot be made safe. Settings changes now take effect after restarting the game; option descriptions updated accordingly.
-- **Fixed: with "Edge line on city roads" disabled, manually drawn lines could stop rendering after loading a save** (with log spam), and in the worst case crash the game. The style prefabs now always exist; the settings toggles only control the automatic markings.
-- **Default line curvature now adapts to the connection angle** — a line between diverging ramp lanes gets a default curve that actually hugs the carriageway edge instead of a too-flat one. Existing lines keep their saved curvature.
-- Default parking line style is now the G87 dashed decal (falls back to the vanilla dashed line if G87 isn't installed).
+- **New area fills: the game's own surfaces.** Grass (regular + dark), sand, pavement and three tile styles can now be used as junction fills — no extra mods needed. These vanilla surfaces previously could not render on roads at all; big thanks to the ExtraAssetsImporter source code for showing the way.
+- **New line style: Curb.** Draws the vanilla curb texture along any segment — outline traffic islands and medians with a proper curb edge. Needs the free "[G87] Vanilla Curb" mod; without it the style falls back to a plain line.
+- **Pin your favourite styles.** Every style dropdown (panel and in-world popovers) now shows a star on each entry — pinned styles stay at the top of every list. Pins persist across game restarts.
+- UI: style dropdown menus now size to their longest entry, so nothing clips; fill styles from the auto-installed G87 packs dropped the "(G87)" suffix — the marker stays only on styles that need optional mods (Asphalt — G87 VA, Curb — G87 VC).
+- Diagnostics: the startup survey now also logs every net-lane mesh with its dimensions — useful when reporting issues with modded road assets.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />

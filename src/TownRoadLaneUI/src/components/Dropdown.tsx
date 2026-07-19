@@ -27,6 +27,8 @@ export interface DropdownOption<V> {
   label: string;
   /** Optional visual sample rendered before the label (style swatches etc). */
   preview?: ReactNode;
+  /** Pinned favourite — filled pin icon; callers sort pinned options first. */
+  pinned?: boolean;
 }
 
 export interface DropdownProps<V> {
@@ -39,6 +41,10 @@ export interface DropdownProps<V> {
    *  without this signal a hover-expanded popover collapses and unmounts the
    *  dropdown mid-interaction. */
   onOpenChange?: (open: boolean) => void;
+  /** When set, every menu item grows a trailing pin button that toggles the
+   *  option's favourite status. Clicking the pin does NOT select the option or
+   *  close the menu — the list just re-sorts on the next binding push. */
+  onTogglePin?: (v: V) => void;
 }
 
 const Container = styled.div`
@@ -110,6 +116,15 @@ const Item = styled.div`
   }
 `;
 
+// Menu item label: nowrap defines the menu's shrink-wrap width; ellipsis only
+// kicks in when the screen-edge maxWidth clips the menu — the pin never clips.
+const ItemLabel = styled.span`
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
 // Swatch slot before the label (toggle + menu items). flex-shrink 0 so the
 // ellipsized label never squeezes the sample.
 const Preview = styled.span`
@@ -119,18 +134,46 @@ const Preview = styled.span`
   margin-right: ${T.space2};
 `;
 
+// Trailing pin toggle on menu items. A padded hit target noticeably larger than
+// the 12px glyph — dropdown rows are dense and the pin competes with "select".
+const PinBtn = styled.span`
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 2rem 2rem 2rem ${T.space2};
+  border-radius: ${T.radiusSm};
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+`;
+
+// Inline SVG pin (star) — unicode glyph coverage in cohtml is unreliable, SVG
+// is not. Filled amber = pinned, faint outline = not.
+const PinIcon = ({ active }: { active: boolean }) => (
+  <svg width={12} height={12} viewBox="0 0 12 12" fill="none">
+    <path
+      d="M6 1 L7.4 4.2 L10.9 4.5 L8.2 6.8 L9 10.2 L6 8.4 L3 10.2 L3.8 6.8 L1.1 4.5 L4.6 4.2 Z"
+      fill={active ? "#f2c94c" : "none"}
+      stroke={active ? "#f2c94c" : "rgba(255, 255, 255, 0.4)"}
+      strokeWidth={1}
+    />
+  </svg>
+);
+
 const itemSelectedStyle = {
   background: T.colorAccentDim,
   color: T.colorTextPrimary,
 };
 
-export const Dropdown = <V,>({ value, options, onChange, placeholder = "—", onOpenChange }: DropdownProps<V>) => {
+export const Dropdown = <V,>({ value, options, onChange, placeholder = "—", onOpenChange, onTogglePin }: DropdownProps<V>) => {
   const [isOpen, setIsOpen] = useState(false);
   const setOpen = (next: boolean) => {
     setIsOpen(next);
     onOpenChange?.(next);
   };
-  const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number; maxWidth: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLDivElement>(null);
 
@@ -143,6 +186,9 @@ export const Dropdown = <V,>({ value, options, onChange, placeholder = "—", on
       top: rect.bottom + 2,
       left: rect.left,
       width: rect.width,
+      // Let the menu outgrow the toggle for long labels, but never past the
+      // right screen edge (popovers can sit close to it).
+      maxWidth: Math.max(rect.width, window.innerWidth - rect.left - 8),
     });
   }, [isOpen]);
 
@@ -188,7 +234,10 @@ export const Dropdown = <V,>({ value, options, onChange, placeholder = "—", on
         createPortal(
           <Menu
             data-trl-dropdown-menu="1"
-            style={{ top: menuRect.top, left: menuRect.left, width: menuRect.width }}
+            // min-width = toggle width so short lists still align with the
+            // control; no fixed width — the fixed-position menu shrink-wraps
+            // to its widest item, so long labels and the pin button always fit.
+            style={{ top: menuRect.top, left: menuRect.left, minWidth: menuRect.width, maxWidth: menuRect.maxWidth }}
           >
             {options.map((opt, idx) => (
               <Item
@@ -197,7 +246,17 @@ export const Dropdown = <V,>({ value, options, onChange, placeholder = "—", on
                 onClick={() => handleSelect(opt.value)}
               >
                 {opt.preview && <Preview>{opt.preview}</Preview>}
-                <span>{opt.label}</span>
+                <ItemLabel>{opt.label}</ItemLabel>
+                {onTogglePin && (
+                  <PinBtn
+                    onClick={(e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      onTogglePin(opt.value);
+                    }}
+                  >
+                    <PinIcon active={!!opt.pinned} />
+                  </PinBtn>
+                )}
               </Item>
             ))}
           </Menu>,

@@ -97,6 +97,9 @@ namespace TownRoadLane
         private const string kG87DashedMesh       = kG87Prefix + "UK Carriageway Line White Dashed NetLaneDecal_RenderPrefab";
         private const string kG87YellowMesh       = kG87Prefix + "UK Carriageway Line Yellow NetLaneDecal_RenderPrefab";
         private const string kG87YellowDashedMesh = kG87Prefix + "UK Carriageway Line Yellow Dashed NetLaneDecal_RenderPrefab";
+        // From the optional "[G87] Vanilla Curb" mod (not our hard deps). Missing mod →
+        // PickMesh keeps the source prefab's own mesh.
+        private const string kCurbMesh = "G87 Vanilla Curb Misc G87 Vanilla Curb NetLane_RenderPrefab";
 
         private static readonly StyleRecipe[] kStyleRecipes =
         {
@@ -130,6 +133,11 @@ namespace TownRoadLane
             new() { style = MarkingStyle.G87YellowDashed, isNA = true,  sourcePrefabName = "NA Car Bay Line",  cloneName = "TownRoadLane NA City G87 Yellow Dashed Line", fallbackMesh = kG87YellowDashedMesh, hostOnCityLanes = false },
             new() { style = MarkingStyle.DashedLong,      isNA = false, sourcePrefabName = "EU Car Lane Line", cloneName = "TownRoadLane EU City Dashed Long Line",       fallbackMesh = "White Dashed Line Mesh - Long", hostOnCityLanes = false },
             new() { style = MarkingStyle.DashedLong,      isNA = true,  sourcePrefabName = "NA Car Lane Line", cloneName = "TownRoadLane NA City Dashed Long Line",       fallbackMesh = "White Dashed Line Mesh - Long", hostOnCityLanes = false },
+            // Curb (2026-07-19): vanilla curb texture, "[G87] Vanilla Curb" optional mod.
+            // Visual curb line for island/median edges — the flat stand-in for a real 3D curb
+            // (no curb mesh exists in vanilla — see the netlane-geom survey in the log).
+            new() { style = MarkingStyle.Curb,            isNA = false, sourcePrefabName = "EU Car Bay Line",  cloneName = "TownRoadLane EU City Curb Line",              fallbackMesh = kCurbMesh, hostOnCityLanes = false },
+            new() { style = MarkingStyle.Curb,            isNA = true,  sourcePrefabName = "NA Car Bay Line",  cloneName = "TownRoadLane NA City Curb Line",              fallbackMesh = kCurbMesh, hostOnCityLanes = false },
         };
 
         private PrefabSystem m_PrefabSystem;

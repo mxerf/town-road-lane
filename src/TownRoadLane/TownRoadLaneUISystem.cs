@@ -50,6 +50,9 @@ namespace TownRoadLane
 
         private ValueBindingHelper<PanelStateVM> _panelState;
         private ValueBindingHelper<SegmentPointVM[]> _screenPoints;
+        // Pinned "favourite" styles for the dropdowns — persisted as CSV in settings, pushed
+        // to React as int arrays. Toggled by the pin buttons on dropdown options.
+        private ValueBindingHelper<PinnedStylesVM> _pinnedStyles;
         // Content hashes gating the pushes above — see RebuildBindings. 0 = "nothing published
         // yet"; both start at the FNV offset so an all-default state still differs and pushes once.
         private ulong _lastStateHash;
@@ -89,6 +92,7 @@ namespace TownRoadLane
 
             _panelState = CreateBinding("GetPanelState", new PanelStateVM());
             _screenPoints = CreateBinding("GetScreenPoints", Array.Empty<SegmentPointVM>());
+            _pinnedStyles = CreateBinding("GetPinnedStyles", BuildPinnedStylesVM());
 
             // i18n locale binding — React reads this to pick which dictionary
             // (en-US, ru-RU, ...) to render strings from. Re-evaluated every
@@ -106,6 +110,8 @@ namespace TownRoadLane
             CreateTrigger("ActivateTool", OnActivateTool);
             CreateTrigger<int>("SetCurrentStyle", OnSetCurrentStyle);
             CreateTrigger<int>("SetCurrentAreaStyle", OnSetCurrentAreaStyle);
+            CreateTrigger<int>("TogglePinLineStyle", OnTogglePinLineStyle);
+            CreateTrigger<int>("TogglePinAreaStyle", OnTogglePinAreaStyle);
             CreateTrigger("ToggleAreaMode", OnToggleAreaMode);
             CreateTrigger<int, int>("SetAreaStyle", OnSetAreaStyle);
             CreateTrigger<int>("ToggleAreaVisible", OnToggleAreaVisible);
@@ -756,6 +762,47 @@ namespace TownRoadLane
             _tool?.SetCurrentAreaStyle(styleId);
         }
 
+        // --- Pinned favourite styles (dropdown pin buttons) ---
+
+        private void OnTogglePinLineStyle(int style)
+        {
+            if (Mod.Settings == null) return;
+            Mod.Settings.PinnedLineStylesCsv = ToggleIdInCsv(Mod.Settings.PinnedLineStylesCsv, style);
+            Mod.Settings.ApplyAndSave();
+            _pinnedStyles.Value = BuildPinnedStylesVM();
+        }
+
+        private void OnTogglePinAreaStyle(int styleId)
+        {
+            if (Mod.Settings == null) return;
+            Mod.Settings.PinnedAreaStylesCsv = ToggleIdInCsv(Mod.Settings.PinnedAreaStylesCsv, styleId);
+            Mod.Settings.ApplyAndSave();
+            _pinnedStyles.Value = BuildPinnedStylesVM();
+        }
+
+        private static PinnedStylesVM BuildPinnedStylesVM() => new()
+        {
+            lineStyles = ParseCsv(Mod.Settings?.PinnedLineStylesCsv),
+            areaStyles = ParseCsv(Mod.Settings?.PinnedAreaStylesCsv),
+        };
+
+        private static int[] ParseCsv(string csv)
+        {
+            if (string.IsNullOrEmpty(csv)) return Array.Empty<int>();
+            var parts = csv.Split(',');
+            var result = new List<int>(parts.Length);
+            foreach (var p in parts)
+                if (int.TryParse(p.Trim(), out int v) && !result.Contains(v)) result.Add(v);
+            return result.ToArray();
+        }
+
+        private static string ToggleIdInCsv(string csv, int id)
+        {
+            var ids = new List<int>(ParseCsv(csv));
+            if (!ids.Remove(id)) ids.Add(id);
+            return string.Join(",", ids);
+        }
+
         /// <summary>Panel mode switch: NodeSelected ⇄ AreaSelecting. Entering clears any running
         /// contour; leaving drops a partial contour without committing (same as the A hotkey).</summary>
         private void OnToggleAreaMode()
@@ -881,6 +928,14 @@ namespace TownRoadLane
 
     /// <summary>Panel structure snapshot — everything the React panel renders except the
     /// camera-dependent popover anchors (those travel via <see cref="SegmentPointVM"/>).</summary>
+    /// <summary>Pinned favourite style ids for the UI dropdowns. Field names are the React
+    /// contract (GenericUIWriter serializes them verbatim) — see usePinnedStyles.ts.</summary>
+    public class PinnedStylesVM
+    {
+        public int[] lineStyles = Array.Empty<int>();
+        public int[] areaStyles = Array.Empty<int>();
+    }
+
     public class PanelStateVM
     {
         public bool isActive;

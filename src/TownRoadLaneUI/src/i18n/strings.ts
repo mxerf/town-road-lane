@@ -50,7 +50,7 @@ const enUS = {
   "next.lineStyle":           "New line style",
   "next.lineStyle.tooltip":   "Style applied to the NEXT line you draw (hotkey Y cycles it)",
   "next.areaStyle":           "New area fill",
-  "next.areaStyle.tooltip":   "Fill applied to the NEXT area you close (hotkey U cycles it). Fills marked (G87) need the G87 Road Markings packs; Asphalt needs the separate 'G87 Vanilla Asphalt Pavement' mod. Missing fills fall back to concrete.",
+  "next.areaStyle.tooltip":   "Fill applied to the NEXT area you close (hotkey U cycles it). Asphalt needs the separate 'G87 Vanilla Asphalt Pavement' mod (G87 VA); missing fills fall back to concrete. Pin favourites with the star to keep them on top.",
 
   // Sections
   "section.lines":            "Lines",
@@ -67,13 +67,20 @@ const enUS = {
 
   // Area fill styles (indexes match kStyleSurfaceNames on the C# side)
   "areaStyle.0":              "Concrete",
-  "areaStyle.1":              "Junction box (G87)",
-  "areaStyle.2":              "White stripes (G87)",
-  "areaStyle.3":              "White stripes, sparse (G87)",
-  "areaStyle.4":              "Yellow stripes (G87)",
-  "areaStyle.5":              "Green bike lane (G87)",
-  "areaStyle.6":              "Red bus lane (G87)",
+  "areaStyle.1":              "Junction box",
+  "areaStyle.2":              "White stripes",
+  "areaStyle.3":              "White stripes, sparse",
+  "areaStyle.4":              "Yellow stripes",
+  "areaStyle.5":              "Green bike lane",
+  "areaStyle.6":              "Red bus lane",
   "areaStyle.14":             "Asphalt (G87 VA)",
+  "areaStyle.15":             "Grass",
+  "areaStyle.17":             "Grass, dark",
+  "areaStyle.18":             "Sand",
+  "areaStyle.19":             "Pavement",
+  "areaStyle.20":             "Tiles 1",
+  "areaStyle.21":             "Tiles 2",
+  "areaStyle.22":             "Tiles 3",
 
   // Full node reset
   "node.reset":               "Reset all markings",
@@ -123,6 +130,7 @@ const enUS = {
   "style.dashedLong":         "Dashed, long",
   "style.g87Yellow":          "G87 Yellow",
   "style.g87YellowDashed":    "G87 Yellow Dashed",
+  "style.curb":               "Curb (G87 VC)",
   "style.unknown":            "?",
 } as const;
 
@@ -169,7 +177,7 @@ const ruRU: LocaleDict = {
   "next.lineStyle":           "Стиль новой линии",
   "next.lineStyle.tooltip":   "Стиль СЛЕДУЮЩЕЙ линии, которую вы проведёте (хоткей Y листает по кругу)",
   "next.areaStyle":           "Заливка новой области",
-  "next.areaStyle.tooltip":   "Заливка СЛЕДУЮЩЕЙ замкнутой области (хоткей U листает по кругу). Стили с пометкой (G87) требуют паки G87 Road Markings; асфальт — отдельный мод «G87 Vanilla Asphalt Pavement». Недоступные стили откатываются к бетону.",
+  "next.areaStyle.tooltip":   "Заливка СЛЕДУЮЩЕЙ замкнутой области (хоткей U листает по кругу). Асфальту нужен отдельный мод «G87 Vanilla Asphalt Pavement» (G87 VA); недоступные стили откатываются к бетону. Звёздочка закрепляет любимые стили наверху.",
 
   // Sections
   "section.lines":            "Линии",
@@ -186,13 +194,20 @@ const ruRU: LocaleDict = {
 
   // Area fill styles (indexes match kStyleSurfaceNames on the C# side)
   "areaStyle.0":              "Бетон",
-  "areaStyle.1":              "Вафельная разметка (G87)",
-  "areaStyle.2":              "Белая штриховка (G87)",
-  "areaStyle.3":              "Белая штриховка, редкая (G87)",
-  "areaStyle.4":              "Жёлтая штриховка (G87)",
-  "areaStyle.5":              "Зелёная велополоса (G87)",
-  "areaStyle.6":              "Красная автобусная полоса (G87)",
+  "areaStyle.1":              "Вафельная разметка",
+  "areaStyle.2":              "Белая штриховка",
+  "areaStyle.3":              "Белая штриховка, редкая",
+  "areaStyle.4":              "Жёлтая штриховка",
+  "areaStyle.5":              "Зелёная велополоса",
+  "areaStyle.6":              "Красная автобусная полоса",
   "areaStyle.14":             "Асфальт (G87 VA)",
+  "areaStyle.15":             "Трава",
+  "areaStyle.17":             "Трава тёмная",
+  "areaStyle.18":             "Песок",
+  "areaStyle.19":             "Тротуарная плитка",
+  "areaStyle.20":             "Плитка 1",
+  "areaStyle.21":             "Плитка 2",
+  "areaStyle.22":             "Плитка 3",
 
   // Full node reset
   "node.reset":               "Сбросить всю разметку",
@@ -242,6 +257,7 @@ const ruRU: LocaleDict = {
   "style.dashedLong":         "Пунктир, длинный",
   "style.g87Yellow":          "G87 Жёлтая",
   "style.g87YellowDashed":    "G87 Жёлтый пунктир",
+  "style.curb":               "Бордюр (G87 VC)",
   "style.unknown":            "?",
 };
 

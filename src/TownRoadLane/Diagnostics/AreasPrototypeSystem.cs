@@ -53,6 +53,7 @@ namespace TownRoadLane.Diagnostics
             ProbeAllPrefabsByNameSubstring("G87");
             ProbeAllPrefabsByNameSubstring("g87");
             ProbeSurfacePrefabCountAgain();
+            ProbeNetLaneGeometry();
             log.Info("[AreasPrototype] === second pass done — disabling ===");
             Enabled = false;
         }
@@ -93,6 +94,36 @@ namespace TownRoadLane.Diagnostics
                     : "<no RenderedArea>";
                 log.Info($"[AreasPrototype]   surf[{i}] {sp.name} | {raInfo}");
             }
+        }
+
+        private void ProbeNetLaneGeometry()
+        {
+            // Curb hunt: our line pipeline can spawn any NetLane prefab along a segment curve,
+            // and the vanilla sublane path renders 3D meshes along curves natively (fences,
+            // hedges). A per-segment "curb" style therefore only needs an existing NetLane
+            // prefab with a curb-like profile. Dump every NetLaneGeometryPrefab (the ones
+            // with real lane meshes, not decals) with its mesh names and bounds — the
+            // cross-section (x=width, y=height) tells us what's curb-shaped.
+            var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
+            using var ents = query.ToEntityArray(Allocator.Temp);
+            int geomCount = 0;
+            for (int i = 0; i < ents.Length; i++)
+            {
+                if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
+                if (pb is not NetLaneGeometryPrefab glp || glp.m_Meshes == null || glp.m_Meshes.Length == 0) continue;
+                geomCount++;
+                var meshes = new System.Text.StringBuilder();
+                for (int m = 0; m < glp.m_Meshes.Length; m++)
+                {
+                    var mesh = glp.m_Meshes[m].m_Mesh;
+                    if (meshes.Length > 0) meshes.Append("; ");
+                    if (mesh == null) { meshes.Append("<null>"); continue; }
+                    var size = mesh.bounds.max - mesh.bounds.min;
+                    meshes.Append($"{mesh.name} [{size.x:F2}w×{size.y:F2}h×{size.z:F2}l m]");
+                }
+                log.Info($"[AreasPrototype]   netlane-geom {glp.name} ({glp.GetType().Name}): {meshes}");
+            }
+            log.Info($"[AreasPrototype] NetLane survey: {ents.Length} NetLane prefab(s) total, {geomCount} with 3D lane meshes");
         }
 
         private void ProbeShader()

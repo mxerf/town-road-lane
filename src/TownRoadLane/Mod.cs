@@ -42,6 +42,10 @@ namespace TownRoadLane
             GameManager.instance.localizationManager.AddSource("ru-RU", new LocaleRU(Settings));
             AssetDatabase.global.LoadSettings(nameof(TownRoadLane), Settings, new TownRoadLaneSetting(this));
 
+            // EXPERIMENT: vanilla grass surface as an area fill, registered on a live frame
+            // (the EAI recipe — see VanillaSurfaceLateClone). Style slots 15/16.
+            VanillaSurfaceLateClone.Register(updateSystem.World);
+
             // Read-only structural dump, useful when something changes between game patches.
             updateSystem.UpdateAt<RoadPrefabDumpSystem>(SystemUpdatePhase.PrefabUpdate);
             // Phase 6 prototype: one-shot probes for Shader.Find + vanilla SurfacePrefab inventory.

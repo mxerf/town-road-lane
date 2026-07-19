@@ -45,10 +45,17 @@ export const LineStylePreview = ({
   const dashedShort = style === 5;
   const dashedLong = style === 8;
   const double = style === 4;
+  const border = style === 9;
   const paint = style === 6 || style === 7 ? PAINT_YELLOW : PAINT;
   return (
     <svg width={width} height={height} viewBox="0 0 36 10" fill="none">
-      {double ? (
+      {border ? (
+        // Curb: concrete band with a shadow edge, not paint.
+        <>
+          <rect x="1" y="3" width="34" height="4" rx="1" fill="#97a0a8" />
+          <rect x="1" y="6" width="34" height="1" fill="#5a6068" />
+        </>
+      ) : double ? (
         <>
           <rect x="1" y="2.5" width="34" height="2" fill={paint} />
           <rect x="1" y="5.5" width="34" height="2" fill={paint} />
@@ -104,6 +111,13 @@ const SOLID_FILLS: Record<number, string> = {
   5: BIKE_GREEN,
   6: BUS_RED,
   14: "#3f444a",  // asphalt
+  15: "#4d7a3a",  // grass
+  17: "#3d5c2e",  // grass, dark
+  18: "#c9a961",  // sand
+  19: "#8f8f89",  // pavement
+  20: "#a39682",  // tiles 1
+  21: "#93857a",  // tiles 2
+  22: "#7e8291",  // tiles 3
 };
 
 export const AreaStylePreview = ({ styleId, size = 14 }: { styleId: number; size?: number }) => {

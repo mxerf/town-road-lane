@@ -27,6 +27,11 @@ import {
   SegmentVM,
   AreaVM,
 } from "../hooks/useToolState";
+import {
+  usePinnedStyles,
+  cmdTogglePinLineStyle,
+  cmdTogglePinAreaStyle,
+} from "../hooks/usePinnedStyles";
 import { registerSegmentAnchor, setAnchorExpanded, segKey, areaKey } from "../hooks/positionRegistry";
 import { ChevronRight, Cross, Eye, EyeOff, Trash, Cycle } from "../components/icons";
 import { LineStylePreview, AreaStylePreview, isG87LineStyle } from "../components/stylePreviews";
@@ -116,7 +121,7 @@ const PanelErrorFallback = ({ error, onRetry }: { error: Error; onRetry: () => v
 };
 
 // MarkingStyle enum on the C# side — numeric values must stay in sync.
-const STYLE_VALUES = [0, 1, 5, 8, 2, 3, 6, 7, 4] as const;
+const STYLE_VALUES = [0, 1, 5, 8, 2, 3, 6, 7, 4, 9] as const;
 type StyleValue = typeof STYLE_VALUES[number];
 
 // Lookup table: enum value → i18n string key. Keeps style label rendering
@@ -134,6 +139,7 @@ const STYLE_KEYS: Record<number, StringKey> = {
   6: "style.g87Yellow",
   7: "style.g87YellowDashed",
   8: "style.dashedLong",
+  9: "style.curb",
 };
 
 const styleLabel = (t: ReturnType<typeof useT>, style: number): string =>
@@ -144,7 +150,9 @@ const styleLabel = (t: ReturnType<typeof useT>, style: number): string =>
 // those surfaces can't be made to render on intersections, see the emission
 // catalogue comment) and are hidden here. The numeric id order is append-only
 // serialization history, not a presentation order.
-const AREA_STYLE_VALUES = [0, 14, 1, 2, 3, 4, 5, 6] as const;
+// 15/17+ — vanilla surfaces revived via VanillaSurfaceLateClone (16 is a retired
+// reserved slot, like 7-13).
+const AREA_STYLE_VALUES = [0, 14, 1, 2, 3, 4, 5, 6, 15, 17, 18, 19, 20, 21, 22] as const;
 const AREA_STYLE_ID_SET: ReadonlySet<number> = new Set(AREA_STYLE_VALUES);
 
 const areaStyleLabel = (t: ReturnType<typeof useT>, styleId: number): string => {
@@ -153,19 +161,30 @@ const areaStyleLabel = (t: ReturnType<typeof useT>, styleId: number): string => 
 };
 
 // Shared option lists for every style picker (panel rows + in-world popovers).
-const makeLineStyleOptions = (t: ReturnType<typeof useT>): DropdownOption<StyleValue>[] =>
-  STYLE_VALUES.map((s) => ({
-    value: s,
-    label: styleLabel(t, s),
-    preview: <LineStylePreview style={s} width={28} height={8} />,
-  }));
+// `pinned` = the user's favourite ids (usePinnedStyles) — those options float to
+// the top in their catalogue order; the rest keep the curated order below.
+const sortPinnedFirst = <V,>(opts: DropdownOption<V>[]): DropdownOption<V>[] =>
+  [...opts.filter((o) => o.pinned), ...opts.filter((o) => !o.pinned)];
 
-const makeAreaStyleOptions = (t: ReturnType<typeof useT>): DropdownOption<number>[] =>
-  AREA_STYLE_VALUES.map((s) => ({
-    value: s,
-    label: areaStyleLabel(t, s),
-    preview: <AreaStylePreview styleId={s} size={12} />,
-  }));
+const makeLineStyleOptions = (t: ReturnType<typeof useT>, pinned: number[]): DropdownOption<StyleValue>[] =>
+  sortPinnedFirst(
+    STYLE_VALUES.map((s) => ({
+      value: s,
+      label: styleLabel(t, s),
+      preview: <LineStylePreview style={s} width={28} height={8} />,
+      pinned: pinned.includes(s),
+    })),
+  );
+
+const makeAreaStyleOptions = (t: ReturnType<typeof useT>, pinned: number[]): DropdownOption<number>[] =>
+  sortPinnedFirst(
+    AREA_STYLE_VALUES.map((s) => ({
+      value: s,
+      label: areaStyleLabel(t, s),
+      preview: <AreaStylePreview styleId={s} size={12} />,
+      pinned: pinned.includes(s),
+    })),
+  );
 
 // Exported wrapper — boundary first, then real panel. moduleRegistry mounts
 // this into GameTopRight, so the boundary protects the game UI from our bugs.
@@ -193,6 +212,7 @@ const POPOVER_DELETE_CONFIRM_MS = 2500;
 
 const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   const t = useT();
+  const pinned = usePinnedStyles();
   const key = segKey(seg.lineIndex, seg.segmentIndex);
   const [expanded, setExpanded] = useState(false);
   // The style dropdown's menu is portalled to document.body — while it's open
@@ -262,8 +282,9 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
           <PopoverDropdownWrap>
             <Dropdown
               value={seg.style as StyleValue}
-              options={makeLineStyleOptions(t)}
+              options={makeLineStyleOptions(t, pinned.lineStyles)}
               onChange={(s) => cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, s)}
+              onTogglePin={cmdTogglePinLineStyle}
               onOpenChange={(open) => {
                 setStyleOpen(open);
                 // Menu closed with the cursor possibly over the (portalled)
@@ -319,6 +340,7 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
 // swatch, so the dot itself says which area it is.
 const AreaPopover = ({ area }: { area: AreaVM }) => {
   const t = useT();
+  const pinned = usePinnedStyles();
   const key = areaKey(area.areaIndex);
   const [expanded, setExpanded] = useState(false);
   // Same contract as SegmentPopover: keep the row mounted while the portalled
@@ -370,8 +392,9 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
           <PopoverDropdownWrap>
             <Dropdown
               value={area.styleId}
-              options={makeAreaStyleOptions(t)}
+              options={makeAreaStyleOptions(t, pinned.areaStyles)}
               onChange={(s) => cmdSetAreaStyle(area.areaIndex, s)}
+              onTogglePin={cmdTogglePinAreaStyle}
               onOpenChange={(open) => {
                 setStyleOpen(open);
                 if (!open) {
@@ -456,6 +479,7 @@ const toolStatus = (t: ReturnType<typeof useT>, state: { toolState: number; area
 const TownRoadLanePanelInner = () => {
   const state = useToolState();
   const t = useT();
+  const pinned = usePinnedStyles();
   // Index of the currently-expanded line row. -1 = all collapsed.
   // Auto-snaps to a single-line selection so a fresh node opens immediately.
   const [expandedLine, setExpandedLine] = useState<number>(-1);
@@ -611,8 +635,8 @@ const TownRoadLanePanelInner = () => {
     expandedLine >= 0 && expandedLine < state.lines.length ? state.lines[expandedLine] : null;
   const popoverArea = state.areas.find((a) => a.areaIndex === expandedArea) ?? null;
 
-  const lineStyleOptions = makeLineStyleOptions(t);
-  const areaStyleOptions = makeAreaStyleOptions(t);
+  const lineStyleOptions = makeLineStyleOptions(t, pinned.lineStyles);
+  const areaStyleOptions = makeAreaStyleOptions(t, pinned.areaStyles);
 
   return (
     <>
@@ -661,6 +685,7 @@ const TownRoadLanePanelInner = () => {
                   value={state.currentAreaStyle}
                   options={areaStyleOptions}
                   onChange={(s) => cmdSetCurrentAreaStyle(s)}
+                  onTogglePin={cmdTogglePinAreaStyle}
                 />
               </FieldRow>
               <DraftBox>
@@ -681,6 +706,7 @@ const TownRoadLanePanelInner = () => {
                 value={state.currentStyle as StyleValue}
                 options={lineStyleOptions}
                 onChange={(s) => cmdSetCurrentStyle(s)}
+                onTogglePin={cmdTogglePinLineStyle}
               />
             </FieldRow>
           )}
@@ -899,6 +925,7 @@ const AreaRow = ({
             value={area.styleId}
             options={areaStyleOptions}
             onChange={(s) => cmdSetAreaStyle(area.areaIndex, s)}
+            onTogglePin={cmdTogglePinAreaStyle}
           />
         </FieldRow>
         <Tooltip content={area.visible ? t("area.hide.tooltip") : t("area.show.tooltip")}>
@@ -1098,12 +1125,14 @@ const CurvatureInput = ({ line }: { line: LineVM }) => {
 // on each render so they pick up locale changes (cheap — 5 entries).
 const StyleSelector = ({ line }: { line: LineVM }) => {
   const t = useT();
+  const pinned = usePinnedStyles();
   return (
     <StyleRow>
       <Dropdown
         value={line.style as StyleValue}
-        options={makeLineStyleOptions(t)}
+        options={makeLineStyleOptions(t, pinned.lineStyles)}
         onChange={(s) => cmdSetLineStyle(line.lineIndex, s)}
+        onTogglePin={cmdTogglePinLineStyle}
       />
     </StyleRow>
   );

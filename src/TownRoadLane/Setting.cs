@@ -143,6 +143,16 @@ namespace TownRoadLane
         public bool IsEdgeDisabled() => !EdgeLineEnabled;
         public bool IsParkingDisabled() => !ParkingMarkingsEnabled;
 
+        // Pinned "favourite" styles for the in-game dropdowns (panel + popovers): CSV of the
+        // numeric style ids, e.g. "2,6". Managed by the pin buttons in the UI (see
+        // TownRoadLaneUISystem TogglePin* triggers), hidden from the options screen — these
+        // live here only so they persist like every other setting.
+        [SettingsUIHidden]
+        public string PinnedLineStylesCsv { get; set; } = "";
+
+        [SettingsUIHidden]
+        public string PinnedAreaStylesCsv { get; set; } = "";
+
         public override void SetDefaults()
         {
             EdgeLineEnabled = true;
@@ -154,6 +164,8 @@ namespace TownRoadLane
             SegmentAnchorDeadZoneM = MarkingTopologySystem.kDefaultEndpointMarginM;
             SegmentMinCrossingAngleDeg = MarkingTopologySystem.kDefaultMinCrossingAngleDeg;
             SegmentHitClusterM = MarkingTopologySystem.kDefaultHitClusterM;
+            PinnedLineStylesCsv = "";
+            PinnedAreaStylesCsv = "";
         }
 
         // G87 RenderPrefab name prefixes — full names are very long; build them once.

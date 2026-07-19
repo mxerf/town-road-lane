@@ -81,8 +81,22 @@ namespace TownRoadLane
             "",                                                                                                  // 12 (reserved: Tiles 2)
             "",                                                                                                  // 13 (reserved: Tiles 3)
             "G87 Vanilla Asphalt Pavement G87 VA Surface URM Surface",                                           // 14 Asphalt patch (layer=Terrain,Roads)
+            // Vanilla-surface revival (2026-07-19): these prefabs are built at runtime by
+            // VanillaSurfaceLateClone on a LIVE frame — the timing the 2026-07-16 attempts
+            // missed (see the slot 7-13 comment above). Confirmed rendering on intersections.
+            Diagnostics.VanillaSurfaceLateClone.kCloneGrass,                                                     // 15 Grass
+            // Slot 16 was the one-day material-variant comparison specimen ("TRL Grass
+            // Surface B", template material + transplanted textures). It rendered identically
+            // to 15 and was retired the same day — reserved, like 7-13.
+            "",                                                                                                  // 16 (reserved: Grass variant B)
+            Diagnostics.VanillaSurfaceLateClone.kCloneGrassDark,                                                 // 17 Grass, dark
+            Diagnostics.VanillaSurfaceLateClone.kCloneSand,                                                      // 18 Sand
+            Diagnostics.VanillaSurfaceLateClone.kClonePavement,                                                  // 19 Pavement
+            Diagnostics.VanillaSurfaceLateClone.kCloneTiles1,                                                    // 20 Tiles 1
+            Diagnostics.VanillaSurfaceLateClone.kCloneTiles2,                                                    // 21 Tiles 2
+            Diagnostics.VanillaSurfaceLateClone.kCloneTiles3,                                                    // 22 Tiles 3
         };
-        public const int kStyleCount = 15;
+        public const int kStyleCount = 23;
         public const int kStyleSolidConcrete = 0;
 
         /// <summary>False for reserved (disabled) catalogue slots — they never resolve, are
