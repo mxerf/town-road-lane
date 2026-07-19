@@ -79,7 +79,7 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/town-road-lane-road-markings-draw-your-own-lines-area-fills-on-any-intersection.1935028/" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.4.0" />
+	<ModVersion Value="2.4.1" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -96,13 +96,10 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-# 2.4.0 — vanilla surface fills, curb lines, pinned favourites
+# 2.4.1 — Vanilla Curb ships as a dependency
 
-- **New area fills: the game's own surfaces.** Grass (regular + dark), sand, pavement and three tile styles can now be used as junction fills — no extra mods needed. These vanilla surfaces previously could not render on roads at all; big thanks to the ExtraAssetsImporter source code for showing the way.
-- **New line style: Curb.** Draws the vanilla curb texture along any segment — outline traffic islands and medians with a proper curb edge. Uses the "[G87] Vanilla Curb" pack, now included as a dependency (installs automatically, under 1 MB).
-- **Pin your favourite styles.** Every style dropdown (panel and in-world popovers) now shows a star on each entry — pinned styles stay at the top of every list. Pins persist across game restarts.
-- UI: style dropdown menus now size to their longest entry, so nothing clips; fill styles from the auto-installed G87 packs dropped the "(G87)" suffix — the marker stays only on styles that need optional mods (Asphalt — G87 VA, Curb — G87 VC).
-- Diagnostics: the startup survey now also logs every net-lane mesh with its dimensions — useful when reporting issues with modded road assets.
+- The "[G87] Vanilla Curb" pack (under 1 MB) is now a regular dependency and installs automatically — the Curb line style from 2.4.0 works out of the box. Already subscribed manually? Nothing changes for you.
+- The Curb style label dropped its "(G87 VC)" suffix accordingly.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />
