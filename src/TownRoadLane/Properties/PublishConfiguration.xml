@@ -64,6 +64,8 @@ Both G87 marking packs ship as dependencies and install automatically — they s
 	<!--Screenshot, can be set multiple times-->
 	<!-- Screenshot filenames carry a content hash: the PDX CDN caches by name, so re-publishing
 	     under a reused name can serve the stale image. New content = new name, always fresh. -->
+	<Screenshot Value="Properties/Screenshots/TRL_2ecbc8fe.jpg" />
+	<Screenshot Value="Properties/Screenshots/TRL_9c1107eb.jpg" />
 	<Screenshot Value="Properties/Screenshots/TRL_9f56d721.jpg" />
 	<Screenshot Value="Properties/Screenshots/TRL_f43d4d3e.jpg" />
 	<Screenshot Value="Properties/Screenshots/TRL_7f19dcc1.jpg" />
