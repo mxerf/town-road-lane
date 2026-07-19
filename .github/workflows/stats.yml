@@ -1,0 +1,40 @@
+# Subscriber-stats scraper: snapshots the public PDX Mods API into history.csv
+# on the data-only `stats` branch (no common history with main). Scheduled
+# workflows only run from the default branch, which is why this file lives here
+# while the data lives there.
+name: stats
+
+on:
+  schedule:
+    # Every 6 hours, at :17 — top-of-hour crons on GitHub get queued/skipped
+    # under load, an odd minute runs far more reliably.
+    - cron: "17 */6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stats
+
+      - name: Append datapoint
+        run: |
+          set -euo pipefail
+          json=$(curl -sf --retry 3 "https://api.paradox-interactive.com/mods?modId=150863&os=windows")
+          subs=$(echo "$json" | jq -r '.modDetail.subscriptions')
+          likes=$(echo "$json" | jq -r '.modDetail.ratingsTotal')
+          if [ -z "$subs" ] || [ "$subs" = "null" ]; then
+            echo "API returned no subscriptions field — skipping this run"
+            exit 1
+          fi
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ),$subs,$likes,api" >> history.csv
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history.csv
+          git commit -m "stats: $subs subscribers, $likes likes"
+          git push
