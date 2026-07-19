@@ -23,11 +23,13 @@ Click any intersection and draw your own markings:
 - **Pin favourite styles** — star any entry in a style dropdown to keep it at the top of every list.
 - In-game panel (English + Russian) and hotkeys: `Ctrl+M` toggle tool, `Y` cycle line style, `A` area mode, `U` cycle area fill.
 
+![Area mode: outlining a traffic island between anchor dots](src/TownRoadLane/Properties/Screenshots/TRL_a3fa8fbf.jpg)
+
 ![Zebra crossing and custom junction markings](src/TownRoadLane/Properties/Screenshots/TRL_9f56d721.jpg)
 
-![Y-junction with custom lane guidance](src/TownRoadLane/Properties/Screenshots/TRL_f43d4d3e.jpg)
+![Autumn interchange with chevron islands and lane guidance](src/TownRoadLane/Properties/Screenshots/TRL_9c1107eb.jpg)
 
-![Area fills](src/TownRoadLane/Properties/Screenshots/TRL_a051f879.jpg)
+![Junction with hatched safety islands](src/TownRoadLane/Properties/Screenshots/TRL_2ecbc8fe.jpg)
 
 ### Automatic markings
 Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included.
