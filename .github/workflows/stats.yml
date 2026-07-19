@@ -33,8 +33,9 @@ jobs:
             exit 1
           fi
           echo "$(date -u +%Y-%m-%dT%H:%M:%SZ),$subs,$likes,api" >> history.csv
+          python3 render_chart.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add history.csv
+          git add history.csv chart-light.svg chart-dark.svg
           git commit -m "stats: $subs subscribers, $likes likes"
           git push

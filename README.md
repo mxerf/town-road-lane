@@ -44,6 +44,15 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 - **Area fill edges** curve along a line only when that line was drawn with this mod. The game's own markings are not traced — along them the fill edge stays a straight segment between its points.
 - **Move It:** after moving or reshaping a road, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
 
+## Subscriber growth
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mxerf/town-road-lane/stats/chart-dark.svg">
+  <img alt="PDX Mods subscribers over time" src="https://raw.githubusercontent.com/mxerf/town-road-lane/stats/chart-light.svg" width="720">
+</picture>
+
+Snapshotted every 6 hours from the public PDX Mods API into the [`stats`](https://github.com/mxerf/town-road-lane/tree/stats) branch.
+
 ## Dependencies
 
 Line styles and area fills come from the G87 marking packs (installed automatically as PDX Mods dependencies):

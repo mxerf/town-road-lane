@@ -44,6 +44,15 @@
 - **Рёбра заливок** изгибаются вдоль линии, только если линия нарисована этим модом. Ванильную разметку заливка не огибает — вдоль неё ребро остаётся прямым отрезком между точками.
 - **Move It:** после перемещения или изменения дороги линии подстраиваются под новую геометрию, а заливки областей — не всегда: удалите их и нарисуйте заново.
 
+## Рост подписчиков
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mxerf/town-road-lane/stats/chart-dark.svg">
+  <img alt="Подписчики PDX Mods по времени" src="https://raw.githubusercontent.com/mxerf/town-road-lane/stats/chart-light.svg" width="720">
+</picture>
+
+Снимается каждые 6 часов из публичного API PDX Mods в ветку [`stats`](https://github.com/mxerf/town-road-lane/tree/stats).
+
 ## Зависимости
 
 Стили линий и заливки берутся из паков разметки G87 (ставятся автоматически как зависимости PDX Mods):
