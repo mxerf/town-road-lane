@@ -10,11 +10,11 @@
 <line x1="46" y1="16.0" x2="642" y2="16.0" stroke="#30363d" stroke-width="1" opacity="0.5"/>
 <text x="38" y="19.5" text-anchor="end" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">20k</text>
 <text x="46.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">11.07</text>
-<text x="195.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">13.07</text>
+<text x="195.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">14.07</text>
 <text x="344.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">16.07</text>
 <text x="493.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">18.07</text>
-<text x="642.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">20.07</text>
-<polyline points="46.0,230.0 101.8,219.2 231.4,200.0 361.1,155.3 425.9,123.0 481.3,122.9 520.5,103.5 546.8,86.1 548.6,85.8 549.0,85.7 560.8,80.7 576.1,73.4 599.2,68.7 614.0,65.9 627.4,61.1 642.0,55.2" fill="none" stroke="#d97706" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<circle cx="642.0" cy="55.2" r="3.5" fill="#d97706"/>
-<text x="651.0" y="59.2" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#e6edf3">16 336</text>
+<text x="642.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">21.07</text>
+<polyline points="46.0,230.0 99.9,219.2 225.1,200.0 350.3,155.3 412.9,123.0 466.4,122.9 504.2,103.5 529.6,86.1 531.3,85.8 531.7,85.7 543.2,80.7 557.9,73.4 580.2,68.7 594.5,65.9 607.4,61.1 621.5,55.2 642.0,50.8" fill="none" stroke="#d97706" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="642.0" cy="50.8" r="3.5" fill="#d97706"/>
+<text x="651.0" y="54.8" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#e6edf3">16 750</text>
 </svg>
