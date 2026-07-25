@@ -12,7 +12,7 @@
 <text x="344.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">18.07</text>
 <text x="493.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">21.07</text>
 <text x="642.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">25.07</text>
-<polyline points="46.0,230.0 83.9,222.8 172.1,210.0 260.3,180.2 304.4,158.7 342.1,158.6 368.8,145.7 386.7,134.1 387.9,133.9 388.1,133.8 396.2,130.4 406.6,125.6 422.3,122.5 432.4,120.6 441.5,117.4 451.4,113.5 465.8,110.5 475.0,109.0 485.3,105.8 495.4,102.2 510.0,99.3 519.0,98.0 529.4,95.0 539.4,91.8 554.0,89.2 563.1,87.7 573.8,84.0 583.4,80.4 598.1,77.5 607.2,75.8 617.3,72.4 627.5,68.4 642.0,65.0" fill="none" stroke="#d97706" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<circle cx="642.0" cy="65.0" r="3.5" fill="#d97706"/>
-<text x="651.0" y="69.0" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#e6edf3">23 128</text>
+<polyline points="46.0,230.0 83.4,222.8 170.3,210.0 257.3,180.2 300.7,158.7 337.8,158.6 364.1,145.7 381.8,134.1 382.9,133.9 383.2,133.8 391.2,130.4 401.4,125.6 416.9,122.5 426.8,120.6 435.8,117.4 445.6,113.5 459.8,110.5 468.8,109.0 479.0,105.8 488.9,102.2 503.3,99.3 512.2,98.0 522.5,95.0 532.3,91.8 546.7,89.2 555.7,87.7 566.2,84.0 575.7,80.4 590.1,77.5 599.1,75.8 609.1,72.4 619.2,68.4 633.4,65.0 642.0,62.8" fill="none" stroke="#d97706" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="642.0" cy="62.8" r="3.5" fill="#d97706"/>
+<text x="651.0" y="66.8" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#e6edf3">23 440</text>
 </svg>
