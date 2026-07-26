@@ -270,6 +270,24 @@ namespace TownRoadLane
             var cityLanes = ResolveList(laneByName, kCityLaneNames, "city host lane");
             if (cityLanes.Count == 0) { log.Warn("no city host lanes found — aborting"); return; }
 
+            // Phase 2 of the US yellow-left option: real highways. Vanilla 'NA Highway Edge
+            // Line' hosts highway drive lanes in m_LeftLanes with canFlipSides=true → white on
+            // both edges. While the option is on we stop the mirroring (white keeps the curb
+            // side) and mirror its exact host entries onto the yellow clone's m_RightLanes, so
+            // highways get the yellow median edge with the same lanes and flags vanilla uses.
+            // In-place vanilla patch + UpdatePrefab in this same one-shot window is the v1.1
+            // precedent; EU prefab is untouched, so EU highways keep both white edges.
+            SecondaryLaneInfo[] highwayYellowInfos = Array.Empty<SecondaryLaneInfo>();
+            if (yellowLeftOn
+                && laneByName.TryGetValue("NA Highway Edge Line", out var naVanillaEdge) && naVanillaEdge != null
+                && naVanillaEdge.TryGet<SecondaryLane>(out var naVanillaSec) && naVanillaSec.m_LeftLanes != null)
+            {
+                highwayYellowInfos = (SecondaryLaneInfo[])naVanillaSec.m_LeftLanes.Clone();
+                naVanillaSec.m_CanFlipSides = false;
+                m_PrefabSystem.UpdatePrefab(naVanillaEdge);
+                log.Info($"patched vanilla 'NA Highway Edge Line': canFlipSides=false, {highwayYellowInfos.Length} host entries mirrored to the yellow-left clone");
+            }
+
             // Collect every distinct mesh name we might need so we resolve all of them in one query pass.
             var meshNames = new HashSet<string> { edgeMeshName };
             foreach (var r in kStyleRecipes) meshNames.Add(r.fallbackMesh);
@@ -326,10 +344,19 @@ namespace TownRoadLane
                 else if (recipe.hostYellowLeft && yellowLeftOn)
                 {
                     // Host in m_RightLanes: lanes to the RIGHT of the line → the yellow line
-                    // renders on the lane's LEFT (median) edge.
-                    sec.m_RightLanes = MakeCityLaneInfos(cityLanes);
+                    // renders on the lane's LEFT (median) edge. City lanes + the highway
+                    // entries mirrored from the vanilla NA edge line (phase 2, see above).
+                    var yellowInfos = MakeCityLaneInfos(cityLanes);
+                    if (highwayYellowInfos.Length > 0)
+                    {
+                        var combined = new SecondaryLaneInfo[yellowInfos.Length + highwayYellowInfos.Length];
+                        yellowInfos.CopyTo(combined, 0);
+                        highwayYellowInfos.CopyTo(combined, yellowInfos.Length);
+                        yellowInfos = combined;
+                    }
+                    sec.m_RightLanes = yellowInfos;
                     sec.m_CanFlipSides = false;
-                    hostCount = cityLanes.Count * 2;
+                    hostCount = yellowInfos.Length;
                 }
                 // else: clone exists only as a spawn-archetype source for Phase-4 emission;
                 // intentionally hosted on nothing so vanilla SecondaryLaneSystem won't draw it.
