@@ -41,6 +41,9 @@ namespace TownRoadLane
         private EntityQuery _ourSubLanes;
         private EntityQuery _legacyPairSubLanes;
         private readonly System.Text.StringBuilder _churnDetail = new System.Text.StringBuilder();
+        // One warn per (node, line) that blew the PathNode slot capacity — this fires every
+        // tick for a persistent over-limit line, so unthrottled logging would flood.
+        private readonly HashSet<(Entity, int)> _slotOverflowWarned = new HashSet<(Entity, int)>();
         private PrefabSystem _prefabSystem;
         private EdgeLineCloneSystem _edgeLineSys;
         private CityConfigurationSystem _cityConfig;
@@ -243,7 +246,18 @@ namespace TownRoadLane
             // Each segment reserves 16 slots → up to 4 passes of 4 PathNode slots each. 512 slots
             // per line → up to 32 segments per line before colliding with the next line.
             // Vanilla primary lanes occupy 0..N-1; 32768+ keeps us clear.
-            ushort idxBase = (ushort)(32768 + lineIndex * 512 + segmentIndex * 16 + passIndex * 4);
+            // Hard capacity limits: segmentIndex ≥ 32 would collide with the next line's slot
+            // range, and lineIndex ≥ 64 wraps the ushort back into vanilla's 0..N slots — a
+            // slot collision there crashes the pathfinder (RESEARCH_sublane_lifecycle.md). Skip
+            // the sublane instead of spawning a corrupt one; the line simply doesn't render.
+            int slotBase = 32768 + lineIndex * 512 + segmentIndex * 16 + passIndex * 4;
+            if (segmentIndex >= 32 || lineIndex >= 64 || slotBase + 2 > ushort.MaxValue)
+            {
+                if (_slotOverflowWarned.Add((node, lineIndex)))
+                    log.Warn($"segment-emission node#{node.Index}: line {lineIndex} segment {segmentIndex} exceeds PathNode slot capacity (max 64 lines × 32 segments per node) — sublane skipped");
+                return Entity.Null;
+            }
+            ushort idxBase = (ushort)slotBase;
             var lane = new Lane
             {
                 m_StartNode  = new PathNode(new PathNode(node, idxBase),               secondaryNode: true),

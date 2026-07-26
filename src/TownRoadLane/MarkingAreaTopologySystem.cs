@@ -4,6 +4,7 @@ using Colossal.Mathematics;
 using Game;
 using Game.Common;
 using Game.Net;
+using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -40,16 +41,32 @@ namespace TownRoadLane
         private EntityQuery _nodesWithAreas;
         private EntityQuery _spawnedAreas;
 
+        // Nodes stuck behind the save/load defer guard, and how long — see RecomputeIfChanged.
+        private readonly Dictionary<Entity, int> _deferredTicks = new Dictionary<Entity, int>();
+        private const int kDeferredWarnTicks = 600;
+
         protected override void OnCreate()
         {
             base.OnCreate();
+            // Same Temp/Deleted exclusion as MarkingTopologySystem: road-tool preview clones
+            // carry our buffers, and touching them mid-apply is a native-crash route.
             _nodesWithAreas = GetEntityQuery(
                 ComponentType.ReadOnly<MarkingArea>(),
-                ComponentType.ReadOnly<Node>());
+                ComponentType.ReadOnly<Node>(),
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
             _spawnedAreas = GetEntityQuery(
                 ComponentType.ReadOnly<TRLAreaLink>(),
                 ComponentType.Exclude<Deleted>());
             RequireForUpdate(_nodesWithAreas);
+        }
+
+        protected override void OnGameLoaded(Colossal.Serialization.Entities.Context serializationContext)
+        {
+            base.OnGameLoaded(serializationContext);
+            // Entity indices are reused across saves — stale defer counters from the previous
+            // save would fire the warning early (or never) for an unrelated node.
+            _deferredTicks.Clear();
         }
 
         protected override void OnUpdate()
@@ -94,9 +111,19 @@ namespace TownRoadLane
                 for (int i = 0; i < connected.Length; i++)
                 {
                     if (MarkingEndpointExtractor.IsEdgeAliveButUnready(EntityManager, connected[i].m_Edge))
+                    {
+                        // An edge that never becomes ready (some Road Builder / custom nets)
+                        // defers this node forever — pieces are never built and the area shows
+                        // no fill, with zero log output before 2.4.2.
+                        _deferredTicks.TryGetValue(node, out var ticks);
+                        _deferredTicks[node] = ticks + 1;
+                        if (ticks + 1 == kDeferredWarnTicks)
+                            log.Warn($"area-topology node#{node.Index}: deferred {kDeferredWarnTicks} ticks — connected edge #{connected[i].m_Edge.Index} never extraction-ready, area pieces are not being built");
                         return false;
+                    }
                 }
             }
+            _deferredTicks.Remove(node);
 
             // Snapshot before any structural change — buffers become invalid the moment we
             // touch AddBuffer/RemoveComponent below.
@@ -283,6 +310,8 @@ namespace TownRoadLane
                     // pieces over verbatim instead of dropping them: cached geometry is the best
                     // truth we have and the user's per-piece visibility must survive.
                     var carried = oldPiecesByArea[a];
+                    if (carried.Count == 0)
+                        log.Warn($"area-topology node#{node.Index} area#{a}: outer ring unresolvable and no cached pieces — this area will have no fill");
                     for (int p = 0; p < carried.Count; p++)
                     {
                         var (header, ring) = carried[p];
@@ -297,7 +326,11 @@ namespace TownRoadLane
                     continue;
                 }
 
-                if (math.abs(SignedAreaXZ(outerRing)) < kMinPieceAreaM2) continue;
+                if (math.abs(SignedAreaXZ(outerRing)) < kMinPieceAreaM2)
+                {
+                    log.Warn($"area-topology node#{node.Index} area#{a}: ring area {math.abs(SignedAreaXZ(outerRing)):F2} m² below {kMinPieceAreaM2} m² minimum — piece dropped");
+                    continue;
+                }
 
                 float3 c = PolygonSplitter.CentroidXZ(outerRing);
                 bool visible = LookupInheritedVisibility(oldPiecesByArea[a], c, defaultVisible: true);

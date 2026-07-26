@@ -4,6 +4,7 @@ using Colossal.Mathematics;
 using Game;
 using Game.Common;
 using Game.Net;
+using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -71,9 +72,15 @@ namespace TownRoadLane
         protected override void OnCreate()
         {
             base.OnCreate();
+            // Temp = road-tool preview clones of real nodes (buffers included). Rewriting their
+            // MarkingSegment buffer / tagging them Updated mid-apply feeds the vanilla
+            // Modification pipeline an entity state it doesn't expect — native crash at
+            // tool-apply time. Deleted nodes likewise must not be recomputed.
             _nodesWithLines = GetEntityQuery(
                 ComponentType.ReadOnly<MarkingLine>(),
-                ComponentType.ReadOnly<Node>());
+                ComponentType.ReadOnly<Node>(),
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
             RequireForUpdate(_nodesWithLines);
         }
 
