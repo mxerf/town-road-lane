@@ -1,4 +1,5 @@
 using Colossal;
+using Colossal.Core;
 using Colossal.IO.AssetDatabase;
 using Game.Input;
 using Game.Modding;
@@ -57,6 +58,53 @@ namespace TownRoadLane
         public const string CycleAreaStyle = "CycleAreaStyle";
 
         public TownRoadLaneSetting(IMod mod) : base(mod) { }
+
+        // ── Coalesced backup save (2.4.2) ──
+        // Vanilla ApplyAndSave() is `async void`: every checkbox click / pin toggle starts an
+        // independent read-modify-write of the settings file, and two quick changes race — the
+        // slower task can clobber the faster one's write (forum report 2026-07-25: one of two
+        // toggles "came back" after reload). ApplyAndSave isn't virtual, so the races can't be
+        // prevented; instead Apply() marks the state dirty and one extra save always lands the
+        // FINAL in-memory state once the UI has been quiet for a couple of seconds.
+        private const int kQuietFramesBeforeSave = 120; // ~2 s at 60 fps
+
+        private bool _saveDirty;
+        private int _quietFrames;
+        private bool _saverRegistered;
+
+        public override void Apply()
+        {
+            base.Apply();
+            _saveDirty = true;
+            _quietFrames = 0;
+            if (_saverRegistered) return;
+            _saverRegistered = true;
+            MainThreadDispatcher.RegisterUpdater(SaveWhenQuiet);
+        }
+
+        // Permanent per-frame updater (two int checks when idle) — stays registered so every
+        // later Apply() reuses it.
+        private bool SaveWhenQuiet()
+        {
+            if (!_saveDirty) return false;
+            if (++_quietFrames < kQuietFramesBeforeSave) return false;
+            _saveDirty = false;
+            SaveNow();
+            return false;
+        }
+
+        private async void SaveNow()
+        {
+            try
+            {
+                await AssetDatabase.global.SaveSpecificSetting(GetType().Name);
+                Mod.log.Info($"settings: coalesced save landed (edge={EdgeLineEnabled}/{EdgeLineStyle}, parking={ParkingMarkingsEnabled}/{ParkingLineStyle}/{ParkingEndStyle})");
+            }
+            catch (System.Exception e)
+            {
+                Mod.log.Warn($"settings: coalesced save failed: {e.Message}");
+            }
+        }
 
         // --- Edge line (curb-side line on city 3 m roads) ---
 
@@ -275,19 +323,19 @@ namespace TownRoadLane
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)), "Edge line style" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)),
-                    "The mesh style used for the curb-side edge line. \"G87\" options require the [G87] Road Markings mod; if it isn't installed they fall back to vanilla." },
+                    "The mesh style used for the automatic curb-side edge line only — lines drawn with the marking tool keep their own styles. \"G87\" options require the [G87] Road Markings mod; if it isn't installed they fall back to vanilla. Changes take effect after the game is restarted." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)), "Mark parallel parking zones" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)),
-                    "Draws a line along parallel street-parking zones with a cross tick at each end of the block. Roads without a Parking Lane 2 sublane (oneway 3-lane, asymmetric variants) remain unmarked — same coverage as v1.1." },
+                    "Draws a line along parallel street-parking zones with a cross tick at each end of the block. Roads without a Parking Lane 2 sublane (oneway 3-lane, asymmetric variants) remain unmarked — same coverage as v1.1. Changes take effect after the game is restarted." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingLineStyle)), "Parking line style" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingLineStyle)),
-                    "The longitudinal line drawn along the parking zone. \"G87\" options require the [G87] Road Markings mod." },
+                    "The longitudinal line drawn along the parking zone. \"G87\" options require the [G87] Road Markings mod. Changes take effect after the game is restarted." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)), "Parking end-tick style" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)),
-                    "The short perpendicular tick at the start and end of a parking block. \"None\" disables the ticks. \"G87\" options require the [G87] Road Markings mod." },
+                    "The short perpendicular tick at the start and end of a parking block. \"None\" disables the ticks. \"G87\" options require the [G87] Road Markings mod. Changes take effect after the game is restarted." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentMinLengthM)), "Minimum segment length (m)" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentMinLengthM)),
@@ -381,19 +429,19 @@ namespace TownRoadLane
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)), "Стиль краевой линии" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)),
-                    "Стиль меша краевой линии. Варианты «G87» требуют мод [G87] Road Markings; без него используется ванильный стиль." },
+                    "Стиль меша только автоматической краевой линии — линии, нарисованные инструментом разметки, сохраняют собственные стили. Варианты «G87» требуют мод [G87] Road Markings; без него используется ванильный стиль. Изменения вступают в силу после перезапуска игры." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)), "Размечать зоны параллельной парковки" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)),
-                    "Рисует линию вдоль зон параллельной уличной парковки с поперечной чертой на концах квартала. Дороги без сублейна Parking Lane 2 (односторонние трёхполосные, асимметричные варианты) остаются без разметки — то же покрытие, что и в v1.1." },
+                    "Рисует линию вдоль зон параллельной уличной парковки с поперечной чертой на концах квартала. Дороги без сублейна Parking Lane 2 (односторонние трёхполосные, асимметричные варианты) остаются без разметки — то же покрытие, что и в v1.1. Изменения вступают в силу после перезапуска игры." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingLineStyle)), "Стиль линии парковки" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingLineStyle)),
-                    "Продольная линия вдоль парковочной зоны. Варианты «G87» требуют мод [G87] Road Markings." },
+                    "Продольная линия вдоль парковочной зоны. Варианты «G87» требуют мод [G87] Road Markings. Изменения вступают в силу после перезапуска игры." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)), "Стиль концевой черты парковки" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingEndStyle)),
-                    "Короткая поперечная черта в начале и конце парковочного квартала. «Нет» отключает черты. Варианты «G87» требуют мод [G87] Road Markings." },
+                    "Короткая поперечная черта в начале и конце парковочного квартала. «Нет» отключает черты. Варианты «G87» требуют мод [G87] Road Markings. Изменения вступают в силу после перезапуска игры." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.SegmentMinLengthM)), "Минимальная длина сегмента (м)" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.SegmentMinLengthM)),

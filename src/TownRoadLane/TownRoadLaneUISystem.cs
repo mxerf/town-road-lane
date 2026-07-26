@@ -764,11 +764,15 @@ namespace TownRoadLane
 
         // --- Pinned favourite styles (dropdown pin buttons) ---
 
+        // Apply() (not ApplyAndSave): each ApplyAndSave is an independent async read-modify-write
+        // of the settings file that races with the Options screen's own saves — a second
+        // concurrent writer was losing toggle edits (2.4.2 forum report). Apply() marks the
+        // state dirty and the coalesced saver in TownRoadLaneSetting lands one final write.
         private void OnTogglePinLineStyle(int style)
         {
             if (Mod.Settings == null) return;
             Mod.Settings.PinnedLineStylesCsv = ToggleIdInCsv(Mod.Settings.PinnedLineStylesCsv, style);
-            Mod.Settings.ApplyAndSave();
+            Mod.Settings.Apply();
             _pinnedStyles.Value = BuildPinnedStylesVM();
         }
 
@@ -776,7 +780,7 @@ namespace TownRoadLane
         {
             if (Mod.Settings == null) return;
             Mod.Settings.PinnedAreaStylesCsv = ToggleIdInCsv(Mod.Settings.PinnedAreaStylesCsv, styleId);
-            Mod.Settings.ApplyAndSave();
+            Mod.Settings.Apply();
             _pinnedStyles.Value = BuildPinnedStylesVM();
         }
 

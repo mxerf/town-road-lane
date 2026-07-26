@@ -32,6 +32,11 @@ namespace TownRoadLane
             if (GameManager.instance.modManager.TryGetExecutableAsset(this, out var asset))
                 log.Info($"Current mod asset at {asset.path}");
 
+            // The defaults instance must be created BEFORE the live one: every ModSetting ctor
+            // registers itself in the static ModSetting.instances[id] map, so whichever is
+            // constructed last is what the game resolves by id. Constructing the defaults inline
+            // in the LoadSettings call used to leave the throwaway object as the registered one.
+            var settingDefaults = new TownRoadLaneSetting(this);
             Settings = new TownRoadLaneSetting(this);
             // RegisterKeyBindings must run BEFORE GetAction() resolves anything. Without this call
             // the ProxyAction for ToggleMarkingTool never fires (silent — no warn). Traffic's
@@ -40,7 +45,10 @@ namespace TownRoadLane
             Settings.RegisterInOptionsUI();
             GameManager.instance.localizationManager.AddSource("en-US", new LocaleEN(Settings));
             GameManager.instance.localizationManager.AddSource("ru-RU", new LocaleRU(Settings));
-            AssetDatabase.global.LoadSettings(nameof(TownRoadLane), Settings, new TownRoadLaneSetting(this));
+            AssetDatabase.global.LoadSettings(nameof(TownRoadLane), Settings, settingDefaults);
+            // Decode failures fall back to SetDefaults() silently (both toggles back to true) —
+            // log what actually survived the load so user reports show the real state.
+            log.Info($"settings loaded: edge={Settings.EdgeLineEnabled}/{Settings.EdgeLineStyle}, parking={Settings.ParkingMarkingsEnabled}/{Settings.ParkingLineStyle}/{Settings.ParkingEndStyle}, pins='{Settings.PinnedLineStylesCsv}'/'{Settings.PinnedAreaStylesCsv}'");
 
             // EXPERIMENT: vanilla grass surface as an area fill, registered on a live frame
             // (the EAI recipe — see VanillaSurfaceLateClone). Style slots 15/16.
