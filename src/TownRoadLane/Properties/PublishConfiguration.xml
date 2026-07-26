@@ -13,14 +13,14 @@ A road-marking editor for intersections plus automatic lane markings for ordinar
 
 ## Marking editor
 Click any intersection and draw your own markings:
-- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, G87 white or yellow styles, and a curb line, with adjustable curvature and per-segment visibility. Dots sit on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction — for the solid no-lane-change stretch in front of the stop line.
+- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, a vanilla yellow set (solid / dashed / double / solid + dashed), G87 white or yellow styles, and a curb line, with adjustable curvature and per-segment visibility. Dots sit on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction — for the solid no-lane-change stretch in front of the stop line.
 - **Area fills** over any polygon you outline — points snap to lane endpoints, kerb corners and line crossings, edges follow line curvature. Junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete, grass, sand, pavement, tiles, asphalt patch (needs the separate "G87 Vanilla Asphalt Pavement" mod).
 - **Hide vanilla markings** per intersection to start from a clean slate.
 - **Pin favourite styles** — star any entry in a style dropdown to keep it at the top of every list.
 - Full in-game panel (English + Russian) and hotkeys: **Ctrl+M** toggle tool, **Y** cycle line style, **A** area mode, **U** cycle area fill.
 
 ## Automatic markings
-Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included.
+Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included. In North American-theme cities, one-way and divided roads (highways included) also get the US-style yellow line along the left, median-side edge — optional, on by default; European themes are unaffected.
 
 ## Known limitations
 - **The mod is purely visual.** Markings never affect how vehicles actually drive. To change real lane behavior use the Traffic mod (by krzychu124) — set up lane connections and directions there first, then draw your markings to match. The two mods don't sync automatically.
@@ -41,14 +41,14 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 
 ## Редактор разметки
 Кликните по любому перекрёстку и нарисуйте свою разметку:
-- **Линии** между точками-якорями — сплошная, пунктир (короткий / обычный / длинный), двойная сплошная, белые и жёлтые стили G87, бордюр; настраиваемая кривизна и видимость отдельных сегментов. Точки стоят на каждой границе полос, на краю проезжей части (в том числе за парковочными полосами) и вторым рядом за 8 м до перекрёстка — для сплошной перед стоп-линией, запрещающей перестроение.
+- **Линии** между точками-якорями — сплошная, пунктир (короткий / обычный / длинный), двойная сплошная, ванильный жёлтый набор (сплошная / пунктир / двойная / сплошная + пунктир), белые и жёлтые стили G87, бордюр; настраиваемая кривизна и видимость отдельных сегментов. Точки стоят на каждой границе полос, на краю проезжей части (в том числе за парковочными полосами) и вторым рядом за 8 м до перекрёстка — для сплошной перед стоп-линией, запрещающей перестроение.
 - **Заливки областей** по обведённому полигону — точки цепляются к концам полос, углам бордюров и пересечениям линий, рёбра повторяют кривизну линий. Вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон, трава, песок, тротуарная плитка, плитка, асфальтовая заплатка (нужен отдельный мод «G87 Vanilla Asphalt Pavement»).
 - **Скрытие ванильной разметки** на отдельном перекрёстке, чтобы начать с чистого листа.
 - **Пины любимых стилей** — звёздочка в любом дропдауне стилей закрепляет стиль наверху всех списков.
 - Полноценная панель в игре (английский + русский) и горячие клавиши: **Ctrl+M** — инструмент, **Y** — стиль линии, **A** — режим области, **U** — заливка области.
 
 ## Автоматическая разметка
-Обычные городские дороги с полосами 3 м получают краевую разметку — как на шоссе, — поэтому парковка, тротуары и остановки работают корректно. Разметка парковочных полос включена.
+Обычные городские дороги с полосами 3 м получают краевую разметку — как на шоссе, — поэтому парковка, тротуары и остановки работают корректно. Разметка парковочных полос включена. В городах с североамериканской темой односторонние и разделённые дороги (включая шоссе) дополнительно получают жёлтую линию вдоль левого края, со стороны медианы, — по американской конвенции; опция включена по умолчанию, европейские темы не затрагиваются.
 
 ## Известные ограничения
 - **Мод чисто визуальный.** Разметка не влияет на реальное движение машин. Управлять полосами нужно модом Traffic (от krzychu124): сначала настройте там направления и соединения полос, затем нарисуйте разметку под них. Автоматической синхронизации между модами нет.
@@ -79,7 +79,7 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/town-road-lane-road-markings-draw-your-own-lines-area-fills-on-any-intersection.1935028/" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.4.1" />
+	<ModVersion Value="2.4.2" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -96,10 +96,17 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-# 2.4.1 — Vanilla Curb ships as a dependency
+# 2.4.2 — US yellow lines, yellow marking styles, settings fixes
 
-- The "[G87] Vanilla Curb" pack (under 1 MB) is now a regular dependency and installs automatically — the Curb line style from 2.4.0 works out of the box. Already subscribed manually? Nothing changes for you.
-- The Curb style label dropped its "(G87 VC)" suffix accordingly.
+New:
+- Vanilla yellow line styles in the marking editor: Yellow solid, Yellow dashed, Yellow double solid, and Yellow solid + dashed (the US passing-zone centre line). These use the same meshes the North American theme paints its own centre lines with, so they blend in perfectly.
+- US-style yellow left edge line: in North American-theme cities, one-way and divided roads — highways included — now get a yellow line along the left (median-side) edge, with the white line staying curb-side, the way real US roads are marked. New "Yellow left edge line (US)" toggle in the mod settings, on by default. European themes are unaffected.
+
+Fixed:
+- Picking "Yellow solid" as the edge line style no longer turns the marking tool's Solid style yellow too — that setting now affects only the automatic curb-side line.
+- Settings toggles could silently revert when several were changed quickly one after another (a save race in the game's settings pipeline). The mod now always lands one final save with your latest values. Options that only apply after a game restart now say so in their descriptions.
+- Crash protection: the marking systems no longer touch the road tool's temporary preview copies (a suspected cause of the reported crash-to-desktop when closing a road loop), and oversized junctions can no longer overflow the game's lane bookkeeping (lines beyond 64 per node simply don't render instead of corrupting anything).
+- The area-fill pipeline now logs every previously-silent failure mode, so "my fills don't show up" reports can be diagnosed from the mod's log file.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />

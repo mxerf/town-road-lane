@@ -16,7 +16,7 @@ A road-marking mod for **Cities: Skylines II**: a manual marking editor for inte
 ### Marking editor
 Click any intersection and draw your own markings:
 
-- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, G87 white or yellow styles, and a curb line, with adjustable curvature and per-segment visibility.
+- **Lines** between anchor dots — solid, dashed (short / normal / long), double solid, a vanilla yellow set (solid / dashed / double / solid + dashed), G87 white or yellow styles, and a curb line, with adjustable curvature and per-segment visibility.
 - **Anchor dots everywhere you need them** — on every lane boundary, on the carriageway edge (including past parking lanes), and in a second "setback" row 8 m before the junction, so you can draw the solid no-lane-change stretch in front of the stop line.
 - **Area fills** over any polygon you outline — junction box (yellow box), white/yellow hatching, green bike lane, red bus lane, concrete, grass, sand, pavement, tiles, asphalt patch.
 - **Hide vanilla markings** per intersection to start from a clean slate.
@@ -32,7 +32,7 @@ Click any intersection and draw your own markings:
 ![Junction with hatched safety islands](src/TownRoadLane/Properties/Screenshots/TRL_2ecbc8fe.jpg)
 
 ### Automatic markings
-Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included.
+Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included. In North American-theme cities, one-way and divided roads (highways included) also get the US-style yellow line along the left, median-side edge — optional, on by default; European themes are unaffected.
 
 ![Forest road with edge markings](src/TownRoadLane/Properties/Screenshots/TRL_7f19dcc1.jpg)
 
