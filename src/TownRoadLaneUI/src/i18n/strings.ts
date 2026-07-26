@@ -131,6 +131,7 @@ const enUS = {
   "style.g87Yellow":          "G87 Yellow",
   "style.g87YellowDashed":    "G87 Yellow Dashed",
   "style.curb":               "Curb",
+  "style.chevron":            "Chevron",
   "style.unknown":            "?",
 } as const;
 
@@ -258,6 +259,7 @@ const ruRU: LocaleDict = {
   "style.g87Yellow":          "G87 Жёлтая",
   "style.g87YellowDashed":    "G87 Жёлтый пунктир",
   "style.curb":               "Бордюр",
+  "style.chevron":            "Шеврон",
   "style.unknown":            "?",
 };
 

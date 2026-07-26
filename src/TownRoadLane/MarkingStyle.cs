@@ -8,9 +8,10 @@ namespace TownRoadLane
     /// Adding a new style is a three-step change:
     ///   1. Append an entry here (do NOT reorder or reuse — append only).
     ///   2. Register the corresponding prefab clone in <see cref="EdgeLineCloneSystem"/> (one
-    ///      clone per (style × theme) — EU + NA).
-    ///   3. Register the style → prefab mapping in <see cref="MarkingSegmentEmissionSystem"/>
-    ///      (one line in the resolver dictionary).
+    ///      clone per (style × theme) — EU + NA). Emission resolves clones generically via
+    ///      <see cref="EdgeLineCloneSystem.GetCloneEntity"/> — no per-style mapping needed.
+    ///   3. UI: STYLE_VALUES + STYLE_KEYS in town-road-lane-panel.tsx, the i18n strings, and
+    ///      a preview in stylePreviews.tsx.
     ///
     /// The emission system falls back to <see cref="Solid"/> for unknown values, so old saves
     /// with future-style numbers degrade gracefully (a line drawn in a not-yet-installed style
@@ -34,6 +35,10 @@ namespace TownRoadLane
         // VA "Road Border VFX GND" — Terrain-only decal mask, invisible on the road deck;
         // PVM "Vanilla Pavement 01 XS" — renders, but 0.88 m reads as a pavement strip.
         Curb            = 9,
+        // Chevron median-fill band from the "[G87] Road Markings SC" pack (elGendo87),
+        // optional — degrades to the source prefab's dashed mesh when the pack is missing.
+        // Forum request (KeanZera, 2026-07-22).
+        Chevron         = 10,
     }
 
     public static class MarkingStyleExtensions

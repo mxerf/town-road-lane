@@ -23,8 +23,9 @@ const BUS_RED = "#b04a38";
 
 // MarkingStyle enum on the C# side: 0 Solid, 1 Dashed, 2 G87 Solid,
 // 3 G87 Dashed, 4 Double Solid, 5 Dashed short, 6 G87 Yellow, 7 G87 Yellow
-// Dashed, 8 Dashed long. G87 variants share the vanilla geometry — callers
-// that need to telegraph "G87" add a text mark next to the preview.
+// Dashed, 8 Dashed long, 9 Curb, 10 Chevron. G87 variants share the vanilla
+// geometry — callers that need to telegraph "G87" add a text mark next to
+// the preview.
 export const isG87LineStyle = (style: number): boolean =>
   style === 2 || style === 3 || style === 6 || style === 7;
 
@@ -46,10 +47,19 @@ export const LineStylePreview = ({
   const dashedLong = style === 8;
   const double = style === 4;
   const border = style === 9;
+  const chevron = style === 10;
   const paint = style === 6 || style === 7 ? PAINT_YELLOW : PAINT;
   return (
     <svg width={width} height={height} viewBox="0 0 36 10" fill="none">
-      {border ? (
+      {chevron ? (
+        // Chevron: row of > marks, the median-fill band look.
+        <>
+          {[2, 9, 16, 23, 30].map((x) => [
+            <line key={`c${x}u`} x1={x} y1={1.5} x2={x + 4} y2={5} stroke={paint} strokeWidth={1.6} />,
+            <line key={`c${x}d`} x1={x} y1={8.5} x2={x + 4} y2={5} stroke={paint} strokeWidth={1.6} />,
+          ])}
+        </>
+      ) : border ? (
         // Curb: concrete band with a shadow edge, not paint.
         <>
           <rect x="1" y="3" width="34" height="4" rx="1" fill="#97a0a8" />

@@ -121,7 +121,7 @@ const PanelErrorFallback = ({ error, onRetry }: { error: Error; onRetry: () => v
 };
 
 // MarkingStyle enum on the C# side — numeric values must stay in sync.
-const STYLE_VALUES = [0, 1, 5, 8, 2, 3, 6, 7, 4, 9] as const;
+const STYLE_VALUES = [0, 1, 5, 8, 2, 3, 6, 7, 4, 9, 10] as const;
 type StyleValue = typeof STYLE_VALUES[number];
 
 // Lookup table: enum value → i18n string key. Keeps style label rendering
@@ -140,6 +140,7 @@ const STYLE_KEYS: Record<number, StringKey> = {
   7: "style.g87YellowDashed",
   8: "style.dashedLong",
   9: "style.curb",
+  10: "style.chevron",
 };
 
 const styleLabel = (t: ReturnType<typeof useT>, style: number): string =>
