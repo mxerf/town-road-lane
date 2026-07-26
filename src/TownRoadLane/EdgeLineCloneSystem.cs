@@ -275,8 +275,15 @@ namespace TownRoadLane
             // both edges. While the option is on we stop the mirroring (white keeps the curb
             // side) and mirror its exact host entries onto the yellow clone's m_RightLanes, so
             // highways get the yellow median edge with the same lanes and flags vanilla uses.
-            // In-place vanilla patch + UpdatePrefab in this same one-shot window is the v1.1
-            // precedent; EU prefab is untouched, so EU highways keep both white edges.
+            // EU prefab is untouched, so EU highways keep both white edges.
+            //
+            // MUST NOT go through UpdatePrefab on the vanilla prefab: re-initializing an
+            // already-initialized prefab makes NetInitializeSystem re-Add its m_LeftLanes
+            // entries to the host-lane SecondaryNetLane buffers (vanilla dedupes Right only) —
+            // duplicate sublanes with identical PathNode keys, native crash in the 4B barrier
+            // playback (observed 2026-07-26). Instead, strip the CanFlipSides bit from the
+            // already-built host-buffer entries in place; the managed flag is updated too so a
+            // not-yet-initialized prefab converges to the same state.
             SecondaryLaneInfo[] highwayYellowInfos = Array.Empty<SecondaryLaneInfo>();
             if (yellowLeftOn
                 && laneByName.TryGetValue("NA Highway Edge Line", out var naVanillaEdge) && naVanillaEdge != null
@@ -284,8 +291,25 @@ namespace TownRoadLane
             {
                 highwayYellowInfos = (SecondaryLaneInfo[])naVanillaSec.m_LeftLanes.Clone();
                 naVanillaSec.m_CanFlipSides = false;
-                m_PrefabSystem.UpdatePrefab(naVanillaEdge);
-                log.Info($"patched vanilla 'NA Highway Edge Line': canFlipSides=false, {highwayYellowInfos.Length} host entries mirrored to the yellow-left clone");
+                Entity naEdgeEnt = m_PrefabSystem.GetEntity(naVanillaEdge);
+                int stripped = 0;
+                foreach (var info in highwayYellowInfos)
+                {
+                    if (info.m_Lane == null) continue;
+                    Entity hostEnt = m_PrefabSystem.GetEntity(info.m_Lane);
+                    if (hostEnt == Entity.Null || !EntityManager.HasBuffer<SecondaryNetLane>(hostEnt)) continue;
+                    var hostBuf = EntityManager.GetBuffer<SecondaryNetLane>(hostEnt);
+                    for (int i = 0; i < hostBuf.Length; i++)
+                    {
+                        var entry = hostBuf[i];
+                        if (entry.m_Lane != naEdgeEnt) continue;
+                        if ((entry.m_Flags & SecondaryNetLaneFlags.CanFlipSides) == 0) continue;
+                        entry.m_Flags &= ~SecondaryNetLaneFlags.CanFlipSides;
+                        hostBuf[i] = entry;
+                        stripped++;
+                    }
+                }
+                log.Info($"yellow-left: unmirrored vanilla 'NA Highway Edge Line' — CanFlipSides stripped from {stripped} host entries, {highwayYellowInfos.Length} entries mirrored to the yellow clone");
             }
 
             // Collect every distinct mesh name we might need so we resolve all of them in one query pass.
