@@ -88,7 +88,8 @@ namespace TownRoadLane
             // "странные неконсистентные полосы" after Stage 5c rolled out.
             public bool         hostOnCityLanes;
             // True = the US-convention yellow left-edge clone: hosts on city lanes in
-            // m_LeftLanes ONLY with canFlipSides=false, active only while both EdgeLineEnabled
+            // m_RightLanes ONLY (= line on the lane's LEFT edge, see the side-semantics note
+            // in ApplyOrUpdate) with canFlipSides=false, active only while both EdgeLineEnabled
             // and YellowLeftLineEnabled are on. Mutually exclusive with hostOnCityLanes.
             public bool         hostYellowLeft;
         }
@@ -118,8 +119,9 @@ namespace TownRoadLane
             new() { style = MarkingStyle.Solid,     isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA Auto Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
             // US-convention yellow left-edge line (2.4.2, forum request): NA source only — the
             // clone inherits the NA ThemeObject, so vanilla's theme requirements keep it out of
-            // EU cities at spawn time. Left-hosted with canFlipSides=false; the white NA clone
-            // above drops to right-side-only while YellowLeftLineEnabled is on.
+            // EU cities at spawn time. Renders on the lane's left/median edge (hosted in
+            // m_RightLanes, canFlipSides=false); the white NA clone above stops mirroring
+            // while YellowLeftLineEnabled is on.
             new() { style = MarkingStyle.YellowSolid, isNA = true, sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA Auto Yellow Left Line", fallbackMesh = "Yellow Solid Line Mesh", hostYellowLeft = true },
             // Tool's Solid style — always white, regardless of the edge-line settings. Keeps the
             // pre-2.4.2 clone name: saved games reference manual solid segments by it.
@@ -303,11 +305,15 @@ namespace TownRoadLane
                     // RequireSafe entry and RequireMerge+RequireSafeMaster entry per lane.
                     // With EdgeLineEnabled off the clone still exists (manual lines + saved games
                     // depend on it) but hosts nothing, so the auto edge line stops drawing.
+                    // Side semantics (verified in game 2026-07-26): m_LeftLanes lists the host
+                    // lanes lying to the LEFT of the line, i.e. the line renders on the lane's
+                    // RIGHT edge — and vice versa. (Vanilla Car Bay Line: drive lane in LEFT,
+                    // bay lane in RIGHT, line between them.)
                     if (yellowLeftOn && recipe.isNA)
                     {
                         // US split: the NA white line keeps only the curb (right) side; the
                         // median (left) side belongs to the yellow-left clone below.
-                        sec.m_RightLanes = MakeCityLaneInfos(cityLanes);
+                        sec.m_LeftLanes = MakeCityLaneInfos(cityLanes);
                         sec.m_CanFlipSides = false;
                     }
                     else
@@ -319,7 +325,9 @@ namespace TownRoadLane
                 }
                 else if (recipe.hostYellowLeft && yellowLeftOn)
                 {
-                    sec.m_LeftLanes = MakeCityLaneInfos(cityLanes);
+                    // Host in m_RightLanes: lanes to the RIGHT of the line → the yellow line
+                    // renders on the lane's LEFT (median) edge.
+                    sec.m_RightLanes = MakeCityLaneInfos(cityLanes);
                     sec.m_CanFlipSides = false;
                     hostCount = cityLanes.Count * 2;
                 }
