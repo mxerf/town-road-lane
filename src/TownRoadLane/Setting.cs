@@ -115,6 +115,14 @@ namespace TownRoadLane
         [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsEdgeDisabled))]
         public EdgeLineStyleEnum EdgeLineStyle { get; set; } = EdgeLineStyleEnum.WhiteSolid;
 
+        // US convention (2.4.2, forum request): NA-theme cities get a yellow line on the
+        // left/median edge of one-way and divided carriageways; the white edge line stays
+        // curb-side only. Theme gating is free — the yellow clone sources the NA prefab and
+        // inherits its ThemeObject, so EU cities never spawn it.
+        [SettingsUISection(kSection, kEdgeGroup)]
+        [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsEdgeDisabled))]
+        public bool YellowLeftLineEnabled { get; set; } = true;
+
         // --- Parallel street-parking markings ---
 
         [SettingsUISection(kSection, kParkingGroup)]
@@ -205,6 +213,7 @@ namespace TownRoadLane
         {
             EdgeLineEnabled = true;
             EdgeLineStyle = EdgeLineStyleEnum.WhiteSolid;
+            YellowLeftLineEnabled = true;
             ParkingMarkingsEnabled = true;
             ParkingLineStyle = ParkingLineStyleEnum.WhiteDashed_G87;
             ParkingEndStyle = ParkingEndStyleEnum.WhiteSolid;
@@ -325,6 +334,10 @@ namespace TownRoadLane
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)),
                     "The mesh style used for the automatic curb-side edge line only — lines drawn with the marking tool keep their own styles. \"G87\" options require the [G87] Road Markings mod; if it isn't installed they fall back to vanilla. Changes take effect after the game is restarted." },
 
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.YellowLeftLineEnabled)), "Yellow left edge line (US)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.YellowLeftLineEnabled)),
+                    "In North American-theme cities, one-way and divided roads get a yellow line along the left (median-side) edge of the carriageway, the way US roads mark it — the white edge line stays on the curb side. European-theme cities are unaffected. Changes take effect after the game is restarted." },
+
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)), "Mark parallel parking zones" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)),
                     "Draws a line along parallel street-parking zones with a cross tick at each end of the block. Roads without a Parking Lane 2 sublane (oneway 3-lane, asymmetric variants) remain unmarked — same coverage as v1.1. Changes take effect after the game is restarted." },
@@ -430,6 +443,10 @@ namespace TownRoadLane
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)), "Стиль краевой линии" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.EdgeLineStyle)),
                     "Стиль меша только автоматической краевой линии — линии, нарисованные инструментом разметки, сохраняют собственные стили. Варианты «G87» требуют мод [G87] Road Markings; без него используется ванильный стиль. Изменения вступают в силу после перезапуска игры." },
+
+                { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.YellowLeftLineEnabled)), "Жёлтая левая краевая (США)" },
+                { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.YellowLeftLineEnabled)),
+                    "В городах с североамериканской темой односторонние и разделённые дороги получают жёлтую линию вдоль левого края проезжей части (со стороны медианы), как принято в США; белая краевая остаётся у бордюра. Города с европейской темой не затрагиваются. Изменения вступают в силу после перезапуска игры." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)), "Размечать зоны параллельной парковки" },
                 { m_Setting.GetOptionDescLocaleID(nameof(TownRoadLaneSetting.ParkingMarkingsEnabled)),

@@ -87,6 +87,10 @@ namespace TownRoadLane
             // city road grows a dashed line in addition to its normal markings — observed as
             // "странные неконсистентные полосы" after Stage 5c rolled out.
             public bool         hostOnCityLanes;
+            // True = the US-convention yellow left-edge clone: hosts on city lanes in
+            // m_LeftLanes ONLY with canFlipSides=false, active only while both EdgeLineEnabled
+            // and YellowLeftLineEnabled are on. Mutually exclusive with hostOnCityLanes.
+            public bool         hostYellowLeft;
         }
 
         // G87 mesh names — prefixes from Setting.cs (kept here as full strings to avoid a
@@ -112,6 +116,11 @@ namespace TownRoadLane
             // Hosted clones are NOT registered in m_ClonesByStyle — they aren't tool styles.
             new() { style = MarkingStyle.Solid,     isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU Auto Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
             new() { style = MarkingStyle.Solid,     isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA Auto Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
+            // US-convention yellow left-edge line (2.4.2, forum request): NA source only — the
+            // clone inherits the NA ThemeObject, so vanilla's theme requirements keep it out of
+            // EU cities at spawn time. Left-hosted with canFlipSides=false; the white NA clone
+            // above drops to right-side-only while YellowLeftLineEnabled is on.
+            new() { style = MarkingStyle.YellowSolid, isNA = true, sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA Auto Yellow Left Line", fallbackMesh = "Yellow Solid Line Mesh", hostYellowLeft = true },
             // Tool's Solid style — always white, regardless of the edge-line settings. Keeps the
             // pre-2.4.2 clone name: saved games reference manual solid segments by it.
             new() { style = MarkingStyle.Solid,     isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU City Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = false },
@@ -242,6 +251,7 @@ namespace TownRoadLane
             // on the 2.4.2 split.
             string edgeMeshName = Mod.Settings?.EdgeLineMeshName() ?? "White Solid Line Mesh";
             bool autoEdgeOn = Mod.Settings == null || Mod.Settings.EdgeLineEnabled;
+            bool yellowLeftOn = autoEdgeOn && (Mod.Settings == null || Mod.Settings.YellowLeftLineEnabled);
 
             // Resolve every prefab we need by name in one pass over NetLanePrefab entities.
             var wantedLanes = new HashSet<string>(kCityLaneNames);
@@ -293,8 +303,24 @@ namespace TownRoadLane
                     // RequireSafe entry and RequireMerge+RequireSafeMaster entry per lane.
                     // With EdgeLineEnabled off the clone still exists (manual lines + saved games
                     // depend on it) but hosts nothing, so the auto edge line stops drawing.
+                    if (yellowLeftOn && recipe.isNA)
+                    {
+                        // US split: the NA white line keeps only the curb (right) side; the
+                        // median (left) side belongs to the yellow-left clone below.
+                        sec.m_RightLanes = MakeCityLaneInfos(cityLanes);
+                        sec.m_CanFlipSides = false;
+                    }
+                    else
+                    {
+                        sec.m_LeftLanes = MakeCityLaneInfos(cityLanes);
+                        sec.m_CanFlipSides = true;
+                    }
+                    hostCount = cityLanes.Count * 2;
+                }
+                else if (recipe.hostYellowLeft && yellowLeftOn)
+                {
                     sec.m_LeftLanes = MakeCityLaneInfos(cityLanes);
-                    sec.m_CanFlipSides = true;
+                    sec.m_CanFlipSides = false;
                     hostCount = cityLanes.Count * 2;
                 }
                 // else: clone exists only as a spawn-archetype source for Phase-4 emission;
@@ -303,9 +329,9 @@ namespace TownRoadLane
                 int swapped = SwapMesh(cloneBase, mesh);
                 m_PrefabSystem.UpdatePrefab(cloneBase);
 
-                // Hosted auto-edge clones aren't tool styles — registering them would collide
-                // with the tool's Solid entry under the same (style, isNA) key.
-                if (!recipe.hostOnCityLanes) m_ClonesByStyle[(recipe.style, recipe.isNA)] = cloneBase;
+                // Hosted auto clones aren't tool styles — registering them would collide with
+                // the tool's entry under the same (style, isNA) key.
+                if (!recipe.hostOnCityLanes && !recipe.hostYellowLeft) m_ClonesByStyle[(recipe.style, recipe.isNA)] = cloneBase;
                 touched++;
                 log.Info($"applied '{recipe.cloneName}' [{recipe.style}/{(recipe.isNA ? "NA" : "EU")}]: hostedEntries={hostCount} mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
             }
