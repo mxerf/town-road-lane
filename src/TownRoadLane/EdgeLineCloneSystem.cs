@@ -76,6 +76,8 @@ namespace TownRoadLane
             public string       cloneName;
             public string       fallbackMesh;
             // True = host on city Car Drive Lane 3 (the v1.1 "edge line on city roads" feature).
+            // Hosted clones also take their mesh from the "Edge line style" setting and are NOT
+            // registered as tool styles (see kStyleRecipes note on the 2.4.2 split).
             // False = clone exists ONLY as a spawn-archetype source for the Phase-4 emission system;
             // it must NOT inherit vanilla hosting from the source prefab or it gets auto-drawn on
             // every city road as part of the vanilla SecondaryLane pass.
@@ -103,8 +105,17 @@ namespace TownRoadLane
 
         private static readonly StyleRecipe[] kStyleRecipes =
         {
-            new() { style = MarkingStyle.Solid,     isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU City Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
-            new() { style = MarkingStyle.Solid,     isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA City Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
+            // Auto edge line — the ONLY clones that host on city lanes. Their mesh follows the
+            // "Edge line style" setting (may be yellow / G87). Split from the tool's Solid
+            // archetype in 2.4.2: one clone used to serve both roles, so picking a yellow edge
+            // style silently turned the tool's Solid lines yellow too (forum report 2026-07-20).
+            // Hosted clones are NOT registered in m_ClonesByStyle — they aren't tool styles.
+            new() { style = MarkingStyle.Solid,     isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU Auto Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
+            new() { style = MarkingStyle.Solid,     isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA Auto Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
+            // Tool's Solid style — always white, regardless of the edge-line settings. Keeps the
+            // pre-2.4.2 clone name: saved games reference manual solid segments by it.
+            new() { style = MarkingStyle.Solid,     isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU City Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = false },
+            new() { style = MarkingStyle.Solid,     isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA City Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = false },
             new() { style = MarkingStyle.Dashed,    isNA = false, sourcePrefabName = "EU Car Lane Line",     cloneName = "TownRoadLane EU City Dashed Line",     fallbackMesh = "White Dashed Line Mesh", hostOnCityLanes = false },
             new() { style = MarkingStyle.Dashed,    isNA = true,  sourcePrefabName = "NA Car Lane Line",     cloneName = "TownRoadLane NA City Dashed Line",     fallbackMesh = "White Dashed Line Mesh", hostOnCityLanes = false },
             // G87 styles: use 'Car Bay Line' as the source prefab. Same prefab the parking-line
@@ -215,10 +226,10 @@ namespace TownRoadLane
         /// </summary>
         public void ApplyOrUpdate()
         {
-            // User-pickable mesh from settings only governs the SOLID style for now; dashed
-            // always uses its fallback. When per-style mesh dropdowns are added in a future stage,
-            // this picks per-recipe.
-            string solidMeshName = Mod.Settings?.EdgeLineMeshName() ?? "White Solid Line Mesh";
+            // User-pickable mesh from settings governs ONLY the hosted auto-edge clones; every
+            // tool style (Solid included) always uses its recipe fallback. See kStyleRecipes note
+            // on the 2.4.2 split.
+            string edgeMeshName = Mod.Settings?.EdgeLineMeshName() ?? "White Solid Line Mesh";
             bool autoEdgeOn = Mod.Settings == null || Mod.Settings.EdgeLineEnabled;
 
             // Resolve every prefab we need by name in one pass over NetLanePrefab entities.
@@ -237,14 +248,14 @@ namespace TownRoadLane
             if (cityLanes.Count == 0) { log.Warn("no city host lanes found — aborting"); return; }
 
             // Collect every distinct mesh name we might need so we resolve all of them in one query pass.
-            var meshNames = new HashSet<string> { solidMeshName };
+            var meshNames = new HashSet<string> { edgeMeshName };
             foreach (var r in kStyleRecipes) meshNames.Add(r.fallbackMesh);
             var meshByName = ResolveMeshes(meshNames);
 
             int touched = 0;
             foreach (var recipe in kStyleRecipes)
             {
-                string wantedMesh = recipe.style == MarkingStyle.Solid ? solidMeshName : recipe.fallbackMesh;
+                string wantedMesh = recipe.hostOnCityLanes ? edgeMeshName : recipe.fallbackMesh;
                 RenderPrefab mesh = PickMesh(meshByName, wantedMesh, recipe.fallbackMesh, recipe.cloneName);
 
                 if (!laneByName.TryGetValue(recipe.cloneName, out var cloneBase) || cloneBase == null)
@@ -281,7 +292,9 @@ namespace TownRoadLane
                 int swapped = SwapMesh(cloneBase, mesh);
                 m_PrefabSystem.UpdatePrefab(cloneBase);
 
-                m_ClonesByStyle[(recipe.style, recipe.isNA)] = cloneBase;
+                // Hosted auto-edge clones aren't tool styles — registering them would collide
+                // with the tool's Solid entry under the same (style, isNA) key.
+                if (!recipe.hostOnCityLanes) m_ClonesByStyle[(recipe.style, recipe.isNA)] = cloneBase;
                 touched++;
                 log.Info($"applied '{recipe.cloneName}' [{recipe.style}/{(recipe.isNA ? "NA" : "EU")}]: hostedEntries={hostCount} mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
             }
