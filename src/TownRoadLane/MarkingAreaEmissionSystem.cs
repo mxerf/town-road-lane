@@ -121,6 +121,11 @@ namespace TownRoadLane
 
         // Surface-prefab count at the last G87 diagnostic dump — see TryResolveAllStyles.
         private int _lastSurfaceDumpCount = -1;
+        // Diagnostics (2.4.2): the three OnUpdate early-outs and the concrete fallback used to
+        // be completely silent — a user whose fills never appear had nothing in the log at all.
+        private int _blockedTicks;
+        private const int kBlockedWarnTicks = 600; // matches kOrphanSweepMaxWaitTicks scale
+        private readonly HashSet<int> _fallbackWarned = new HashSet<int>();
 
         // Post-load orphan sweep (2.2.0 migration): pre-2.2.0 saves contain our spawned fills
         // WITHOUT the TRLAreaLink tag (it wasn't serialized), one stacked copy per save/load
@@ -157,11 +162,20 @@ namespace TownRoadLane
         {
             TryResolveAllStyles();
             Entity solidEntity = _stylePrefabEntities[kStyleSolidConcrete];
-            if (solidEntity == Entity.Null) return;
-
-            if (!EntityManager.HasComponent<AreaData>(solidEntity)) return;
+            string blocked =
+                solidEntity == Entity.Null ? "style 0 'Concrete Surface 01' not resolved" :
+                !EntityManager.HasComponent<AreaData>(solidEntity) ? "style 0 prefab has no AreaData" :
+                !EntityManager.GetComponentData<AreaData>(solidEntity).m_Archetype.Valid ? "style 0 archetype invalid" : null;
+            if (blocked != null)
+            {
+                // Assets keep importing ~10 s after load, so a short block is normal — but a
+                // persistent one disables ALL fills, which used to happen in total silence.
+                if (++_blockedTicks == kBlockedWarnTicks)
+                    log.Warn($"[area-emission] BLOCKED for {kBlockedWarnTicks} ticks: {blocked} — no fills of any style will spawn");
+                return;
+            }
+            _blockedTicks = 0;
             var solidAreaData = EntityManager.GetComponentData<AreaData>(solidEntity);
-            if (!solidAreaData.m_Archetype.Valid) return;
 
             if (_orphanSweepPending)
             {
@@ -391,7 +405,12 @@ namespace TownRoadLane
                     if (sp.name == kStyleSurfaceNames[s])
                     {
                         _stylePrefabEntities[s] = ents[i];
-                        log.Info($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}");
+                        // prio/layer decide whether the surface can render on top of road
+                        // geometry at all (layer without Roads → fill is drawn under the road).
+                        string renderInfo = sp.TryGet<RenderedArea>(out var ra) && ra != null
+                            ? $" prio={ra.m_RendererPriority} layer={ra.m_DecalLayerMask}"
+                            : " (no RenderedArea)";
+                        log.Info($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}{renderInfo}");
                     }
                 }
             }
@@ -424,6 +443,8 @@ namespace TownRoadLane
         {
             int s = (styleId >= 0 && styleId < kStyleCount) ? styleId : kStyleSolidConcrete;
             var e = _stylePrefabEntities[s];
+            if (e == Entity.Null && s != kStyleSolidConcrete && IsStyleEnabled(s) && _fallbackWarned.Add(s))
+                log.Warn($"[area-emission] style {s} '{kStyleSurfaceNames[s]}' unresolved — spawning as concrete (self-corrects once the prefab loads; stays concrete if its pack is missing)");
             return e != Entity.Null ? e : solidFallback;
         }
 

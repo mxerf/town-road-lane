@@ -57,6 +57,11 @@ namespace TownRoadLane.Diagnostics
 
         private static World _world;
         private static bool _done;
+        // Gate diagnostics (2.4.2): a gate that never passes used to leave zero log lines —
+        // no clones, every clone-backed fill style silently falling back to concrete.
+        private static int _gateFrames;
+        private static bool _gateWarned;
+        private const int kGateWarnFrames = 3600; // ≈ 1 min at 60 fps
 
         public static void Register(World world)
         {
@@ -72,10 +77,19 @@ namespace TownRoadLane.Diagnostics
         {
             if (_done) return true;
             var gm = GameManager.instance;
-            if (gm == null || !gm.modManager.isInitialized) return false;
-            if (gm.gameMode != GameMode.MainMenu && gm.gameMode != GameMode.Game) return false;
-            if (gm.state == GameManager.State.Booting || gm.state == GameManager.State.Loading) return false;
-            if (_world == null || !_world.IsCreated) return false;
+            bool gateOpen = gm != null && gm.modManager.isInitialized
+                && (gm.gameMode == GameMode.MainMenu || gm.gameMode == GameMode.Game)
+                && gm.state != GameManager.State.Booting && gm.state != GameManager.State.Loading
+                && _world != null && _world.IsCreated;
+            if (!gateOpen)
+            {
+                if (++_gateFrames >= kGateWarnFrames && !_gateWarned)
+                {
+                    _gateWarned = true;
+                    log.Warn($"[late-clone] gate not passed after {kGateWarnFrames} frames (gameMode={gm?.gameMode.ToString() ?? "<no GameManager>"}, state={gm?.state.ToString() ?? "-"}) — surface clones missing, clone-backed fill styles will fall back to concrete");
+                }
+                return false;
+            }
 
             _done = true;
             try
