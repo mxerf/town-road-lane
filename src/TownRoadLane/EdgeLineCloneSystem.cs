@@ -102,11 +102,6 @@ namespace TownRoadLane
         // From the "[G87] Vanilla Curb" pack — a hard PDX dependency since 2.4.0. Missing
         // pack (local/manual installs) → PickMesh keeps the source prefab's own mesh.
         private const string kCurbMesh = "G87 Vanilla Curb Misc G87 Vanilla Curb NetLane_RenderPrefab";
-        // From the optional "[G87] Road Markings SC" pack. Name follows the same EAI convention
-        // as kCurbMesh: "<mod name> <category folder> <asset folder> NetLane_RenderPrefab" —
-        // verified against the pack's cache layout (pdx_mods/98624: CustomNetlanes/RoadMarking/
-        // "G87 Chevrons 2to1 60cm White"). Missing pack → source's dashed mesh.
-        private const string kChevronMesh = "G87 Road Markings SC RoadMarking G87 Chevrons 2to1 60cm White NetLane_RenderPrefab";
 
         private static readonly StyleRecipe[] kStyleRecipes =
         {
@@ -154,10 +149,17 @@ namespace TownRoadLane
             // (no curb mesh exists in vanilla — see the netlane-geom survey in the log).
             new() { style = MarkingStyle.Curb,            isNA = false, sourcePrefabName = "EU Car Bay Line",  cloneName = "TownRoadLane EU City Curb Line",              fallbackMesh = kCurbMesh, hostOnCityLanes = false },
             new() { style = MarkingStyle.Curb,            isNA = true,  sourcePrefabName = "NA Car Bay Line",  cloneName = "TownRoadLane NA City Curb Line",              fallbackMesh = kCurbMesh, hostOnCityLanes = false },
-            // Chevron (2.4.2, forum request): median-fill chevron band. Same Car Bay Line
-            // archetype as the other G87-sourced styles.
-            new() { style = MarkingStyle.Chevron,         isNA = false, sourcePrefabName = "EU Car Bay Line",  cloneName = "TownRoadLane EU City Chevron Line",           fallbackMesh = kChevronMesh, hostOnCityLanes = false },
-            new() { style = MarkingStyle.Chevron,         isNA = true,  sourcePrefabName = "NA Car Bay Line",  cloneName = "TownRoadLane NA City Chevron Line",           fallbackMesh = kChevronMesh, hostOnCityLanes = false },
+            // Vanilla yellow family (2.4.2): same source archetypes as the white counterparts
+            // (solid → Highway Edge Line, dashed → Car Lane Line, the rest → Car Bay Line).
+            // All meshes are vanilla — no pack dependency.
+            new() { style = MarkingStyle.YellowSolid,       isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU City Yellow Solid Line",        fallbackMesh = "Yellow Solid Line Mesh",               hostOnCityLanes = false },
+            new() { style = MarkingStyle.YellowSolid,       isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA City Yellow Solid Line",        fallbackMesh = "Yellow Solid Line Mesh",               hostOnCityLanes = false },
+            new() { style = MarkingStyle.YellowDashed,      isNA = false, sourcePrefabName = "EU Car Lane Line",     cloneName = "TownRoadLane EU City Yellow Dashed Line",       fallbackMesh = "Yellow Dashed Line Mesh - Long",       hostOnCityLanes = false },
+            new() { style = MarkingStyle.YellowDashed,      isNA = true,  sourcePrefabName = "NA Car Lane Line",     cloneName = "TownRoadLane NA City Yellow Dashed Line",       fallbackMesh = "Yellow Dashed Line Mesh - Long",       hostOnCityLanes = false },
+            new() { style = MarkingStyle.YellowDoubleSolid, isNA = false, sourcePrefabName = "EU Car Bay Line",      cloneName = "TownRoadLane EU City Yellow Double Solid Line", fallbackMesh = "Yellow Double Solid Line Mesh",        hostOnCityLanes = false },
+            new() { style = MarkingStyle.YellowDoubleSolid, isNA = true,  sourcePrefabName = "NA Car Bay Line",      cloneName = "TownRoadLane NA City Yellow Double Solid Line", fallbackMesh = "Yellow Double Solid Line Mesh",        hostOnCityLanes = false },
+            new() { style = MarkingStyle.YellowSolidDashed, isNA = false, sourcePrefabName = "EU Car Bay Line",      cloneName = "TownRoadLane EU City Yellow Solid Dashed Line", fallbackMesh = "Yellow Solid Dashed Line Mesh - Long", hostOnCityLanes = false },
+            new() { style = MarkingStyle.YellowSolidDashed, isNA = true,  sourcePrefabName = "NA Car Bay Line",      cloneName = "TownRoadLane NA City Yellow Solid Dashed Line", fallbackMesh = "Yellow Solid Dashed Line Mesh - Long", hostOnCityLanes = false },
         };
 
         private PrefabSystem m_PrefabSystem;

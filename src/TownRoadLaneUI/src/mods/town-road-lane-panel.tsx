@@ -121,14 +121,14 @@ const PanelErrorFallback = ({ error, onRetry }: { error: Error; onRetry: () => v
 };
 
 // MarkingStyle enum on the C# side — numeric values must stay in sync.
-const STYLE_VALUES = [0, 1, 5, 8, 2, 3, 6, 7, 4, 9, 10] as const;
+const STYLE_VALUES = [0, 1, 5, 8, 4, 10, 11, 13, 12, 2, 3, 6, 7, 9] as const;
 type StyleValue = typeof STYLE_VALUES[number];
 
 // Lookup table: enum value → i18n string key. Keeps style label rendering
 // alongside the enum mapping rather than scattered across components.
-// STYLE_VALUES order groups related looks together in the dropdown (white
-// solid/dashed variants, then G87 white + yellow, then double) — the numeric
-// enum order is append-only history, not a presentation order.
+// STYLE_VALUES order groups related looks together in the dropdown (vanilla
+// whites incl. double, vanilla yellows, G87 white + yellow, curb) — the
+// numeric enum order is append-only history, not a presentation order.
 const STYLE_KEYS: Record<number, StringKey> = {
   0: "style.solid",
   1: "style.dashed",
@@ -140,7 +140,10 @@ const STYLE_KEYS: Record<number, StringKey> = {
   7: "style.g87YellowDashed",
   8: "style.dashedLong",
   9: "style.curb",
-  10: "style.chevron",
+  10: "style.yellowSolid",
+  11: "style.yellowDashed",
+  12: "style.yellowDoubleSolid",
+  13: "style.yellowSolidDashed",
 };
 
 const styleLabel = (t: ReturnType<typeof useT>, style: number): string =>

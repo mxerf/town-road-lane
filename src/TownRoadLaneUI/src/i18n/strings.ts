@@ -131,7 +131,10 @@ const enUS = {
   "style.g87Yellow":          "G87 Yellow",
   "style.g87YellowDashed":    "G87 Yellow Dashed",
   "style.curb":               "Curb",
-  "style.chevron":            "Chevron",
+  "style.yellowSolid":        "Yellow solid",
+  "style.yellowDashed":       "Yellow dashed",
+  "style.yellowDoubleSolid":  "Yellow double solid",
+  "style.yellowSolidDashed":  "Yellow solid + dashed",
   "style.unknown":            "?",
 } as const;
 
@@ -259,7 +262,10 @@ const ruRU: LocaleDict = {
   "style.g87Yellow":          "G87 Жёлтая",
   "style.g87YellowDashed":    "G87 Жёлтый пунктир",
   "style.curb":               "Бордюр",
-  "style.chevron":            "Шеврон",
+  "style.yellowSolid":        "Жёлтая сплошная",
+  "style.yellowDashed":       "Жёлтый пунктир",
+  "style.yellowDoubleSolid":  "Двойная жёлтая",
+  "style.yellowSolidDashed":  "Жёлтая сплошная + пунктир",
   "style.unknown":            "?",
 };
 

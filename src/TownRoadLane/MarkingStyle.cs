@@ -35,10 +35,16 @@ namespace TownRoadLane
         // VA "Road Border VFX GND" — Terrain-only decal mask, invisible on the road deck;
         // PVM "Vanilla Pavement 01 XS" — renders, but 0.88 m reads as a pavement strip.
         Curb            = 9,
-        // Chevron median-fill band from the "[G87] Road Markings SC" pack (elGendo87),
-        // optional — degrades to the source prefab's dashed mesh when the pack is missing.
-        // Forum request (KeanZera, 2026-07-22).
-        Chevron         = 10,
+        // Vanilla yellow family (2.4.2, forum feedback: the tool declared only G87 yellows,
+        // no vanilla ones like the white set). Value 10 briefly held an unshipped Chevron
+        // experiment (G87 SC median band netlane — useless as a line style, cut same day);
+        // it never reached a public build, so the slot is safe to reuse.
+        // YellowDashed uses the '- Long' mesh: vanilla ships no plain-length yellow dashed.
+        // YellowSolidDashed is the US passing-zone centre line (solid one side, dashed other).
+        YellowSolid       = 10,
+        YellowDashed      = 11,
+        YellowDoubleSolid = 12,
+        YellowSolidDashed = 13,
     }
 
     public static class MarkingStyleExtensions
