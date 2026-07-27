@@ -12,7 +12,7 @@
 <text x="344.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">19.07</text>
 <text x="493.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">23.07</text>
 <text x="642.0" y="252" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" fill="#8b949e">27.07</text>
-<polyline points="46.0,230.0 79.0,222.8 155.8,210.0 232.5,180.2 270.9,158.7 303.7,158.6 326.9,145.7 342.4,134.1 343.5,133.9 343.7,133.8 350.7,130.4 359.8,125.6 373.4,122.5 382.2,120.6 390.2,117.4 398.8,113.5 411.3,110.5 419.3,109.0 428.3,105.8 437.0,102.2 449.7,99.3 457.6,98.0 466.7,95.0 475.3,91.8 488.0,89.2 496.0,87.7 505.3,84.0 513.6,80.4 526.4,77.5 534.3,75.8 543.1,72.4 552.0,68.4 564.6,65.0 572.2,62.8 581.2,58.6 590.1,54.3 603.4,50.8 611.0,48.4 619.5,44.2 628.5,39.2 642.0,35.8" fill="none" stroke="#d97706" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-<circle cx="642.0" cy="35.8" r="3.5" fill="#d97706"/>
-<text x="651.0" y="39.8" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#e6edf3">27 228</text>
+<polyline points="46.0,230.0 78.5,222.8 154.0,210.0 229.5,180.2 267.3,158.7 299.5,158.6 322.3,145.7 337.7,134.1 338.7,133.9 338.9,133.8 345.8,130.4 354.7,125.6 368.2,122.5 376.8,120.6 384.6,117.4 393.1,113.5 405.5,110.5 413.3,109.0 422.1,105.8 430.8,102.2 443.2,99.3 451.0,98.0 459.9,95.0 468.4,91.8 480.9,89.2 488.7,87.7 497.9,84.0 506.1,80.4 518.7,77.5 526.5,75.8 535.1,72.4 543.9,68.4 556.3,65.0 563.7,62.8 572.6,58.6 581.3,54.3 594.5,50.8 601.9,48.4 610.3,44.2 619.1,39.2 632.4,35.8 642.0,33.8" fill="none" stroke="#d97706" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="642.0" cy="33.8" r="3.5" fill="#d97706"/>
+<text x="651.0" y="37.8" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="600" fill="#e6edf3">27 499</text>
 </svg>
