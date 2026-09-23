@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const MOD = require("./mod.json");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
@@ -14,12 +15,18 @@ const gray = (text) => `\x1b[90m${text}\x1b[0m`;
 // <RemoveDir $(DeployDir)> on every build and wiped the .mjs that we'd just placed there —
 // the UI went silently missing after every C# rebuild.
 const OUTPUT_DIR = "./dist/";
+// Single version source: ModVersion in the C# project's PublishConfiguration.xml — the number
+// PDX shows. The csproj stamps the assembly version from the same field.
+const PUBLISH_CONFIG_PATH = path.resolve(__dirname, "../TownRoadLane/Properties/PublishConfiguration.xml");
+const modVersionMatch = /<ModVersion Value="([^"]+)"/.exec(fs.readFileSync(PUBLISH_CONFIG_PATH, "utf8"));
+if (!modVersionMatch) throw new Error(`ModVersion not found in ${PUBLISH_CONFIG_PATH}`);
+const MOD_VERSION = modVersionMatch[1];
 // The banner is the manifest: the game's UIModuleAsset.PostCreate parses this
 // comment block out of the .mjs itself (NOT mod.json). The Dependencies line
 // is REQUIRED even when empty — PostCreate calls AddTags(m_UIModuleDependencies)
 // unconditionally, and that field stays null (→ NullReferenceException in the
 // game log on every startup) unless a "Dependencies:" line was parsed.
-const banner = `\n * Cities: Skylines II UI Module\n * Id: ${MOD.id}\n * Author: ${MOD.author}\n * Version: ${MOD.version}\n * Dependencies: ${(MOD.dependencies || []).join(", ")}\n`;
+const banner = `\n * Cities: Skylines II UI Module\n * Id: ${MOD.id}\n * Author: ${MOD.author}\n * Version: ${MOD_VERSION}\n * Dependencies: ${(MOD.dependencies || []).join(", ")}\n`;
 
 module.exports = {
   // cohtml's JS runtime doesn't expose readable stack traces — every error

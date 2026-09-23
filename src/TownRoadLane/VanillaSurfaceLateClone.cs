@@ -9,12 +9,13 @@ using Game.SceneFlow;
 using Unity.Entities;
 using UnityEngine;
 
-namespace TownRoadLane.Diagnostics
+namespace TownRoadLane
 {
     /// <summary>
-    /// EXPERIMENT (vanilla-surface revival, 2026-07-19): register SurfacePrefab clones of a
-    /// vanilla decorative surface on a LIVE frame — the way ExtraAssetsImporter registers every
-    /// G87 surface (MainThreadDispatcher updater fires once the game is out of Booting/Loading,
+    /// Builds the vanilla-surface fill styles (grass, sand, pavement, tiles — catalogue slots
+    /// 15+). Registers SurfacePrefab clones of vanilla decorative surfaces on a LIVE frame —
+    /// the way ExtraAssetsImporter registers every G87 surface (MainThreadDispatcher updater
+    /// fires once the game is out of Booting/Loading,
     /// then PrefabSystem.AddPrefab on the main thread). Our 2026-07-16 attempts created clones
     /// during save loading, where the one-frame Created window of the area batch system
     /// (query {All: RenderedAreaData, Any: Created|Deleted}) elapses before rendering ticks —
@@ -98,7 +99,7 @@ namespace TownRoadLane.Diagnostics
             }
             catch (Exception e)
             {
-                log.Error($"[late-clone] experiment failed: {e}");
+                log.Error($"[late-clone] creating surface clones failed: {e}");
             }
             return true;
         }

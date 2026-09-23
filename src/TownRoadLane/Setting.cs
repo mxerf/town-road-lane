@@ -209,12 +209,14 @@ namespace TownRoadLane
         [SettingsUIHidden]
         public string PinnedAreaStylesCsv { get; set; } = "";
 
+#if DEBUG
         // Developer-only prefab surveys at boot (RoadPrefabDumpSystem, AreasPrototypeSystem):
         // tens of thousands of log lines per start, which got the mod flagged by Skyve for
-        // "extreme logging" (2026-08). Hidden from the options screen; to enable, set
-        // "DiagnosticDumps": true in TownRoadLane.coc and restart the game.
+        // "extreme logging" (2026-08). Debug builds only; hidden from the options screen — to
+        // enable, set "DiagnosticDumps": true in TownRoadLane.coc and restart the game.
         [SettingsUIHidden]
         public bool DiagnosticDumps { get; set; } = false;
+#endif
 
         public override void SetDefaults()
         {
@@ -230,7 +232,9 @@ namespace TownRoadLane
             SegmentHitClusterM = MarkingTopologySystem.kDefaultHitClusterM;
             PinnedLineStylesCsv = "";
             PinnedAreaStylesCsv = "";
+#if DEBUG
             DiagnosticDumps = false;
+#endif
         }
 
         // G87 RenderPrefab name prefixes — full names are very long; build them once.

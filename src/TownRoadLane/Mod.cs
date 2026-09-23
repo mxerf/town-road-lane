@@ -4,7 +4,9 @@ using Game.Modding;
 using Game.Net;
 using Game.SceneFlow;
 using Colossal.IO.AssetDatabase;
+#if DEBUG
 using TownRoadLane.Diagnostics;
+#endif
 
 namespace TownRoadLane
 {
@@ -63,12 +65,14 @@ namespace TownRoadLane
             // log what actually survived the load so user reports show the real state.
             log.Info($"settings loaded: edge={Settings.EdgeLineEnabled}/{Settings.EdgeLineStyle}, parking={Settings.ParkingMarkingsEnabled}/{Settings.ParkingLineStyle}/{Settings.ParkingEndStyle}, pins='{Settings.PinnedLineStylesCsv}'/'{Settings.PinnedAreaStylesCsv}'");
 
-            // EXPERIMENT: vanilla grass surface as an area fill, registered on a live frame
-            // (the EAI recipe — see VanillaSurfaceLateClone). Style slots 15/16.
+            // Vanilla-surface fill styles (grass, sand, pavement, tiles), registered on a live
+            // frame (the EAI recipe — see VanillaSurfaceLateClone). Style slots 15+.
             VanillaSurfaceLateClone.Register(updateSystem.World);
 
-            // Developer prefab surveys — off unless the hidden DiagnosticDumps setting is on
-            // (see Setting.cs): they write tens of thousands of lines per boot.
+#if DEBUG
+            // Developer prefab surveys — Debug builds only (excluded from the Release DLL in the
+            // csproj), and even there off unless the hidden DiagnosticDumps setting is on (see
+            // Setting.cs): they write tens of thousands of lines per boot.
             if (Settings.DiagnosticDumps)
             {
                 // Read-only structural dump, useful when something changes between game patches.
@@ -80,6 +84,7 @@ namespace TownRoadLane
             log.Info($"diagnostic dumps: {(Settings.DiagnosticDumps ? "ON" : "off")}");
             // ParkingPairDumpSystem is kept in the tree for phase 4 endpoint-extraction debugging.
             // Re-register when needed: updateSystem.UpdateAt<ParkingPairDumpSystem>(SystemUpdatePhase.GameSimulation);
+#endif
 
             // Layer 1: clone vanilla marking prefabs (one-shot per session, self-disables after first run).
             // Both must live in PrefabUpdate so PrefabSystem.UpdatePrefab fires NetInitializeSystem on the

@@ -27,6 +27,10 @@
 		     the SDK) would still leak the raw local repo path in its JSON map key — off. -->
 		<PathMap>$(MSBuildProjectDirectory)=TownRoadLane</PathMap>
 		<EnableSourceLink>false</EnableSourceLink>
+		<!-- The SDK would append the build tree's git HEAD to the informational version. The
+		     Windows build tree is synced from the Mac by file copy, so its HEAD is unrelated
+		     to what is being built — a misleading hash. Plain ModVersion instead. -->
+		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -104,16 +108,36 @@
 		<None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
 	</ItemGroup>
 
+	<!-- Developer-only systems stay in the tree for Debug builds but never ship: prefab
+	     surveys and dumps, plus retired approaches kept for reference (the managed
+	     Graphics.DrawMesh renderer and the Phase-4 pair emitter, both superseded by
+	     MarkingSegmentEmissionSystem). Registration sites are under #if DEBUG in Mod.cs. -->
+	<ItemGroup Condition="'$(Configuration)' == 'Release'">
+		<Compile Remove="Diagnostics\RoadPrefabDumpSystem.cs" />
+		<Compile Remove="Diagnostics\AreasPrototypeSystem.cs" />
+		<Compile Remove="Diagnostics\ParkingPairDumpSystem.cs" />
+		<Compile Remove="Diagnostics\UserPairEmissionDumpSystem.cs" />
+		<Compile Remove="MarkingMeshRenderSystem.cs" />
+		<Compile Remove="MarkingPairEmissionSystem.cs" />
+	</ItemGroup>
+
 	<!-- NOTE on the startup NullReferenceException in UIModuleAsset.PostCreate: decompiling
 	     Colossal.IO.AssetDatabase showed the game parses the UI module manifest from the
 	     BANNER COMMENT inside the .mjs itself (Id/Author/Version/Dependencies lines) — NOT
 	     from mod.json. PostCreate then calls AddTags(m_UIModuleDependencies) unconditionally,
 	     which is null when the banner lacks a "Dependencies:" line. Fixed in the UI's
-	     webpack.config.js banner. mod.json is inert for this either way; it stays in source
-	     for webpack (MOD.id output naming) and ships for PDX-tooling parity with TTE. -->
-	<ItemGroup>
-		<None Include="mod.json" CopyToOutputDirectory="Never" />
-	</ItemGroup>
+	     webpack.config.js banner. The UI project's mod.json is inert for this either way; it
+	     stays in source for webpack (MOD.id output naming) and ships for PDX-tooling parity
+	     with TTE. -->
+
+	<!-- Single version source: ModVersion in PublishConfiguration.xml (the number PDX shows).
+	     The assembly version is stamped from it here and the UI module banner reads it in
+	     webpack.config.js — 2.4.3 shipped as assembly 1.0.0.0 with a UI module claiming 2.0.1. -->
+	<Target Name="VersionFromPublishConfiguration" BeforeTargets="GetAssemblyVersion">
+		<XmlPeek XmlInputPath="$(PublishConfigurationPath)" Query="/Publish/ModVersion/@Value">
+			<Output TaskParameter="Result" PropertyName="Version" />
+		</XmlPeek>
+	</Target>
 
 	<!-- Stage 5d: build the React UI bundle and copy it next to the .dll. Pattern mirrors
 	     ZessonsDE/TrafficToolEssentials (_refs/TrafficToolEssentials/TrafficToolEssentials.csproj
