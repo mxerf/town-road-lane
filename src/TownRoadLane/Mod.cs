@@ -16,7 +16,20 @@ namespace TownRoadLane
     /// </summary>
     public class Mod : IMod
     {
-        public static ILog log = LogManager.GetLogger($"{nameof(TownRoadLane)}.{nameof(Mod)}").SetShowsErrorsInUI(false);
+        public static ILog log = CreateLog();
+
+        private static ILog CreateLog()
+        {
+            var logger = LogManager.GetLogger($"{nameof(TownRoadLane)}.{nameof(Mod)}").SetShowsErrorsInUI(false);
+            // By default UnityLogger reopens and closes the file on EVERY write. When an open
+            // fails (antivirus / cloud sync holding the file) Open() swallows the error, the
+            // writer stays null and the write throws NullReferenceException — outside its
+            // IOException catch, so it escapes into whichever of our systems was logging
+            // (the NREs players reported at RoadPrefabDumpSystem.cs:586 and
+            // MarkingAreaEmissionSystem.cs:436 in 2.4.2). One open per session instead.
+            logger.keepStreamOpen = true;
+            return logger;
+        }
 
         public static TownRoadLaneSetting Settings { get; private set; }
         // Singleton handle to the live mod instance — needed by TownRoadLaneUISystem so it can
@@ -54,11 +67,17 @@ namespace TownRoadLane
             // (the EAI recipe — see VanillaSurfaceLateClone). Style slots 15/16.
             VanillaSurfaceLateClone.Register(updateSystem.World);
 
-            // Read-only structural dump, useful when something changes between game patches.
-            updateSystem.UpdateAt<RoadPrefabDumpSystem>(SystemUpdatePhase.PrefabUpdate);
-            // Phase 6 prototype: one-shot probes for Shader.Find + vanilla SurfacePrefab inventory.
-            // Self-disables after first run. Remove from registration once Phase 6 is wired.
-            updateSystem.UpdateAt<AreasPrototypeSystem>(SystemUpdatePhase.PrefabUpdate);
+            // Developer prefab surveys — off unless the hidden DiagnosticDumps setting is on
+            // (see Setting.cs): they write tens of thousands of lines per boot.
+            if (Settings.DiagnosticDumps)
+            {
+                // Read-only structural dump, useful when something changes between game patches.
+                updateSystem.UpdateAt<RoadPrefabDumpSystem>(SystemUpdatePhase.PrefabUpdate);
+                // Phase 6 prototype: one-shot probes for Shader.Find + vanilla SurfacePrefab inventory.
+                // Self-disables after its second pass.
+                updateSystem.UpdateAt<AreasPrototypeSystem>(SystemUpdatePhase.PrefabUpdate);
+            }
+            log.Info($"diagnostic dumps: {(Settings.DiagnosticDumps ? "ON" : "off")}");
             // ParkingPairDumpSystem is kept in the tree for phase 4 endpoint-extraction debugging.
             // Re-register when needed: updateSystem.UpdateAt<ParkingPairDumpSystem>(SystemUpdatePhase.GameSimulation);
 

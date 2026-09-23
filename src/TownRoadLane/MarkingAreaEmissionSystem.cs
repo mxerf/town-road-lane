@@ -119,8 +119,14 @@ namespace TownRoadLane
         // Resolved lazily — G87 surfaces show up ~10 s after game load. Entity.Null = retry next tick.
         private Entity[] _stylePrefabEntities = new Entity[kStyleCount];
 
-        // Surface-prefab count at the last G87 diagnostic dump — see TryResolveAllStyles.
+        // Unresolved-style diagnostic — see TryResolveAllStyles. Surface prefabs keep importing
+        // for minutes after load (+1-2 a second with pauses up to ~11 s, observed 2026-09 on
+        // 1.6.2), so the dump waits until the count has not changed for kSurfaceSettleSeconds.
+        // Real time, not ticks: the pause length doesn't scale with frame rate.
+        private int _lastSurfaceCount = -1;
+        private float _surfaceCountChangedAt;
         private int _lastSurfaceDumpCount = -1;
+        private const float kSurfaceSettleSeconds = 60f;
         // Diagnostics (2.4.2): the three OnUpdate early-outs and the concrete fallback used to
         // be completely silent — a user whose fills never appear had nothing in the log at all.
         private int _blockedTicks;
@@ -418,25 +424,39 @@ namespace TownRoadLane
             // Diagnostic: G87 updates have renamed/restructured their surface prefabs before
             // (v1.3 merged the UK set into the main package), which silently breaks the
             // exact-name match above and drops every fill back to concrete. While any style is
-            // still unresolved, dump the runtime names of all G87 surface prefabs whenever the
-            // surface-prefab count changes (assets keep importing ~10 s after load) — the log
-            // then contains exactly what kStyleSurfaceNames needs to say.
+            // still unresolved, log the missing styles plus the runtime names of all G87 surface
+            // prefabs — the log then contains exactly what kStyleSurfaceNames needs to say.
+            // Only after the surface-prefab count has settled, once per settled count: 2.4.2
+            // dumped the full list on EVERY count change, and with minutes of asynchronous
+            // import that made ~10k lines per session (flagged by Skyve as "extreme logging").
             bool stillMissing = false;
             for (int i = 0; i < kStyleCount; i++)
                 if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) { stillMissing = true; break; }
-            if (stillMissing && ents.Length != _lastSurfaceDumpCount)
+            if (!stillMissing) return;
+            float now = UnityEngine.Time.realtimeSinceStartup;
+            if (ents.Length != _lastSurfaceCount)
             {
-                _lastSurfaceDumpCount = ents.Length;
-                int g87Count = 0;
-                for (int i = 0; i < ents.Length; i++)
-                {
-                    if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
-                    if (!pb.name.Contains("G87")) continue;
-                    g87Count++;
-                    log.Info($"[area-emission] G87 surface present: '{pb.name}' ({pb.GetType().Name})");
-                }
-                log.Info($"[area-emission] style resolve incomplete — {ents.Length} surface prefab(s) total, {g87Count} G87 among them");
+                _lastSurfaceCount = ents.Length;
+                _surfaceCountChangedAt = now;
+                return;
             }
+            if (now - _surfaceCountChangedAt < kSurfaceSettleSeconds || ents.Length == _lastSurfaceDumpCount) return;
+            _lastSurfaceDumpCount = ents.Length;
+
+            var report = new System.Text.StringBuilder("[area-emission] style resolve incomplete after surface import settled — missing:");
+            for (int i = 0; i < kStyleCount; i++)
+                if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null)
+                    report.Append(' ').Append(i).Append(" '").Append(kStyleSurfaceNames[i]).Append("';");
+            int g87Count = 0;
+            for (int i = 0; i < ents.Length; i++)
+            {
+                if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
+                if (!pb.name.Contains("G87")) continue;
+                g87Count++;
+                report.AppendLine().Append("  G87 surface present: '").Append(pb.name).Append('\'');
+            }
+            report.AppendLine().Append("  ").Append(ents.Length).Append(" surface prefab(s) total, ").Append(g87Count).Append(" G87 among them");
+            log.Info(report.ToString());
         }
 
         private Entity ResolveStylePrefabEntity(int styleId, Entity solidFallback)
