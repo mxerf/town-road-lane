@@ -30,6 +30,11 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 - Area fill edges curve along a line only when that line was drawn with this mod. The game's own markings are not traced — along them the fill edge stays a straight segment between its points.
 - After moving or reshaping a road with Move It, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
 
+## How it works
+- The mod replaces the game's lane-marking generator (SecondaryLaneSystem) with a copy that adds its features; vehicles and traffic lanes are untouched. Mods that patch or replace the same system conflict with it; mods that add markings as their own decals or net-lanes (such as the G87 packs) do not.
+- After every game update the copy is compared with the new vanilla system before the next release (1.6.2 required no changes).
+- AI tools (Claude) are among the tools used to develop the mod; every release is tested in-game before publishing. Full source on GitHub.
+
 ## Requirements
 The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and install automatically — they supply the line styles, area fills and the curb texture. Huge thanks to G87 for the assets!
 
@@ -58,6 +63,11 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 - Рёбра заливок изгибаются вдоль линии, только если линия нарисована этим модом. Ванильную разметку заливка не огибает — вдоль неё ребро остаётся прямым отрезком между точками.
 - После перемещения или изменения дороги через Move It линии подстраиваются под новую геометрию, а заливки областей — не всегда: удалите их и нарисуйте заново.
 
+## Как устроен мод
+- Мод заменяет игровой генератор разметки полос (SecondaryLaneSystem) копией со своими дополнениями; машины и полосы движения он не трогает. Моды, которые патчат или заменяют ту же систему, с ним конфликтуют; моды, добавляющие разметку своими декалями или net-lane (например, паки G87), — нет.
+- После каждого обновления игры копия сверяется с новой ванильной системой до выхода следующей версии (1.6.2 правок не потребовал).
+- При разработке мода в том числе используются ИИ-инструменты (Claude); каждая версия перед публикацией проверяется в игре. Исходный код — на GitHub.
+
 ## Зависимости
 Паки разметки G87 и пак «[G87] Vanilla Curb» подключены как зависимости и ставятся автоматически — они дают стили линий, заливки и текстуру бордюра. Спасибо G87 за ассеты!
 	</LongDescription>
@@ -79,7 +89,7 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/town-road-lane-road-markings-draw-your-own-lines-area-fills-on-any-intersection.1935028/" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.4.3" />
+	<ModVersion Value="2.4.4" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -96,13 +106,14 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-# 2.4.3 — quiet log, fixes the "broken" reports
+# 2.4.4 — cleanup
 
-Fixed:
-- The mod wrote a huge log file: about 10 MB per session on game version 1.6.2. Developer surveys ran at every start, and an area-fill check re-listed every G87 surface each time the game imported one more asset (which now goes on for minutes after loading). The log is down to a few dozen lines per session. This is what got the mod flagged as "Broken" in Skyve.
-- NullReferenceException errors from TownRoadLane at startup or while loading a save (reported since August). They came from the game's own log writer: it reopened the log file for every single line, and when antivirus or cloud sync briefly held the file, the write failed with an error that looked like a crash in the mod. The mod's log file is now opened once per session.
+Changed:
+- The published build no longer contains developer-only code: startup prefab surveys, debug dumps and two retired rendering approaches are left out of the mod's DLL (about a quarter smaller).
+- One version number everywhere: the mod's DLL and its UI module now report the same version as this page (previously 1.0.0.0 and 2.0.1).
+- New "How it works" section in the description: how the mod replaces the game's lane-marking generator, what that means for compatibility with other mods, and how it is checked after game updates.
 
-Nothing about how markings are saved or drawn has changed — existing saves load as before.
+No gameplay changes — markings, saves and settings are untouched.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />

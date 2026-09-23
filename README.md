@@ -47,6 +47,14 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 - **Area fill edges** curve along a line only when that line was drawn with this mod. The game's own markings are not traced — along them the fill edge stays a straight segment between its points.
 - **Move It:** after moving or reshaping a road, line markings adapt to the new geometry, but area fills may not — delete and redraw them.
 
+## How it works
+
+- **The mod replaces the game's lane-marking generator.** The vanilla `SecondaryLaneSystem` — the system that paints lane lines and parking markings along roads — is switched off, and a copy of it runs in its place with the mod's additions: automatic edge lines, the US yellow left edge line and per-junction hiding of vanilla markings. Traffic is unaffected: vehicles drive on the game's primary lanes, which the mod does not touch.
+- **Compatibility.** Because of that replacement, a mod that patches or replaces the same vanilla system conflicts with this one. Mods that add markings as their own decals or net-lanes, such as the G87 packs, are not affected.
+- **Game updates.** After every game update the copy is compared with the new vanilla system before the next release. Update 1.6.2 required no changes.
+- **Log.** A few dozen lines per session in `Logs/TownRoadLane.Mod.log` — attach it to bug reports.
+- **Development.** AI tools (Claude) are among the tools used to develop the mod. Every release is built from this repository and tested in-game on a real save before it is published; the full source is here — issues and code review are welcome.
+
 ## Subscriber growth
 
 <picture>
