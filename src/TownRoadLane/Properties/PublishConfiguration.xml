@@ -79,7 +79,7 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/town-road-lane-road-markings-draw-your-own-lines-area-fills-on-any-intersection.1935028/" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.4.2" />
+	<ModVersion Value="2.4.3" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -96,17 +96,13 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-# 2.4.2 — US yellow lines, yellow marking styles, settings fixes
-
-New:
-- Vanilla yellow line styles in the marking editor: Yellow solid, Yellow dashed, Yellow double solid, and Yellow solid + dashed (the US passing-zone centre line). These use the same meshes the North American theme paints its own centre lines with, so they blend in perfectly.
-- US-style yellow left edge line: in North American-theme cities, one-way and divided roads — highways included — now get a yellow line along the left (median-side) edge, with the white line staying curb-side, the way real US roads are marked. New "Yellow left edge line (US)" toggle in the mod settings, on by default. European themes are unaffected.
+# 2.4.3 — quiet log, fixes the "broken" reports
 
 Fixed:
-- Picking "Yellow solid" as the edge line style no longer turns the marking tool's Solid style yellow too — that setting now affects only the automatic curb-side line.
-- Settings toggles could silently revert when several were changed quickly one after another (a save race in the game's settings pipeline). The mod now always lands one final save with your latest values. Options that only apply after a game restart now say so in their descriptions.
-- Crash protection: the marking systems no longer touch the road tool's temporary preview copies (a suspected cause of the reported crash-to-desktop when closing a road loop), and oversized junctions can no longer overflow the game's lane bookkeeping (lines beyond 64 per node simply don't render instead of corrupting anything).
-- The area-fill pipeline now logs every previously-silent failure mode, so "my fills don't show up" reports can be diagnosed from the mod's log file.
+- The mod wrote a huge log file: about 10 MB per session on game version 1.6.2. Developer surveys ran at every start, and an area-fill check re-listed every G87 surface each time the game imported one more asset (which now goes on for minutes after loading). The log is down to a few dozen lines per session. This is what got the mod flagged as "Broken" in Skyve.
+- NullReferenceException errors from TownRoadLane at startup or while loading a save (reported since August). They came from the game's own log writer: it reopened the log file for every single line, and when antivirus or cloud sync briefly held the file, the write failed with an error that looked like a crash in the mod. The mod's log file is now opened once per session.
+
+Nothing about how markings are saved or drawn has changed — existing saves load as before.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />
