@@ -108,17 +108,13 @@
 		<None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
 	</ItemGroup>
 
-	<!-- Developer-only systems stay in the tree for Debug builds but never ship: prefab
-	     surveys and dumps, plus retired approaches kept for reference (the managed
-	     Graphics.DrawMesh renderer and the Phase-4 pair emitter, both superseded by
-	     MarkingSegmentEmissionSystem). Registration sites are under #if DEBUG in Mod.cs. -->
+	<!-- Developer-only prefab surveys and dumps: compiled in Debug, never shipped.
+	     Registration sites are under #if DEBUG in Mod.cs. -->
 	<ItemGroup Condition="'$(Configuration)' == 'Release'">
 		<Compile Remove="Diagnostics\RoadPrefabDumpSystem.cs" />
 		<Compile Remove="Diagnostics\AreasPrototypeSystem.cs" />
 		<Compile Remove="Diagnostics\ParkingPairDumpSystem.cs" />
 		<Compile Remove="Diagnostics\UserPairEmissionDumpSystem.cs" />
-		<Compile Remove="MarkingMeshRenderSystem.cs" />
-		<Compile Remove="MarkingPairEmissionSystem.cs" />
 	</ItemGroup>
 
 	<!-- NOTE on the startup NullReferenceException in UIModuleAsset.PostCreate: decompiling

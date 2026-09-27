@@ -89,7 +89,14 @@ The build compiles the C# systems, bundles the React UI via webpack, and deploys
 
 ## Project layout
 
-- `src/TownRoadLane/` — C# mod: ECS systems for marking topology, emission, rendering, and the in-game tool.
+- `src/TownRoadLane/` — C# mod:
+  - `Components/` — saved marking data (lines, segments, areas, per-node overrides);
+  - `Geometry/` — curve building, intersections, polygon splitting;
+  - `Systems/Topology/` — junction layout and area outlines, rebuilt when roads change;
+  - `Systems/Emission/` — turns marking data into game lanes and area fills, incl. the replacement lane generator;
+  - `Systems/Prefabs/` — marking and surface prefabs cloned from vanilla and G87 packs;
+  - `Systems/Tool/`, `Systems/UI/` — the in-game tool, its overlay and the panel bindings;
+  - `Diagnostics/` — developer-only dumps, Debug builds only.
 - `src/TownRoadLaneUI/` — React (cohtml) UI: tool panel, toolbar button, localization.
 
 ## Credits
