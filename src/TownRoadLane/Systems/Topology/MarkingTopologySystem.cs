@@ -73,9 +73,10 @@ namespace TownRoadLane.Systems.Topology
                 ComponentType.ReadOnly<Node>(),
                 ComponentType.Exclude<Temp>(),
                 ComponentType.Exclude<Deleted>());
+            // GetEntityQuery returns the cached query for an identical component set, so a
+            // change-filtered query must differ from the unfiltered ones or the filter lands on both.
             _changedLines = GetEntityQuery(
                 ComponentType.ReadOnly<MarkingLine>(),
-                ComponentType.ReadOnly<Node>(),
                 ComponentType.Exclude<Temp>(),
                 ComponentType.Exclude<Deleted>());
             _changedLines.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingLine>());

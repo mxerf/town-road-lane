@@ -32,7 +32,10 @@ namespace TownRoadLane.Systems.Emission
     ///
     /// The diff only runs on frames where something could have changed it: a segment or line
     /// buffer was written, the number of our sublanes changed behind our back (the case above),
-    /// or the last pass had to wait for a prefab.
+    /// or the last pass had to wait for a prefab or for road geometry. Right after a load the
+    /// edges have no geometry for a few frames, so no line curve can be built yet; nothing in
+    /// the marking buffers changes when it arrives, so the pass retries on its own while any
+    /// such edge exists. A line whose road is gone for good does not keep it retrying.
     /// </summary>
     [UpdateAfter(typeof(MarkingTopologySystem))]
     public partial class MarkingSegmentEmissionSystem : GameSystemBase
@@ -47,6 +50,11 @@ namespace TownRoadLane.Systems.Emission
         // someone else created or deleted some.
         private int _subLaneCountAfterPass = -1;
         private bool _passPending = true;
+        private int _lastWaitingForCurve;
+        // Right after a load any unbuildable line is retried for a while, whatever the reason;
+        // after that only lines whose roads exist but aren't ready yet.
+        private float _retryAnyUntil;
+        private const float kPostLoadRetrySeconds = 30f;
         private readonly System.Text.StringBuilder _churnDetail = new System.Text.StringBuilder();
         // One warning per (node, line) over the PathNode slot capacity: the check fails every
         // tick for such a line, so unthrottled logging would flood.
@@ -72,15 +80,17 @@ namespace TownRoadLane.Systems.Emission
                 All = new[] { ComponentType.ReadOnly<TRLSegmentLink>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>() },
             });
+            // GetEntityQuery returns the cached query for an identical component set, so a
+            // change-filtered query must differ from the unfiltered ones or the filter lands on both.
             _changedSegments = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[] { ComponentType.ReadOnly<MarkingSegment>(), ComponentType.ReadOnly<Node>() },
+                All = new[] { ComponentType.ReadOnly<MarkingSegment>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
             });
             _changedSegments.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingSegment>());
             _changedLines = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[] { ComponentType.ReadOnly<MarkingLine>(), ComponentType.ReadOnly<Node>() },
+                All = new[] { ComponentType.ReadOnly<MarkingLine>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
             });
             _changedLines.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingLine>());
@@ -90,6 +100,7 @@ namespace TownRoadLane.Systems.Emission
         {
             base.OnGameLoaded(serializationContext);
             _passPending = true;
+            _retryAnyUntil = UnityEngine.Time.realtimeSinceStartup + kPostLoadRetrySeconds;
         }
 
         private bool PassNeeded()
@@ -146,12 +157,18 @@ namespace TownRoadLane.Systems.Emission
                         [MarkingStyle.Solid] = solidPair,
                     };
                     var curvesByNode = new Dictionary<Entity, Bezier4x3?[]>();
+                    int waitingForCurve = 0;
                     foreach (var entry in wanted)
                     {
                         var (node, lineIndex, segIdx, pass) = entry.Key;
                         if (!curvesByNode.TryGetValue(node, out var curves))
                             curvesByNode[node] = curves = BuildLineCurves(node);
-                        if (!(curves[lineIndex] is Bezier4x3 curve)) continue;
+                        if (!(curves[lineIndex] is Bezier4x3 curve))
+                        {
+                            if (UnityEngine.Time.realtimeSinceStartup < _retryAnyUntil || IsWaitingForRoad(node, lineIndex))
+                                waitingForCurve++;
+                            continue;
+                        }
 
                         var seg = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true)[entry.Value];
                         // Style belongs to the segment, so pieces of one line can differ.
@@ -172,6 +189,10 @@ namespace TownRoadLane.Systems.Emission
                         if (created <= 12)
                             _churnDetail.Append(created > 1 ? ", " : "").Append($"node#{node.Index} L{lineIndex} S{segIdx} P{pass} {style}");
                     }
+                    if (waitingForCurve > 0) _passPending = true;
+                    if (waitingForCurve != _lastWaitingForCurve)
+                        log.Debug($"segment-emission: {waitingForCurve} sublane(s) waiting for a buildable curve");
+                    _lastWaitingForCurve = waitingForCurve;
                 }
             }
 
@@ -207,6 +228,15 @@ namespace TownRoadLane.Systems.Emission
                 for (int p = 0; p < passes; p++)
                     wanted[(node, seg.lineIndex, segIdx, p)] = s;
             }
+        }
+
+        /// <summary>The line's roads exist but have no geometry yet (the first frames after a
+        /// load), so its curve will become buildable without any marking change.</summary>
+        private bool IsWaitingForRoad(Entity node, int lineIndex)
+        {
+            var line = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true)[lineIndex];
+            return MarkingEndpointExtractor.IsEdgeAliveButUnready(EntityManager, line.sourceEdge)
+                || MarkingEndpointExtractor.IsEdgeAliveButUnready(EntityManager, line.targetEdge);
         }
 
         /// <summary>Full curve of every line on the node, null where the line can't be built.</summary>

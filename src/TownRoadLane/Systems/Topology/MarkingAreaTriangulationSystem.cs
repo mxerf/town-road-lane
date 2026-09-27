@@ -79,13 +79,13 @@ namespace TownRoadLane.Systems.Topology
                 ComponentType.ReadOnly<Game.Areas.Node>(),
                 ComponentType.ReadWrite<Triangle>(),
                 ComponentType.Exclude<Deleted>());
+            // GetEntityQuery returns the cached query for an identical component set, so a
+            // change-filtered query must differ from the unfiltered ones or the filter lands on both.
             _retriangulatedOurs = GetEntityQuery(
                 ComponentType.ReadOnly<TRLAreaLink>(),
-                ComponentType.ReadOnly<Area>(),
-                ComponentType.ReadOnly<Game.Areas.Node>(),
-                ComponentType.ReadWrite<Triangle>(),
+                ComponentType.ReadOnly<Triangle>(),
                 ComponentType.Exclude<Deleted>());
-            _retriangulatedOurs.SetChangedVersionFilter(ComponentType.ReadWrite<Triangle>());
+            _retriangulatedOurs.SetChangedVersionFilter(ComponentType.ReadOnly<Triangle>());
             RequireForUpdate(_allOurs);
         }
 

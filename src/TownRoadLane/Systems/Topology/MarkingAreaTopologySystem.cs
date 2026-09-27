@@ -75,13 +75,17 @@ namespace TownRoadLane.Systems.Topology
             RequireForUpdate(_nodesWithAreas);
         }
 
+        /// <summary>Nodes with areas whose <paramref name="watched"/> component changed. Unlike
+        /// _nodesWithAreas these queries leave out Node: GetEntityQuery returns the cached query
+        /// for an identical component set, and the change filter would land on both.</summary>
         private EntityQuery ChangedQuery(ComponentType watched)
         {
-            var query = GetEntityQuery(
-                ComponentType.ReadOnly<MarkingArea>(),
-                watched,
-                ComponentType.Exclude<Temp>(),
-                ComponentType.Exclude<Deleted>());
+            var area = ComponentType.ReadOnly<MarkingArea>();
+            var query = GetEntityQuery(new EntityQueryDesc
+            {
+                All = watched == area ? new[] { area } : new[] { area, watched },
+                None = new[] { ComponentType.ReadOnly<Temp>(), ComponentType.ReadOnly<Deleted>() },
+            });
             query.SetChangedVersionFilter(watched);
             return query;
         }

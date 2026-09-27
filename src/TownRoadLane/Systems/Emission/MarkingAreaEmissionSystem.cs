@@ -139,26 +139,31 @@ namespace TownRoadLane.Systems.Emission
                 None = new[] { ComponentType.ReadOnly<Deleted>() },
             });
             _surfacePrefabs = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<SurfaceData>());
+            // GetEntityQuery returns the cached query for an identical component set, so a
+            // change-filtered query must differ from the unfiltered ones or the filter lands on both.
             _changedAreas = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[] { ComponentType.ReadOnly<MarkingArea>(), ComponentType.ReadOnly<Game.Net.Node>() },
+                All = new[] { ComponentType.ReadOnly<MarkingArea>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
             });
             _changedAreas.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingArea>());
             _changedPieces = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[] { ComponentType.ReadOnly<MarkingAreaPiece>(), ComponentType.ReadOnly<Game.Net.Node>() },
+                All = new[] { ComponentType.ReadOnly<MarkingAreaPiece>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
             });
             _changedPieces.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingAreaPiece>());
         }
 
-        private bool PassNeeded()
+        private bool PassNeeded(out string reason)
         {
-            return _passPending
-                || !_changedAreas.IsEmpty
-                || !_changedPieces.IsEmpty
-                || _ourAreas.CalculateEntityCount() != _fillCountAfterPass;
+            int fills = _ourAreas.CalculateEntityCount();
+            reason = _passPending ? "pending"
+                : !_changedAreas.IsEmpty ? "areas changed"
+                : !_changedPieces.IsEmpty ? "pieces changed"
+                : fills != _fillCountAfterPass ? $"fill count {_fillCountAfterPass} -> {fills}"
+                : null;
+            return reason != null;
         }
 
         protected override void OnGameLoaded(Colossal.Serialization.Entities.Context serializationContext)
@@ -200,7 +205,7 @@ namespace TownRoadLane.Systems.Emission
                 }
             }
 
-            if (!PassNeeded()) return;
+            if (!PassNeeded(out string reason)) return;
             _passPending = false;
 
             // Wanted set: (node, areaIndex, pieceIndex) for every visible piece of every visible
@@ -231,6 +236,7 @@ namespace TownRoadLane.Systems.Emission
                 }
             }
 
+            log.Debug($"[area-emission] pass ({reason}): wanted={wanted.Count} existing={_ourAreas.CalculateEntityCount()}");
             var ecb = new EntityCommandBuffer(Allocator.Temp);
 
             // Delete stale, duplicate and restyled fills.
