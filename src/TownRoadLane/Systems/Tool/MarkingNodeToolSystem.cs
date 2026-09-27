@@ -28,68 +28,13 @@ namespace TownRoadLane
     {
         private static readonly ILog log = Mod.log;
 
-        public enum State
-        {
-            Default,
-            NodeSelected,
-            SourceSelected,
-            // Entered from NodeSelected via the area hotkey or the panel button. A click adds a
-            // vertex; clicking the start vertex with 3+ placed closes and commits the area.
-            // Right-click removes the last vertex, or leaves the mode if there is none. Esc
-            // cancels.
-            AreaSelecting,
-        }
-
-        // What an area-polygon vertex refers to. Kind plus refIndex (see AreaCandidate) lets one
-        // hit-test pass cover every anchor type.
-        public enum AreaAnchorKind
-        {
-            LaneEndpoint,     // MarkingEndpoint index in _endpoints
-            NodeCorner,       // MarkingCornerAnchor index in _cornerAnchors
-            // A crossing of two lines. refIndex is the packed (lineA, lineB, hitIndex) value from
-            // MarkingIntersectionExtractor.Pack, not a list index, so it can be stored in
-            // MarkingAreaVertex as is and stays valid when lines are added or curvature changes.
-            LineIntersection,
-        }
-
-        // A placed vertex of the area being drawn. The anchor reference lets positions be rebuilt
-        // after a topology change. edgeToNext is set once the following vertex is picked, so on
-        // the last vertex it stays unresolved until the next click or the closing click.
-        public struct AreaPolygonVertex
-        {
-            public AreaAnchorKind kind;
-            public int refIndex;
-            public AreaEdgeKind edgeToNext;
-            public float3 position;  // cached at click time to keep the overlay cheap
-        }
-
-        // Edge between two consecutive area vertices. Stored in logical form; curved edges are
-        // sampled into a polyline later.
-        public enum AreaEdgeKind
-        {
-            Straight,    // direct chord between the two anchor positions
-            LineBezier,  // both anchors lie on the same MarkingLine: follow that line's curve
-        }
-
-        // Hover or pick target in area mode. None is refIndex == -1.
-        public struct AreaCandidate : System.IEquatable<AreaCandidate>
-        {
-            public AreaAnchorKind kind;
-            public int refIndex;
-            public static readonly AreaCandidate None = new AreaCandidate { kind = AreaAnchorKind.LaneEndpoint, refIndex = -1 };
-            public bool IsValid => refIndex >= 0;
-            public bool Equals(AreaCandidate other) => kind == other.kind && refIndex == other.refIndex;
-            public override bool Equals(object obj) => obj is AreaCandidate c && Equals(c);
-            public override int GetHashCode() => ((int)kind << 24) ^ refIndex;
-        }
-
         public override string toolID => "MarkingNodeTool";
 
         // Squared pick radius for dots, in metres, measured in the XZ plane from the cursor's
         // raycast hit. Deliberately larger than the drawn dot.
         private const float kDotPickRadiusSq = 1.5f * 1.5f;
 
-        private State _state;
+        private MarkingToolState _state;
         private Entity _selectedNode;
         private List<MarkingEndpoint> _endpoints = new List<MarkingEndpoint>();
         // Corner anchors where the kerbs of neighbouring edges meet. Used only by area mode.
@@ -140,7 +85,7 @@ namespace TownRoadLane
         // Reused point-in-polygon ring, to avoid per-frame allocations.
         private readonly List<float3> _areaHitScratch = new List<float3>();
 
-        public State ToolState => _state;
+        public MarkingToolState ToolState => _state;
         public Entity SelectedNode => _selectedNode;
         public Entity HoveredNode => _hoveredNode;
         public IReadOnlyList<MarkingEndpoint> Endpoints => _endpoints;
@@ -185,13 +130,13 @@ namespace TownRoadLane
         /// state with a selected node; returns false in Default.</summary>
         public bool TryEnterAreaMode()
         {
-            if (_state == State.SourceSelected)
+            if (_state == MarkingToolState.SourceSelected)
             {
                 _sourceIdx = -1;
-                _state = State.NodeSelected;
+                _state = MarkingToolState.NodeSelected;
             }
-            if (_state != State.NodeSelected) return false;
-            _state = State.AreaSelecting;
+            if (_state != MarkingToolState.NodeSelected) return false;
+            _state = MarkingToolState.AreaSelecting;
             _areaPolygon.Clear();
             _areaHover = AreaCandidate.None;
             log.Debug($"area: entered AreaSelecting via UI on node #{_selectedNode.Index}");
@@ -202,11 +147,11 @@ namespace TownRoadLane
         /// placed vertices.</summary>
         public void ExitAreaMode()
         {
-            if (_state != State.AreaSelecting) return;
+            if (_state != MarkingToolState.AreaSelecting) return;
             log.Debug($"area: exited AreaSelecting via UI (had {_areaPolygon.Count} vertices)");
             _areaPolygon.Clear();
             _areaHover = AreaCandidate.None;
-            _state = State.NodeSelected;
+            _state = MarkingToolState.NodeSelected;
         }
 
         protected override void OnCreate()
@@ -251,7 +196,7 @@ namespace TownRoadLane
 
         private void ResetSelection()
         {
-            _state = State.Default;
+            _state = MarkingToolState.Default;
             _selectedNode = Entity.Null;
             _endpoints.Clear();
             _cornerAnchors.Clear();
@@ -281,19 +226,19 @@ namespace TownRoadLane
             bool hitSomething = GetRaycastResult(out Entity hitEntity, out hit);
             _cursorWorldPos = hitSomething ? hit.m_HitPosition : float3.zero;
             _hoveredNode = (hitSomething && EntityManager.HasComponent<Node>(hitEntity)) ? hitEntity : Entity.Null;
-            _hoverIdx = (_state != State.Default && _state != State.AreaSelecting && hitSomething) ? FindHoveredEndpoint(_cursorWorldPos) : -1;
+            _hoverIdx = (_state != MarkingToolState.Default && _state != MarkingToolState.AreaSelecting && hitSomething) ? FindHoveredEndpoint(_cursorWorldPos) : -1;
             // Lines can change from the panel while an area is being drawn.
-            if (_state == State.AreaSelecting) RefreshIntersectionAnchorsIfStale();
-            _areaHover = (_state == State.AreaSelecting && hitSomething) ? FindHoveredAreaCandidate(_cursorWorldPos) : AreaCandidate.None;
+            if (_state == MarkingToolState.AreaSelecting) RefreshIntersectionAnchorsIfStale();
+            _areaHover = (_state == MarkingToolState.AreaSelecting && hitSomething) ? FindHoveredAreaCandidate(_cursorWorldPos) : AreaCandidate.None;
 
             // Skipped in SourceSelected, where the cursor is aiming at a target dot and line
             // highlights would be noise.
-            _hoveredLineInGame = (_state == State.NodeSelected && _hoverIdx < 0 && hitSomething)
+            _hoveredLineInGame = (_state == MarkingToolState.NodeSelected && _hoverIdx < 0 && hitSomething)
                 ? HitTestLines(_cursorWorldPos)
                 : -1;
 
             // Dots and lines are more specific targets, so they take priority over areas.
-            _hoveredAreaInGame = (_state == State.NodeSelected && _hoverIdx < 0 && _hoveredLineInGame < 0 && hitSomething)
+            _hoveredAreaInGame = (_state == MarkingToolState.NodeSelected && _hoverIdx < 0 && _hoveredLineInGame < 0 && hitSomething)
                 ? HitTestAreas(_cursorWorldPos)
                 : -1;
 
@@ -328,39 +273,39 @@ namespace TownRoadLane
             // The area hotkey enters area mode, and pressing it again leaves without committing.
             if (_enterAreaAction != null && _enterAreaAction.WasPerformedThisFrame())
             {
-                if (_state == State.NodeSelected)
+                if (_state == MarkingToolState.NodeSelected)
                 {
-                    _state = State.AreaSelecting;
+                    _state = MarkingToolState.AreaSelecting;
                     _areaPolygon.Clear();
                     _areaHover = AreaCandidate.None;
                     log.Debug($"area: entered AreaSelecting on node #{_selectedNode.Index}");
                 }
-                else if (_state == State.AreaSelecting)
+                else if (_state == MarkingToolState.AreaSelecting)
                 {
                     log.Debug($"area: cancelled AreaSelecting via hotkey (had {_areaPolygon.Count} vertices)");
                     _areaPolygon.Clear();
                     _areaHover = AreaCandidate.None;
-                    _state = State.NodeSelected;
+                    _state = MarkingToolState.NodeSelected;
                 }
             }
 
             // Cancel steps back one state; from Default it closes the tool.
             if (cancelAction.WasPressedThisFrame())
             {
-                if (_state == State.AreaSelecting)
+                if (_state == MarkingToolState.AreaSelecting)
                 {
                     log.Debug($"area: cancelled AreaSelecting via Esc (had {_areaPolygon.Count} vertices)");
                     _areaPolygon.Clear();
                     _areaHover = AreaCandidate.None;
-                    _state = State.NodeSelected;
+                    _state = MarkingToolState.NodeSelected;
                 }
-                else if (_state == State.SourceSelected)
+                else if (_state == MarkingToolState.SourceSelected)
                 {
                     log.Debug($"tool: cancel — clearing source #{_sourceIdx}");
                     _sourceIdx = -1;
-                    _state = State.NodeSelected;
+                    _state = MarkingToolState.NodeSelected;
                 }
-                else if (_state == State.NodeSelected)
+                else if (_state == MarkingToolState.NodeSelected)
                 {
                     log.Debug($"tool: cancel — deselecting node #{_selectedNode.Index}");
                     ResetSelection();
@@ -374,7 +319,7 @@ namespace TownRoadLane
             }
 
             // Right-click in area mode undoes the last vertex, as in IMT.
-            if (_state == State.AreaSelecting && secondaryApplyAction.WasPressedThisFrame())
+            if (_state == MarkingToolState.AreaSelecting && secondaryApplyAction.WasPressedThisFrame())
             {
                 if (_areaPolygon.Count > 0)
                 {
@@ -384,7 +329,7 @@ namespace TownRoadLane
                 else
                 {
                     log.Debug("area: RMB on empty contour → leave AreaSelecting");
-                    _state = State.NodeSelected;
+                    _state = MarkingToolState.NodeSelected;
                 }
                 return inputDeps;
             }
@@ -397,7 +342,7 @@ namespace TownRoadLane
                 // Tells apart a missing apply event, a click with no raycast hit, and a hit on
                 // something that isn't a node.
                 log.Debug($"tool: LMB fired — state={_state}, hitSomething={hitSomething}, hitEntity=#{(hitSomething ? hitEntity.Index : -1)}, hasNode={(hitSomething && EntityManager.HasComponent<Node>(hitEntity))}");
-                if (_state == State.Default)
+                if (_state == MarkingToolState.Default)
                 {
                     if (hitSomething && EntityManager.HasComponent<Node>(hitEntity))
                     {
@@ -408,12 +353,12 @@ namespace TownRoadLane
                         log.Debug($"tool: click in Default ignored (hit #{(hitSomething ? hitEntity.Index : -1)}, no Node)");
                     }
                 }
-                else if (_state == State.NodeSelected)
+                else if (_state == MarkingToolState.NodeSelected)
                 {
                     if (_hoverIdx >= 0)
                     {
                         _sourceIdx = _hoverIdx;
-                        _state = State.SourceSelected;
+                        _state = MarkingToolState.SourceSelected;
                         log.Debug($"tool: source endpoint chosen — idx={_sourceIdx} edge=#{_endpoints[_sourceIdx].edge.Index} gap={_endpoints[_sourceIdx].gapIndex}");
                     }
                     else if (hitSomething && EntityManager.HasComponent<Node>(hitEntity) && hitEntity != _selectedNode)
@@ -434,20 +379,20 @@ namespace TownRoadLane
                         log.Debug("tool: click in NodeSelected — no dot/raycast, ignored");
                     }
                 }
-                else if (_state == State.SourceSelected)
+                else if (_state == MarkingToolState.SourceSelected)
                 {
                     if (_hoverIdx >= 0 && _hoverIdx != _sourceIdx)
                     {
                         TogglePair(_endpoints[_sourceIdx], _endpoints[_hoverIdx]);
                         _sourceIdx = -1;
-                        _state = State.NodeSelected;
+                        _state = MarkingToolState.NodeSelected;
                     }
                     else
                     {
                         log.Debug("tool: click in SourceSelected — no different target dot hovered, ignored");
                     }
                 }
-                else if (_state == State.AreaSelecting)
+                else if (_state == MarkingToolState.AreaSelecting)
                 {
                     if (!_areaHover.IsValid)
                     {
@@ -476,7 +421,7 @@ namespace TownRoadLane
             _cornerAnchors = MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node);
             RefreshIntersectionAnchors();
             _sourceIdx = -1;
-            _state = State.NodeSelected;
+            _state = MarkingToolState.NodeSelected;
             int existingLines = EntityManager.HasBuffer<MarkingLine>(node)
                 ? EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true).Length
                 : 0;
@@ -842,7 +787,7 @@ namespace TownRoadLane
             log.Debug($"area: closed with {_areaPolygon.Count} vertices on node #{_selectedNode.Index} — buffer now has {areas.Length} area(s)");
             _areaPolygon.Clear();
             _areaHover = AreaCandidate.None;
-            _state = State.NodeSelected;
+            _state = MarkingToolState.NodeSelected;
         }
 
         /// <summary>Removes the line between the two endpoints (in either direction) if it

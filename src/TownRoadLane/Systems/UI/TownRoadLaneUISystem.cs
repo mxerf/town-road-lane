@@ -762,7 +762,7 @@ namespace TownRoadLane
         private void OnToggleAreaMode()
         {
             if (_tool == null) return;
-            if (_tool.ToolState == MarkingNodeToolSystem.State.AreaSelecting)
+            if (_tool.ToolState == MarkingToolState.AreaSelecting)
                 _tool.ExitAreaMode();
             else
                 _tool.TryEnterAreaMode();

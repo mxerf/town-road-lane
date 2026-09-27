@@ -40,6 +40,26 @@ namespace TownRoadLane
         }
     }
 
+    /// <summary>What an area vertex is anchored to. Saved as a byte in
+    /// <see cref="MarkingAreaVertex.kind"/>, so values are never renumbered.</summary>
+    public enum AreaAnchorKind : byte
+    {
+        LaneEndpoint = 0,
+        NodeCorner = 1,
+        // A crossing of two lines. The reference is the packed (lineA, lineB, hitIndex) value from
+        // MarkingIntersectionExtractor.Pack, which stays valid when lines are added or their
+        // curvature changes.
+        LineIntersection = 2,
+    }
+
+    /// <summary>How the edge from an area vertex to the next one is drawn. Saved as a byte in
+    /// <see cref="MarkingAreaVertex.edgeToNext"/>.</summary>
+    public enum AreaEdgeKind : byte
+    {
+        Straight = 0,    // chord between the two anchors
+        LineBezier = 1,  // both anchors lie on the same MarkingLine: follow its curve
+    }
+
     /// <summary>
     /// One area polygon vertex, stored as a reference to a node anchor rather than a position so
     /// the polygon follows the road when lanes move. Areas own contiguous slices of this
@@ -48,8 +68,7 @@ namespace TownRoadLane
     [InternalBufferCapacity(0)]
     public struct MarkingAreaVertex : IBufferElementData, ISerializable
     {
-        // MarkingNodeToolSystem.AreaAnchorKind: 0 = LaneEndpoint, 1 = NodeCorner,
-        // 2 = LineIntersection.
+        // Raw AreaAnchorKind; use Kind. The fields stay public bytes because other mods read them.
         public byte kind;
         // kind 2: packed (lineA, lineB, hitIndex) crossing reference, stable across loads.
         // kind 0/1 in version 1 saves: raw index into the extracted endpoint/corner list. That
@@ -57,8 +76,7 @@ namespace TownRoadLane
         // so version 2 vertices use the refEdge/refGap/refPos identity below instead and this
         // index only resolves version 1 vertices.
         public int refIndex;
-        // MarkingNodeToolSystem.AreaEdgeKind: how the edge to the next vertex is sampled
-        // (0 = straight chord, 1 = part of a MarkingLine curve).
+        // Raw AreaEdgeKind; use EdgeToNext.
         public byte edgeToNext;
         // Stable identity for kind 0/1, the same scheme that keeps MarkingLine valid across loads:
         //   kind 0: refEdgeA = the endpoint's road edge, refGap = its gap index;
@@ -70,6 +88,21 @@ namespace TownRoadLane
         public Entity refEdgeB;
         public int refGap;
         public float3 refPos;
+
+        public AreaAnchorKind Kind
+        {
+            get => (AreaAnchorKind)kind;
+            set => kind = (byte)value;
+        }
+
+        public AreaEdgeKind EdgeToNext
+        {
+            get => (AreaEdgeKind)edgeToNext;
+            set => edgeToNext = (byte)value;
+        }
+
+        /// <summary>Version 1 lane-endpoint or corner vertex, still named by a raw list index.</summary>
+        public bool IsLegacyIndexRef => Kind != AreaAnchorKind.LineIntersection && refEdgeA == Entity.Null;
 
         private const int kVersion = 2;
 

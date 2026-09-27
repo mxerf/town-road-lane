@@ -174,14 +174,14 @@ namespace TownRoadLane
             DrawHasPairsRings(buf, _tool.SelectedNode);
 
             // Only before a node is selected; after that the dots show where the user is.
-            if (_tool.ToolState == MarkingNodeToolSystem.State.Default && _tool.HoveredNode != Entity.Null)
+            if (_tool.ToolState == MarkingToolState.Default && _tool.HoveredNode != Entity.Null)
             {
                 DrawNodeRing(buf, _tool.HoveredNode, kColNodeHoverRing, kNodeHoverDiameter, kNodeHoverOutlineWidth);
             }
 
             // Area mode replaces the line overlay. Checked before the early return on empty
             // endpoints so an area built only from corner anchors still draws.
-            if (_tool.ToolState == MarkingNodeToolSystem.State.AreaSelecting)
+            if (_tool.ToolState == MarkingToolState.AreaSelecting)
             {
                 DrawAreaModeOverlay(buf);
                 return;

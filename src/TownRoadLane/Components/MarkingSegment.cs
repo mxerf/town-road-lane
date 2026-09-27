@@ -48,5 +48,18 @@ namespace TownRoadLane
             // Version 1 has no style field: those segments were drawn Solid (0).
             if (version >= 2) reader.Read(out style); else style = 0;
         }
+
+        /// <summary>Buffer index of the <paramref name="indexInLine"/>-th segment of a line, hidden
+        /// segments included (the order the panel lists them in), or -1.</summary>
+        public static int FindIndex(DynamicBuffer<MarkingSegment> segments, int lineIndex, int indexInLine)
+        {
+            int n = 0;
+            for (int i = 0; i < segments.Length; i++)
+            {
+                if (segments[i].lineIndex != lineIndex) continue;
+                if (n++ == indexInLine) return i;
+            }
+            return -1;
+        }
     }
 }
