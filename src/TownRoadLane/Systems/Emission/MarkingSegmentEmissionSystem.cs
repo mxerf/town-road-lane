@@ -25,6 +25,10 @@ namespace TownRoadLane
     /// The diff compares keys only. A line whose style or road changed gets new sublanes because
     /// <see cref="CustomSecondaryLaneSystem"/> deletes all lanes of an updated node that has user
     /// lines, including ours, and this system respawns them on the next frame.
+    ///
+    /// The diff only runs on frames where something could have changed it: a segment or line
+    /// buffer was written, the number of our sublanes changed behind our back (the case above),
+    /// or the last pass had to wait for a prefab.
     /// </summary>
     [UpdateAfter(typeof(MarkingTopologySystem))]
     public partial class MarkingSegmentEmissionSystem : GameSystemBase
@@ -33,6 +37,12 @@ namespace TownRoadLane
 
         private EntityQuery _nodesWithLines;
         private EntityQuery _ourSubLanes;
+        private EntityQuery _changedSegments;
+        private EntityQuery _changedLines;
+        // Our live sublanes right after the last pass. A different count on a later frame means
+        // someone else created or deleted some.
+        private int _subLaneCountAfterPass = -1;
+        private bool _passPending = true;
         private readonly System.Text.StringBuilder _churnDetail = new System.Text.StringBuilder();
         // One warning per (node, line) over the PathNode slot capacity: the check fails every
         // tick for such a line, so unthrottled logging would flood.
@@ -58,57 +68,61 @@ namespace TownRoadLane
                 All = new[] { ComponentType.ReadOnly<TRLSegmentLink>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>() },
             });
+            _changedSegments = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<MarkingSegment>(), ComponentType.ReadOnly<Node>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
+            });
+            _changedSegments.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingSegment>());
+            _changedLines = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<MarkingLine>(), ComponentType.ReadOnly<Node>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
+            });
+            _changedLines.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingLine>());
+        }
+
+        protected override void OnGameLoaded(Colossal.Serialization.Entities.Context serializationContext)
+        {
+            base.OnGameLoaded(serializationContext);
+            _passPending = true;
+        }
+
+        private bool PassNeeded()
+        {
+            return _passPending
+                || !_changedSegments.IsEmpty
+                || !_changedLines.IsEmpty
+                || _ourSubLanes.CalculateEntityCount() != _subLaneCountAfterPass;
         }
 
         protected override void OnUpdate()
         {
+            if (!PassNeeded()) return;
+            _passPending = false;
+
             var ecb = new EntityCommandBuffer(Allocator.Temp);
 
-            // Wanted set: (node, lineIndex, segmentIndex, passIndex) for every visible segment.
-            var wanted = new HashSet<(Entity, int, int, int)>();
-            var nodes = _nodesWithLines.ToEntityArray(Allocator.Temp);
-            for (int n = 0; n < nodes.Length; n++)
+            // Wanted sublanes, keyed like TRLSegmentLink, mapped to the segment's buffer index.
+            var wanted = new Dictionary<(Entity, int, int, int), int>();
+            using (var nodes = _nodesWithLines.ToEntityArray(Allocator.Temp))
             {
-                var node = nodes[n];
-                if (!EntityManager.HasBuffer<MarkingSegment>(node)) continue;
-                if (!EntityManager.HasBuffer<MarkingLine>(node)) continue;
-                var segs = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
-                var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
-                var perLineCounter = new Dictionary<int, int>();
-                for (int s = 0; s < segs.Length; s++)
-                {
-                    var seg = segs[s];
-                    if (!seg.visible) continue;
-                    if (seg.lineIndex < 0 || seg.lineIndex >= lines.Length) continue;
-                    int segIdx = perLineCounter.TryGetValue(seg.lineIndex, out var c) ? c : 0;
-                    perLineCounter[seg.lineIndex] = segIdx + 1;
-                    var style = (MarkingStyle)seg.style;
-                    int passes = style.DrawPasses();
-                    for (int p = 0; p < passes; p++)
-                        wanted.Add((node, seg.lineIndex, segIdx, p));
-                }
+                for (int n = 0; n < nodes.Length; n++)
+                    CollectWanted(nodes[n], wanted);
             }
-            nodes.Dispose();
 
-            // Delete unwanted and duplicate sublanes.
-            var existing = _ourSubLanes.ToEntityArray(Allocator.Temp);
-            var seen = new HashSet<(Entity, int, int, int)>();
+            // Keep one sublane per wanted key; delete the rest, duplicates included.
             int deleted = 0;
-            for (int i = 0; i < existing.Length; i++)
+            using (var existing = _ourSubLanes.ToEntityArray(Allocator.Temp))
             {
-                var sub = existing[i];
-                var link = EntityManager.GetComponentData<TRLSegmentLink>(sub);
-                var key = (link.node, link.lineIndex, link.segmentIndex, link.passIndex);
-                if (!wanted.Contains(key) || seen.Contains(key))
+                for (int i = 0; i < existing.Length; i++)
                 {
-                    ecb.AddComponent<Deleted>(sub);
+                    var link = EntityManager.GetComponentData<TRLSegmentLink>(existing[i]);
+                    if (wanted.Remove((link.node, link.lineIndex, link.segmentIndex, link.passIndex))) continue;
+                    ecb.AddComponent<Deleted>(existing[i]);
                     deleted++;
-                    continue;
                 }
-                seen.Add(key);
-                wanted.Remove(key);
             }
-            existing.Dispose();
 
             // Spawn the rest.
             int created = 0;
@@ -116,84 +130,50 @@ namespace TownRoadLane
             {
                 // Solid is required: it is the fallback for any style whose clone is not ready.
                 bool isNA = IsNATheme();
-                var prefabByStyle = new Dictionary<MarkingStyle, (Entity prefab, EntityArchetype arch)>();
                 if (!TryResolveStylePrefab(MarkingStyle.Solid, isNA, out var solidPair))
                 {
                     log.Warn("segment-emission: solid prefab not resolved yet — deferring entire tick");
+                    _passPending = true;
                 }
                 else
                 {
-                    prefabByStyle[MarkingStyle.Solid] = solidPair;
-                    nodes = _nodesWithLines.ToEntityArray(Allocator.Temp);
-                    for (int n = 0; n < nodes.Length; n++)
+                    var prefabByStyle = new Dictionary<MarkingStyle, (Entity prefab, EntityArchetype arch)>
                     {
-                        var node = nodes[n];
-                        if (!EntityManager.HasBuffer<MarkingLine>(node)) continue;
-                        if (!EntityManager.HasBuffer<MarkingSegment>(node)) continue;
-                        var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
-                        var segs  = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
+                        [MarkingStyle.Solid] = solidPair,
+                    };
+                    var curvesByNode = new Dictionary<Entity, Bezier4x3?[]>();
+                    foreach (var entry in wanted)
+                    {
+                        var (node, lineIndex, segIdx, pass) = entry.Key;
+                        if (!curvesByNode.TryGetValue(node, out var curves))
+                            curvesByNode[node] = curves = BuildLineCurves(node);
+                        if (!(curves[lineIndex] is Bezier4x3 curve)) continue;
 
-                        var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
-
-                        var lineCount = lines.Length;
-                        var fullBeziers = new Bezier4x3[lineCount];
-                        var bezValid = new bool[lineCount];
-                        for (int i = 0; i < lineCount; i++)
+                        var seg = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true)[entry.Value];
+                        // Style belongs to the segment, so pieces of one line can differ.
+                        var style = (MarkingStyle)seg.style;
+                        if (!prefabByStyle.TryGetValue(style, out var pair))
                         {
-                            if (MarkingCurveBuilder.TryBuild(endpoints, lines[i], out var bez))
-                            {
-                                fullBeziers[i] = bez;
-                                bezValid[i] = true;
-                            }
+                            if (!TryResolveStylePrefab(style, isNA, out pair))
+                                pair = solidPair;
+                            prefabByStyle[style] = pair;
                         }
 
-                        var perLineCounter = new Dictionary<int, int>();
-                        for (int s = 0; s < segs.Length; s++)
-                        {
-                            var seg = segs[s];
-                            if (!seg.visible) continue;
-                            int segIdx = perLineCounter.TryGetValue(seg.lineIndex, out var c) ? c : 0;
-                            perLineCounter[seg.lineIndex] = segIdx + 1;
-
-                            if (seg.lineIndex < 0 || seg.lineIndex >= lineCount) continue;
-                            if (!bezValid[seg.lineIndex]) continue;
-
-                            // Style belongs to the segment, so pieces of one line can differ.
-                            var style = (MarkingStyle)seg.style;
-                            if (!prefabByStyle.TryGetValue(style, out var pair))
-                            {
-                                if (!TryResolveStylePrefab(style, isNA, out pair))
-                                    pair = solidPair;
-                                prefabByStyle[style] = pair;
-                            }
-
-                            // Multi-pass styles stack copies on the same curve to boost alpha.
-                            int passes = style.DrawPasses();
-                            for (int p = 0; p < passes; p++)
-                            {
-                                var key = (node, seg.lineIndex, segIdx, p);
-                                if (!wanted.Contains(key)) continue;
-                                wanted.Remove(key);
-                                var spawned = SpawnSegmentSublane(ecb, node, seg.lineIndex, segIdx, p,
-                                    fullBeziers[seg.lineIndex], seg.tStart, seg.tEnd, pair.prefab, pair.arch);
-                                if (spawned != Entity.Null)
-                                {
-                                    created++;
-                                    // Churn diagnostics: a small steady trickle of re-creations
-                                    // means something keeps deleting these exact sublanes.
-                                    if (created <= 12)
-                                        _churnDetail.Append(created > 1 ? ", " : "").Append($"node#{node.Index} L{seg.lineIndex} S{segIdx} P{p} {style}");
-                                }
-                            }
-                        }
+                        var spawned = SpawnSegmentSublane(ecb, node, lineIndex, segIdx, pass,
+                            curve, seg.tStart, seg.tEnd, pair.prefab, pair.arch);
+                        if (spawned == Entity.Null) continue;
+                        created++;
+                        // Churn diagnostics: a small steady trickle of re-creations means
+                        // something keeps deleting these exact sublanes.
+                        if (created <= 12)
+                            _churnDetail.Append(created > 1 ? ", " : "").Append($"node#{node.Index} L{lineIndex} S{segIdx} P{pass} {style}");
                     }
-                    nodes.Dispose();
                 }
             }
 
             if (created > 0 || deleted > 0)
             {
-                log.Debug($"segment-emission: +{created} created, -{deleted} deleted (wanted={wanted.Count} unmet, existing={_ourSubLanes.CalculateEntityCount()})");
+                log.Debug($"segment-emission: +{created} created, -{deleted} deleted (wanted={wanted.Count - created} unmet, existing={_ourSubLanes.CalculateEntityCount()})");
                 if (_churnDetail.Length > 0 && created <= 12)
                     log.Debug($"segment-emission detail: {_churnDetail}");
             }
@@ -201,6 +181,39 @@ namespace TownRoadLane
 
             ecb.Playback(EntityManager);
             ecb.Dispose();
+            _subLaneCountAfterPass = _ourSubLanes.CalculateEntityCount();
+        }
+
+        /// <summary>Adds a key per visible segment and draw pass. A sublane's segment index counts
+        /// only the visible segments of its line.</summary>
+        private void CollectWanted(Entity node, Dictionary<(Entity, int, int, int), int> wanted)
+        {
+            if (!EntityManager.HasBuffer<MarkingSegment>(node) || !EntityManager.HasBuffer<MarkingLine>(node)) return;
+            var segs = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
+            int lineCount = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true).Length;
+            var visibleInLine = new int[lineCount];
+            for (int s = 0; s < segs.Length; s++)
+            {
+                var seg = segs[s];
+                if (!seg.visible) continue;
+                if (seg.lineIndex < 0 || seg.lineIndex >= lineCount) continue;
+                int segIdx = visibleInLine[seg.lineIndex]++;
+                // Multi-pass styles stack copies on the same curve to boost alpha.
+                int passes = ((MarkingStyle)seg.style).DrawPasses();
+                for (int p = 0; p < passes; p++)
+                    wanted[(node, seg.lineIndex, segIdx, p)] = s;
+            }
+        }
+
+        /// <summary>Full curve of every line on the node, null where the line can't be built.</summary>
+        private Bezier4x3?[] BuildLineCurves(Entity node)
+        {
+            var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
+            var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
+            var curves = new Bezier4x3?[lines.Length];
+            for (int i = 0; i < lines.Length; i++)
+                if (MarkingCurveBuilder.TryBuild(endpoints, lines[i], out var bez)) curves[i] = bez;
+            return curves;
         }
 
         private Entity SpawnSegmentSublane(EntityCommandBuffer ecb, Entity node, int lineIndex, int segmentIndex,

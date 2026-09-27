@@ -81,8 +81,7 @@ namespace TownRoadLane
             EntityManager.RemoveComponent<MarkingPair>(node);
 
             // Updated makes the emission systems pick up the new buffers this frame.
-            if (!EntityManager.HasComponent<Updated>(node))
-                EntityManager.AddComponent<Updated>(node);
+            EntityManager.MarkUpdated(node);
 
             return true;
         }

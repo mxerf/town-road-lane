@@ -21,7 +21,9 @@ namespace TownRoadLane
     /// Updated for <see cref="MarkingSegmentEmissionSystem"/>.
     ///
     /// Change detection compares a hash of the line geometry (endpoints and curvature, not
-    /// style) against <see cref="MarkingTopologyState"/>.
+    /// style) against <see cref="MarkingTopologyState"/>. The per-node scan only runs on frames
+    /// where a line buffer or a state changed, a node has no state yet (after a load, or when
+    /// another mod clears it to force a rebuild), or a node is waiting for its roads.
     /// </summary>
     [UpdateAfter(typeof(MarkingPairMigrationSystem))]
     [UpdateBefore(typeof(MarkingSegmentEmissionSystem))]
@@ -30,6 +32,11 @@ namespace TownRoadLane
         private static readonly ILog log = Mod.log;
 
         private EntityQuery _nodesWithLines;
+        private EntityQuery _changedLines;
+        private EntityQuery _changedStates;
+        private EntityQuery _nodesWithoutState;
+        // A node waited for its edges on the last scan (see RecomputeIfChanged), so scan again.
+        private bool _retryPending;
 
         // Defaults of the four split-filter thresholds, which are user settings. They are read on
         // every node rebuild, so a change reaches a junction when its lines are next edited, and
@@ -62,34 +69,64 @@ namespace TownRoadLane
                 ComponentType.ReadOnly<Node>(),
                 ComponentType.Exclude<Temp>(),
                 ComponentType.Exclude<Deleted>());
+            _changedLines = GetEntityQuery(
+                ComponentType.ReadOnly<MarkingLine>(),
+                ComponentType.ReadOnly<Node>(),
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
+            _changedLines.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingLine>());
+            _changedStates = GetEntityQuery(
+                ComponentType.ReadOnly<MarkingLine>(),
+                ComponentType.ReadOnly<MarkingTopologyState>(),
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
+            _changedStates.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingTopologyState>());
+            _nodesWithoutState = GetEntityQuery(
+                ComponentType.ReadOnly<MarkingLine>(),
+                ComponentType.ReadOnly<Node>(),
+                ComponentType.Exclude<MarkingTopologyState>(),
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
             RequireForUpdate(_nodesWithLines);
         }
 
         protected override void OnUpdate()
         {
+            // Change filters work per chunk and include writes by other systems since this one
+            // last ran; its own writes don't count.
+            if (!_retryPending && _changedLines.IsEmpty && _changedStates.IsEmpty && _nodesWithoutState.IsEmpty)
+                return;
+
+            _retryPending = false;
             using var nodes = _nodesWithLines.ToEntityArray(Allocator.Temp);
             int rewritten = 0;
             for (int i = 0; i < nodes.Length; i++)
             {
-                if (RecomputeIfChanged(nodes[i])) rewritten++;
+                switch (RecomputeIfChanged(nodes[i]))
+                {
+                    case RebuildResult.Rebuilt: rewritten++; break;
+                    case RebuildResult.Deferred: _retryPending = true; break;
+                }
             }
             if (rewritten > 0) log.Debug($"MarkingTopologySystem: recomputed segments on {rewritten} node(s)");
         }
 
-        private bool RecomputeIfChanged(Entity node)
+        private enum RebuildResult { Unchanged, Rebuilt, Deferred }
+
+        private RebuildResult RecomputeIfChanged(Entity node)
         {
-            if (!EntityManager.HasBuffer<MarkingLine>(node)) return false;
+            if (!EntityManager.HasBuffer<MarkingLine>(node)) return RebuildResult.Unchanged;
             var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
 
             if (lines.Length == 0 && !EntityManager.HasBuffer<MarkingSegment>(node))
-                return false;
+                return RebuildResult.Unchanged;
 
             int newHash = HashLines(lines);
             int oldHash = EntityManager.HasComponent<MarkingTopologyState>(node)
                 ? EntityManager.GetComponentData<MarkingTopologyState>(node).linesHash
                 : 0;
             if (newHash == oldHash && EntityManager.HasBuffer<MarkingSegment>(node))
-                return false;
+                return RebuildResult.Unchanged;
 
             // Copy the lines first: structural changes below (AddBuffer, AddComponent) invalidate
             // the buffer handle.
@@ -138,7 +175,7 @@ namespace TownRoadLane
                     linesSnapshot.Dispose();
                     beziers.Dispose();
                     bezierValid.Dispose();
-                    return false;
+                    return RebuildResult.Deferred;
                 }
             }
 
@@ -253,15 +290,14 @@ namespace TownRoadLane
             else
                 EntityManager.AddComponentData(node, new MarkingTopologyState { linesHash = newHash });
 
-            if (!EntityManager.HasComponent<Updated>(node))
-                EntityManager.AddComponent<Updated>(node);
+            EntityManager.MarkUpdated(node);
 
             linesSnapshot.Dispose();
             beziers.Dispose();
             bezierValid.Dispose();
 
             log.Debug($"topology node#{node.Index}: {lineCount} line(s) → {newSegments.Count} segment(s)");
-            return true;
+            return RebuildResult.Rebuilt;
         }
 
         /// <summary>Visibility of the old segment containing <paramref name="t"/>, or
@@ -324,7 +360,7 @@ namespace TownRoadLane
                 for (int v = 0; v < averts.Length; v++)
                 {
                     var av = averts[v];
-                    if (av.kind != 2) continue;
+                    if (av.Kind != AreaAnchorKind.LineIntersection) continue;
                     MarkingIntersectionExtractor.Unpack(av.refIndex, out int a, out int b, out int k);
                     if (a == lineIndex || b == lineIndex) continue;
                     if (a > lineIndex) a--;
@@ -380,22 +416,26 @@ namespace TownRoadLane
             }
         }
 
-        private static int HashLines(DynamicBuffer<MarkingLine> lines)
+        /// <summary>Endpoints and curvature of every line, in order: reordering lines changes the
+        /// lineIndex that segments refer to.</summary>
+        internal static void AddLines(ref Fnv1a h, DynamicBuffer<MarkingLine> lines)
         {
-            // FNV-1a over each line's endpoints and curvature. Order-sensitive on purpose:
-            // reordering lines changes the lineIndex that segments refer to.
-            const uint kPrime = 16777619u;
-            uint h = 2166136261u;
             for (int i = 0; i < lines.Length; i++)
             {
                 var l = lines[i];
-                h = (h ^ (uint)l.sourceEdge.Index) * kPrime;
-                h = (h ^ (uint)l.sourceGapIndex) * kPrime;
-                h = (h ^ (uint)l.targetEdge.Index) * kPrime;
-                h = (h ^ (uint)l.targetGapIndex) * kPrime;
-                h = (h ^ math.asuint(l.curvature)) * kPrime;
+                h.Add(l.sourceEdge);
+                h.Add(l.sourceGapIndex);
+                h.Add(l.targetEdge);
+                h.Add(l.targetGapIndex);
+                h.Add(l.curvature);
             }
-            return (int)h;
+        }
+
+        private static int HashLines(DynamicBuffer<MarkingLine> lines)
+        {
+            var h = Fnv1a.Create();
+            AddLines(ref h, lines);
+            return h.Value32;
         }
     }
 

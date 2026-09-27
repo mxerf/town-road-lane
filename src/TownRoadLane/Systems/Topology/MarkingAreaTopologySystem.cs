@@ -21,7 +21,9 @@ namespace TownRoadLane
     /// across an area are only an overlay and do not cut it.
     ///
     /// Runs after <see cref="MarkingTopologySystem"/> for the current line buffer and before
-    /// <see cref="MarkingAreaEmissionSystem"/>, which spawns fills from the pieces.
+    /// <see cref="MarkingAreaEmissionSystem"/>, which spawns fills from the pieces. Like the line
+    /// topology, the per-node scan only runs when an input buffer or a state changed, a node has
+    /// no state yet, or a node is waiting for its roads.
     /// </summary>
     [UpdateAfter(typeof(MarkingTopologySystem))]
     [UpdateBefore(typeof(MarkingAreaEmissionSystem))]
@@ -31,6 +33,10 @@ namespace TownRoadLane
 
         private EntityQuery _nodesWithAreas;
         private EntityQuery _spawnedAreas;
+        private EntityQuery _nodesWithoutState;
+        // One query per watched type: a change filter on several types is not needed and each
+        // query stays trivially cheap when nothing changed.
+        private EntityQuery[] _changeWatchers;
 
         // Ticks each node has been waiting for its edges to become ready (see RecomputeIfChanged).
         private readonly Dictionary<Entity, int> _deferredTicks = new Dictionary<Entity, int>();
@@ -49,7 +55,39 @@ namespace TownRoadLane
             _spawnedAreas = GetEntityQuery(
                 ComponentType.ReadOnly<TRLAreaLink>(),
                 ComponentType.Exclude<Deleted>());
+            _nodesWithoutState = GetEntityQuery(
+                ComponentType.ReadOnly<MarkingArea>(),
+                ComponentType.ReadOnly<Node>(),
+                ComponentType.Exclude<MarkingAreaTopologyState>(),
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
+            _changeWatchers = new[]
+            {
+                ChangedQuery(ComponentType.ReadOnly<MarkingArea>()),
+                ChangedQuery(ComponentType.ReadOnly<MarkingAreaVertex>()),
+                ChangedQuery(ComponentType.ReadOnly<MarkingLine>()),
+                ChangedQuery(ComponentType.ReadOnly<MarkingAreaTopologyState>()),
+            };
             RequireForUpdate(_nodesWithAreas);
+        }
+
+        private EntityQuery ChangedQuery(ComponentType watched)
+        {
+            var query = GetEntityQuery(
+                ComponentType.ReadOnly<MarkingArea>(),
+                watched,
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
+            query.SetChangedVersionFilter(watched);
+            return query;
+        }
+
+        private bool AnythingToRebuild()
+        {
+            if (_deferredTicks.Count > 0 || !_nodesWithoutState.IsEmpty) return true;
+            for (int i = 0; i < _changeWatchers.Length; i++)
+                if (!_changeWatchers[i].IsEmpty) return true;
+            return false;
         }
 
         protected override void OnGameLoaded(Colossal.Serialization.Entities.Context serializationContext)
@@ -62,11 +100,22 @@ namespace TownRoadLane
 
         protected override void OnUpdate()
         {
+            if (!AnythingToRebuild()) return;
+
             using var nodes = _nodesWithAreas.ToEntityArray(Allocator.Temp);
             int rewritten = 0;
             for (int i = 0; i < nodes.Length; i++)
             {
                 if (RecomputeIfChanged(nodes[i])) rewritten++;
+            }
+            // A node deleted while waiting would otherwise keep the scan running every frame.
+            if (_deferredTicks.Count > 0)
+            {
+                var alive = new HashSet<Entity>(nodes);
+                var gone = new List<Entity>();
+                foreach (var node in _deferredTicks.Keys)
+                    if (!alive.Contains(node)) gone.Add(node);
+                for (int i = 0; i < gone.Count; i++) _deferredTicks.Remove(gone[i]);
             }
             if (rewritten > 0) log.Debug($"MarkingAreaTopologySystem: recomputed pieces on {rewritten} node(s)");
         }
@@ -172,7 +221,7 @@ namespace TownRoadLane
                         if (idx >= 0 && idx < vertsRW.Length)
                         {
                             var t = vertsRW[idx];
-                            if ((t.kind == 0 || t.kind == 1) && t.refEdgeA == Entity.Null) { hasLegacy = true; break; }
+                            if (t.IsLegacyIndexRef) { hasLegacy = true; break; }
                         }
                     }
                     if (!hasLegacy) continue;
@@ -192,18 +241,17 @@ namespace TownRoadLane
                         int idx = ad.firstVertex + v;
                         if (idx < 0 || idx >= vertsRW.Length) { confirmed = false; break; }
                         var av = vertsRW[idx];
-                        bool isLegacy = (av.kind == 0 || av.kind == 1) && av.refEdgeA == Entity.Null;
                         float3 pos;
-                        if (isLegacy)
+                        if (av.IsLegacyIndexRef)
                         {
                             Entity edgeA, edgeB = Entity.Null;
                             int gap = 0;
-                            if (av.kind == 0 && av.refIndex >= 0 && av.refIndex < endpoints.Count)
+                            if (av.Kind == AreaAnchorKind.LaneEndpoint && av.refIndex >= 0 && av.refIndex < endpoints.Count)
                             {
                                 var ep = endpoints[av.refIndex];
                                 pos = ep.position; edgeA = ep.edge; gap = ep.gapIndex;
                             }
-                            else if (av.kind == 1 && av.refIndex >= 0 && av.refIndex < corners.Count)
+                            else if (av.Kind == AreaAnchorKind.NodeCorner && av.refIndex >= 0 && av.refIndex < corners.Count)
                             {
                                 var ca = corners[av.refIndex];
                                 pos = ca.position; edgeA = ca.edgeA; edgeB = ca.edgeB;
@@ -338,8 +386,7 @@ namespace TownRoadLane
             else
                 EntityManager.AddComponentData(node, new MarkingAreaTopologyState { combinedHash = newHash });
 
-            if (!EntityManager.HasComponent<Updated>(node))
-                EntityManager.AddComponent<Updated>(node);
+            EntityManager.MarkUpdated(node);
 
             // Delete every fill spawned for this node; emission respawns them next tick. Its diff
             // matches only by key and prefab, so a fill whose key still matches would keep stale
@@ -392,7 +439,7 @@ namespace TownRoadLane
             for (int v = 0; v < n; v++)
             {
                 ring.Add(anchors[v]);
-                if (avs[v].edgeToNext == 1 // AreaEdgeKind.LineBezier
+                if (avs[v].EdgeToNext == AreaEdgeKind.LineBezier
                     && TryFindSharedLine(avs[v], avs[(v + 1) % n], endpoints, lines, out _, out var bez, out float tFrom, out float tTo))
                 {
                     SampleCurvedEdge(bez, tFrom, tTo, ring);
@@ -448,21 +495,21 @@ namespace TownRoadLane
                                              List<MarkingCornerAnchor> corners, MarkingLine[] lines, out float3 pos)
         {
             pos = default;
-            if (av.kind == 0)
+            if (av.Kind == AreaAnchorKind.LaneEndpoint)
             {
                 int idx = MarkingEndpointExtractor.ResolveEndpointIndex(endpoints, av);
                 if (idx < 0) return false;
                 pos = endpoints[idx].position;
                 return true;
             }
-            if (av.kind == 1)
+            if (av.Kind == AreaAnchorKind.NodeCorner)
             {
                 int idx = MarkingEndpointExtractor.ResolveCornerIndex(corners, av);
                 if (idx < 0) return false;
                 pos = corners[idx].position;
                 return true;
             }
-            if (av.kind == 2) // line crossing: refIndex is the packed (lineA, lineB, hit)
+            if (av.Kind == AreaAnchorKind.LineIntersection) // refIndex is the packed (lineA, lineB, hit)
                 return MarkingIntersectionExtractor.TryResolve(endpoints, lines, av.refIndex, out pos);
             return false;
         }
@@ -524,7 +571,7 @@ namespace TownRoadLane
                                                  List<MarkingEndpoint> endpoints, out float t)
         {
             t = 0f;
-            if (av.kind == 0)
+            if (av.Kind == AreaAnchorKind.LaneEndpoint)
             {
                 int epIdx = MarkingEndpointExtractor.ResolveEndpointIndex(endpoints, av);
                 if (epIdx < 0) return false;
@@ -534,7 +581,7 @@ namespace TownRoadLane
                 if (ln.targetEdge == ep.edge && ln.targetGapIndex == ep.gapIndex) { t = 1f; return true; }
                 return false;
             }
-            if (av.kind == 2)
+            if (av.Kind == AreaAnchorKind.LineIntersection)
             {
                 MarkingIntersectionExtractor.Unpack(av.refIndex, out int a, out int b, out _);
                 if (lineIndex != a && lineIndex != b) return false;
@@ -560,41 +607,28 @@ namespace TownRoadLane
 
         private static int HashAreaAndLines(DynamicBuffer<MarkingArea> areas, DynamicBuffer<MarkingAreaVertex> verts, DynamicBuffer<MarkingLine>? lines)
         {
-            // FNV-1a over the areas, their vertices and the line geometry, like
-            // MarkingTopologySystem.HashLines. Bump kAlgoVersion whenever the ring built from the
-            // same input changes, so existing areas are rebuilt.
+            // Bump kAlgoVersion whenever the ring built from the same input changes, so existing
+            // areas are rebuilt.
             const uint kAlgoVersion = 11;
-            const uint kPrime = 16777619u;
-            uint h = 2166136261u ^ kAlgoVersion;
+            var h = Fnv1a.Create();
+            h.Add(kAlgoVersion);
             for (int i = 0; i < areas.Length; i++)
             {
                 var a = areas[i];
-                h = (h ^ (uint)a.styleId) * kPrime;
-                h = (h ^ (uint)(a.visible ? 1 : 0)) * kPrime;
-                h = (h ^ (uint)a.firstVertex) * kPrime;
-                h = (h ^ (uint)a.vertexCount) * kPrime;
+                h.Add(a.styleId);
+                h.Add(a.visible);
+                h.Add(a.firstVertex);
+                h.Add(a.vertexCount);
             }
             for (int i = 0; i < verts.Length; i++)
             {
                 var v = verts[i];
-                h = (h ^ (uint)v.kind) * kPrime;
-                h = (h ^ (uint)v.refIndex) * kPrime;
-                h = (h ^ (uint)v.edgeToNext) * kPrime;
+                h.Add((uint)v.kind);
+                h.Add(v.refIndex);
+                h.Add((uint)v.edgeToNext);
             }
-            if (lines.HasValue)
-            {
-                var lb = lines.Value;
-                for (int i = 0; i < lb.Length; i++)
-                {
-                    var l = lb[i];
-                    h = (h ^ (uint)l.sourceEdge.Index) * kPrime;
-                    h = (h ^ (uint)l.sourceGapIndex) * kPrime;
-                    h = (h ^ (uint)l.targetEdge.Index) * kPrime;
-                    h = (h ^ (uint)l.targetGapIndex) * kPrime;
-                    h = (h ^ math.asuint(l.curvature)) * kPrime;
-                }
-            }
-            return (int)h;
+            if (lines.HasValue) MarkingTopologySystem.AddLines(ref h, lines.Value);
+            return h.Value32;
         }
     }
 }

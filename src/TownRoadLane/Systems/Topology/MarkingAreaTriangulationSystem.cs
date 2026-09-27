@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Colossal.Logging;
 using Colossal.Mathematics;
 using Game;
@@ -44,19 +45,21 @@ namespace TownRoadLane
 
         private EntityQuery _updatedOurs;
         private EntityQuery _allOurs;
+        // Our fills whose Triangle buffer someone else wrote since this system last ran.
+        private EntityQuery _retriangulatedOurs;
         private TerrainSystem _terrainSystem;
         private bool _loaded;
 
         // Fills whose ring the ear-clip could not solve. Without this set the reclaim scan would
         // retry and warn every tick. An entry is cleared when the entity passes through the
         // Updated path again, meaning its ring changed.
-        private readonly System.Collections.Generic.HashSet<Entity> _healFailed =
-            new System.Collections.Generic.HashSet<Entity>();
+        private readonly HashSet<Entity> _healFailed =
+            new HashSet<Entity>();
 
         // Hash of the triangle indices this system last wrote, per fill. A mismatch means the fill
         // was re-triangulated without an Updated tag (see ReclaimClobberedFills).
-        private readonly System.Collections.Generic.Dictionary<Entity, int> _ownedFingerprint =
-            new System.Collections.Generic.Dictionary<Entity, int>();
+        private readonly Dictionary<Entity, int> _ownedFingerprint =
+            new Dictionary<Entity, int>();
 
         protected override void OnCreate()
         {
@@ -75,6 +78,13 @@ namespace TownRoadLane
                 ComponentType.ReadOnly<Game.Areas.Node>(),
                 ComponentType.ReadWrite<Triangle>(),
                 ComponentType.Exclude<Deleted>());
+            _retriangulatedOurs = GetEntityQuery(
+                ComponentType.ReadOnly<TRLAreaLink>(),
+                ComponentType.ReadOnly<Area>(),
+                ComponentType.ReadOnly<Game.Areas.Node>(),
+                ComponentType.ReadWrite<Triangle>(),
+                ComponentType.Exclude<Deleted>());
+            _retriangulatedOurs.SetChangedVersionFilter(ComponentType.ReadWrite<Triangle>());
             RequireForUpdate(_allOurs);
         }
 
@@ -156,21 +166,23 @@ namespace TownRoadLane
         /// invisible. Fills it can solve get ears chosen on the shrunk polygon but drawn on the
         /// real ring, so the mesh spills past the contour near sharp tips.
         ///
-        /// Nothing downstream is notified, so every tick this scan compares each fill's triangle
-        /// indices with the fingerprint of what this system last wrote. On a mismatch it
-        /// rewrites the triangles and tags the fill Updated, so the search tree and
-        /// AreaBatchSystem refresh in the same frame.
+        /// Nothing downstream is notified, so this scan compares the triangle indices of every
+        /// fill whose Triangle buffer was written by someone else (a per-chunk change filter)
+        /// with the fingerprint of what this system last wrote. On a mismatch it rewrites the
+        /// triangles and tags the fill Updated, so the search tree and AreaBatchSystem refresh
+        /// in the same frame.
         /// </summary>
         private void ReclaimClobberedFills(ref TerrainHeightData heightData)
         {
-            using var all = _allOurs.ToEntityArray(Allocator.Temp);
+            if (_retriangulatedOurs.IsEmpty) return;
+            using var candidates = _retriangulatedOurs.ToEntityArray(Allocator.Temp);
             var toHeal = new NativeList<Entity>(Allocator.Temp);
-            for (int i = 0; i < all.Length; i++)
+            for (int i = 0; i < candidates.Length; i++)
             {
-                if (_healFailed.Contains(all[i])) continue;
-                int current = Fingerprint(EntityManager.GetBuffer<Triangle>(all[i], isReadOnly: true));
-                if (!_ownedFingerprint.TryGetValue(all[i], out int owned) || current != owned)
-                    toHeal.Add(all[i]);
+                if (_healFailed.Contains(candidates[i])) continue;
+                int current = Fingerprint(EntityManager.GetBuffer<Triangle>(candidates[i], isReadOnly: true));
+                if (!_ownedFingerprint.TryGetValue(candidates[i], out int owned) || current != owned)
+                    toHeal.Add(candidates[i]);
             }
 
             int healed = 0;
@@ -206,11 +218,12 @@ namespace TownRoadLane
 
             // Entity keys include the version, so recycled indices never collide, but keys of
             // deleted fills pile up as fills are respawned. Prune them now and then.
-            if (_ownedFingerprint.Count > all.Length * 2 + 32)
+            if (_ownedFingerprint.Count > _allOurs.CalculateEntityCount() * 2 + 32)
             {
-                var alive = new System.Collections.Generic.HashSet<Entity>();
+                using var all = _allOurs.ToEntityArray(Allocator.Temp);
+                var alive = new HashSet<Entity>();
                 for (int i = 0; i < all.Length; i++) alive.Add(all[i]);
-                var dead = new System.Collections.Generic.List<Entity>();
+                var dead = new List<Entity>();
                 foreach (var kv in _ownedFingerprint)
                     if (!alive.Contains(kv.Key)) dead.Add(kv.Key);
                 for (int i = 0; i < dead.Count; i++) _ownedFingerprint.Remove(dead[i]);

@@ -22,6 +22,10 @@ namespace TownRoadLane
     /// The spawned entities are found through their tag rather than stored on the node:
     /// ECB.CreateEntity returns a placeholder that is only valid until Playback, so a stored
     /// reference would never exist on the next tick and the fill would respawn every frame.
+    ///
+    /// The diff only runs when it could change something: an area or piece buffer was written,
+    /// the number of our fills changed behind our back, a style prefab was newly resolved, or
+    /// it is the first pass after a load.
     /// </summary>
     public partial class MarkingAreaEmissionSystem : GameSystemBase
     {
@@ -29,6 +33,15 @@ namespace TownRoadLane
 
         private EntityQuery _nodesWithAreas;
         private EntityQuery _ourAreas;
+        private EntityQuery _surfacePrefabs;
+        private EntityQuery _changedAreas;
+        private EntityQuery _changedPieces;
+        // Our live fills right after the last pass; a different count later means someone else
+        // created or deleted some.
+        private int _fillCountAfterPass = -1;
+        private bool _passPending = true;
+        // Surface prefab count at the last style scan; prefabs only need matching when it changes.
+        private int _scannedSurfaceCount = -1;
         private PrefabSystem _prefabSystem;
         private TerrainSystem _terrainSystem;
 
@@ -92,7 +105,6 @@ namespace TownRoadLane
         // minutes after load, with pauses of several seconds, so the report waits until the count
         // has not changed for kSurfaceSettleSeconds. Real time, because the pauses do not scale
         // with frame rate.
-        private int _lastSurfaceCount = -1;
         private float _surfaceCountChangedAt;
         private int _lastSurfaceDumpCount = -1;
         private const float kSurfaceSettleSeconds = 60f;
@@ -124,6 +136,27 @@ namespace TownRoadLane
                 All = new[] { ComponentType.ReadOnly<TRLAreaLink>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>() },
             });
+            _surfacePrefabs = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<SurfaceData>());
+            _changedAreas = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<MarkingArea>(), ComponentType.ReadOnly<Game.Net.Node>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
+            });
+            _changedAreas.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingArea>());
+            _changedPieces = GetEntityQuery(new EntityQueryDesc
+            {
+                All = new[] { ComponentType.ReadOnly<MarkingAreaPiece>(), ComponentType.ReadOnly<Game.Net.Node>() },
+                None = new[] { ComponentType.ReadOnly<Deleted>(), ComponentType.ReadOnly<Temp>() },
+            });
+            _changedPieces.SetChangedVersionFilter(ComponentType.ReadOnly<MarkingAreaPiece>());
+        }
+
+        private bool PassNeeded()
+        {
+            return _passPending
+                || !_changedAreas.IsEmpty
+                || !_changedPieces.IsEmpty
+                || _ourAreas.CalculateEntityCount() != _fillCountAfterPass;
         }
 
         protected override void OnGameLoaded(Colossal.Serialization.Entities.Context serializationContext)
@@ -131,6 +164,7 @@ namespace TownRoadLane
             base.OnGameLoaded(serializationContext);
             _orphanSweepPending = true;
             _orphanSweepPatience = kOrphanSweepMaxWaitTicks;
+            _passPending = true;
         }
 
         protected override void OnUpdate()
@@ -147,6 +181,7 @@ namespace TownRoadLane
                 // persistent one disables every fill.
                 if (++_blockedTicks == kBlockedWarnTicks)
                     log.Warn($"[area-emission] BLOCKED for {kBlockedWarnTicks} ticks: {blocked} — no fills of any style will spawn");
+                _passPending = true;
                 return;
             }
             _blockedTicks = 0;
@@ -156,14 +191,15 @@ namespace TownRoadLane
             {
                 // Wait for the full style set so G87 orphans are recognised too, but not
                 // forever: G87 may not be installed.
-                bool allResolved = true;
-                for (int i = 0; i < kStyleCount; i++) if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) { allResolved = false; break; }
-                if (allResolved || --_orphanSweepPatience <= 0)
+                if (!AnyStyleMissing() || --_orphanSweepPatience <= 0)
                 {
                     _orphanSweepPending = false;
                     SweepOrphanFills();
                 }
             }
+
+            if (!PassNeeded()) return;
+            _passPending = false;
 
             // Wanted set: (node, areaIndex, pieceIndex) for every visible piece of every visible
             // area. Pieces and their vertices come precomputed from MarkingAreaTopologySystem.
@@ -273,6 +309,7 @@ namespace TownRoadLane
 
             ecb.Playback(EntityManager);
             ecb.Dispose();
+            _fillCountAfterPass = _ourAreas.CalculateEntityCount();
 
             if (spawned > 0 || deleted > 0)
             {
@@ -356,15 +393,43 @@ namespace TownRoadLane
                 log.Info($"[area-emission] post-load sweep: removed {removed} orphaned untagged fill(s) from a pre-2.2.0 save");
         }
 
+        private bool AnyStyleMissing()
+        {
+            for (int i = 0; i < kStyleCount; i++)
+                if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) return true;
+            return false;
+        }
+
         private void TryResolveAllStyles()
         {
-            bool anyMissing = false;
-            for (int i = 0; i < kStyleCount; i++)
-                if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) { anyMissing = true; break; }
-            if (!anyMissing) return;
+            if (!AnyStyleMissing()) return;
 
-            var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<SurfaceData>());
-            using var ents = query.ToEntityArray(Allocator.Temp);
+            // Surface prefabs keep arriving for minutes after a load; matching names only makes
+            // sense when their number changed.
+            int surfaceCount = _surfacePrefabs.CalculateEntityCount();
+            float now = UnityEngine.Time.realtimeSinceStartup;
+            if (surfaceCount != _scannedSurfaceCount)
+            {
+                _scannedSurfaceCount = surfaceCount;
+                _surfaceCountChangedAt = now;
+                MatchStylePrefabs();
+                return;
+            }
+
+            // G87 updates have renamed their surface prefabs before, which silently breaks the
+            // exact-name match and turns every fill into concrete. Once the import has settled
+            // with a style still missing, log the missing styles and the runtime names of all G87
+            // surfaces, which is exactly what kStyleSurfaceNames needs. Only once per settled
+            // count: logging on every change during the long import floods the log and gets the
+            // mod flagged by Skyve.
+            if (now - _surfaceCountChangedAt < kSurfaceSettleSeconds || surfaceCount == _lastSurfaceDumpCount) return;
+            _lastSurfaceDumpCount = surfaceCount;
+            LogMissingStyles();
+        }
+
+        private void MatchStylePrefabs()
+        {
+            using var ents = _surfacePrefabs.ToEntityArray(Allocator.Temp);
             for (int i = 0; i < ents.Length; i++)
             {
                 if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
@@ -372,39 +437,23 @@ namespace TownRoadLane
                 for (int s = 0; s < kStyleCount; s++)
                 {
                     if (_stylePrefabEntities[s] != Entity.Null) continue;
-                    if (sp.name == kStyleSurfaceNames[s])
-                    {
-                        _stylePrefabEntities[s] = ents[i];
-                        // Priority and layer decide whether the fill can draw on the road at
-                        // all: without the Roads layer it ends up under the road surface.
-                        string renderInfo = sp.TryGet<RenderedArea>(out var ra) && ra != null
-                            ? $" prio={ra.m_RendererPriority} layer={ra.m_DecalLayerMask}"
-                            : " (no RenderedArea)";
-                        log.Debug($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}{renderInfo}");
-                    }
+                    if (sp.name != kStyleSurfaceNames[s]) continue;
+                    _stylePrefabEntities[s] = ents[i];
+                    // Fills already spawned as concrete switch to the real style on the next pass.
+                    _passPending = true;
+                    // Priority and layer decide whether the fill can draw on the road at all:
+                    // without the Roads layer it ends up under the road surface.
+                    string renderInfo = sp.TryGet<RenderedArea>(out var ra) && ra != null
+                        ? $" prio={ra.m_RendererPriority} layer={ra.m_DecalLayerMask}"
+                        : " (no RenderedArea)";
+                    log.Debug($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}{renderInfo}");
                 }
             }
+        }
 
-            // G87 updates have renamed their surface prefabs before, which silently breaks the
-            // exact-name match above and turns every fill into concrete. While a style is still
-            // unresolved, log the missing styles and the runtime names of all G87 surfaces, which
-            // is exactly what kStyleSurfaceNames needs. Only once per settled surface count:
-            // logging on every count change during the long asynchronous import floods the log
-            // and gets the mod flagged by Skyve.
-            bool stillMissing = false;
-            for (int i = 0; i < kStyleCount; i++)
-                if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) { stillMissing = true; break; }
-            if (!stillMissing) return;
-            float now = UnityEngine.Time.realtimeSinceStartup;
-            if (ents.Length != _lastSurfaceCount)
-            {
-                _lastSurfaceCount = ents.Length;
-                _surfaceCountChangedAt = now;
-                return;
-            }
-            if (now - _surfaceCountChangedAt < kSurfaceSettleSeconds || ents.Length == _lastSurfaceDumpCount) return;
-            _lastSurfaceDumpCount = ents.Length;
-
+        private void LogMissingStyles()
+        {
+            using var ents = _surfacePrefabs.ToEntityArray(Allocator.Temp);
             var report = new System.Text.StringBuilder("[area-emission] style resolve incomplete after surface import settled — missing:");
             for (int i = 0; i < kStyleCount; i++)
                 if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null)
