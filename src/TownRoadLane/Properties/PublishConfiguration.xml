@@ -89,7 +89,7 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/town-road-lane-road-markings-draw-your-own-lines-area-fills-on-any-intersection.1935028/" />
 	<!--Version of the mod-->
-	<ModVersion Value="2.4.4" />
+	<ModVersion Value="2.5.0" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times.
@@ -106,14 +106,17 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-# 2.4.4 — cleanup
+# 2.5.0 — performance and cleanup
 
 Changed:
-- The published build no longer contains developer-only code: startup prefab surveys, debug dumps and two retired rendering approaches are left out of the mod's DLL (about a quarter smaller).
-- One version number everywhere: the mod's DLL and its UI module now report the same version as this page (previously 1.0.0.0 and 2.0.1).
-- New "How it works" section in the description: how the mod replaces the game's lane-marking generator, what that means for compatibility with other mods, and how it is checked after game updates.
+- Less work every frame. The mod used to re-check every marking in the city on every frame, even when nothing changed. Lines, areas and fills are now only rebuilt when something actually changed, which matters most in large cities with lots of markings.
+- Quieter log. Tool clicks, panel actions and rebuilds are no longer written to the log by default. For a detailed log in bug reports, add "VerboseLogging": true to TownRoadLane.coc and restart the game.
 
-No gameplay changes — markings, saves and settings are untouched.
+Fixed:
+- Deleting a line from the panel left the confirmation armed, so the next line in the list could be deleted with a single click.
+- The tool overlay now waits for the game's overlay renderer before drawing.
+
+Under the hood: the source code on GitHub has been reorganized and cleaned up, with automatic code checks on every change. Saves and settings are untouched; existing cities load as before.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />

@@ -52,7 +52,7 @@ Ordinary city roads with 3 m lanes get proper edge lane markings — the same wa
 - **The mod replaces the game's lane-marking generator.** The vanilla `SecondaryLaneSystem` — the system that paints lane lines and parking markings along roads — is switched off, and a copy of it runs in its place with the mod's additions: automatic edge lines, the US yellow left edge line and per-junction hiding of vanilla markings. Traffic is unaffected: vehicles drive on the game's primary lanes, which the mod does not touch.
 - **Compatibility.** Because of that replacement, a mod that patches or replaces the same vanilla system conflicts with this one. Mods that add markings as their own decals or net-lanes, such as the G87 packs, are not affected.
 - **Game updates.** After every game update the copy is compared with the new vanilla system before the next release. Update 1.6.2 required no changes.
-- **Log.** A few dozen lines per session in `Logs/TownRoadLane.Mod.log` — attach it to bug reports.
+- **Log.** A few dozen lines per session in `Logs/TownRoadLane.Mod.log` — attach it to bug reports. For a step-by-step log of what the tool and panel do, add `"VerboseLogging": true` to `TownRoadLane.coc` (next to the `Logs` folder) and restart the game.
 - **Development.** AI tools (Claude) are among the tools used to develop the mod. Every release is built from this repository and tested in-game on a real save before it is published; the full source is here — issues and code review are welcome.
 
 ## Subscriber growth
@@ -92,7 +92,7 @@ The build compiles the C# systems, bundles the React UI via webpack, and deploys
 - `src/TownRoadLane/` — C# mod:
   - `Components/` — saved marking data (lines, segments, areas, per-node overrides);
   - `Geometry/` — curve building, intersections, polygon splitting;
-  - `Systems/Topology/` — junction layout and area outlines, rebuilt when roads change;
+  - `Systems/Topology/` — how lines split at crossings and area outlines, rebuilt when lines or areas change;
   - `Systems/Emission/` — turns marking data into game lanes and area fills, incl. the replacement lane generator;
   - `Systems/Prefabs/` — marking and surface prefabs cloned from vanilla and G87 packs;
   - `Systems/Tool/`, `Systems/UI/` — the in-game tool, its overlay and the panel bindings;
