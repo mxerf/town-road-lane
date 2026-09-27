@@ -10,6 +10,8 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
+using static TownRoadLane.OverlayPalette;
+using MathUtils = Colossal.Mathematics.MathUtils;
 
 namespace TownRoadLane
 {
@@ -17,7 +19,8 @@ namespace TownRoadLane
     /// Overlay of the marking tool: node rings, endpoint and corner dots, crossing markers,
     /// hover and hidden-segment traces, the drag preview, and the area-mode contour. Idle unless
     /// <see cref="MarkingNodeToolSystem"/> is the active tool. Everything is drawn through the
-    /// vanilla <see cref="OverlayRenderSystem"/>.
+    /// vanilla <see cref="OverlayRenderSystem"/>; colours and sizes live in
+    /// <see cref="OverlayPalette"/>.
     ///
     /// Overlay design: the user is here to judge the painted markings, so anything drawn on top
     /// competes with them. Visible committed lines get no overlay curve; hidden segments get a
@@ -25,110 +28,24 @@ namespace TownRoadLane
     /// </summary>
     public partial class MarkingOverlaySystem : GameSystemBase
     {
+        // Height above the terrain from which a marker counts as being on an elevated deck.
+        private const float kElevatedMinHeight = 0.75f;
+        // Minimum squared distance for a preview line to the cursor to be worth drawing.
+        private const float kMinPreviewLengthSq = 0.01f;
 
         private ToolSystem _toolSystem;
         private MarkingNodeToolSystem _tool;
         private OverlayRenderSystem _overlayRenderSystem;
         private TownRoadLaneUISystem _uiSystem;
-        private EntityQuery _nodesWithPairsQuery;
         private TerrainSystem _terrainSystem;
+        private EntityQuery _nodesWithPairsQuery;
         // Refreshed every update; DotStyle uses it to choose projected or absolute drawing.
         private TerrainHeightData _heightData;
 
-        // Hidden segments (visible ones get no overlay curve).
-        private const float kHiddenSegmentWidth = 0.14f;
-        private static readonly Color kColHiddenSegment = new Color(1.00f, 0.35f, 0.35f, 0.30f);
-
-        // Hover highlight, from the UI panel or the cursor over a line in the world.
-        private const float kHighlightedPairCurveWidth = 0.08f;
-        private static readonly Color kColHighlightedCurve = new Color(0.40f, 0.90f, 1.00f, 0.85f);
-        private static readonly Color kColHighlightedHidden = new Color(1.00f, 0.55f, 0.55f, 0.65f);
-
-        // Drag preview while creating a line: thin, semi-transparent white, so the markings
-        // underneath stay visible.
-        private const float kPreviewCurveWidth = 0.10f;
-        private static readonly Color kColPreviewCurve = new Color(1.00f, 1.00f, 1.00f, 0.55f);
-
-        // Endpoint dots. Each road approach gets its own colour so the user can tell which dots
-        // belong to which approach. A free dot is a hollow ring; a dot that anchors at least one
-        // MarkingLine is filled and gets a small white core.
-        private const float kDotDiameter        = 0.65f;
-        private const float kDotOutlineWidth    = 0.10f;
-        private const float kDotFreeFillAlpha   = 0.14f;
-        private const float kDotConnectedCoreDiameter = 0.20f;
-        private static readonly Color kColDotConnectedCore = new Color(1.00f, 1.00f, 1.00f, 0.90f);
-        private static readonly Color kColDotOutline      = new Color(0.06f, 0.08f, 0.12f, 0.90f);
-        // Source dot: the origin of the line being drawn.
-        private static readonly Color kColDotFillSource   = new Color(1.00f, 1.00f, 1.00f, 0.95f);
-        private static readonly Color kColDotOutlineSrc   = new Color(0.10f, 0.10f, 0.10f, 1.00f);
-        // Dot under the cursor.
-        private const float kDotDiameterHover = 0.95f;
-        private const float kDotOutlineWidthHover = 0.11f;
-
-        // Per-edge palette: high mutual contrast, and none of the colours clash with the
-        // green, red and cyan overlay accents. Indexed by edge.Index, so an edge keeps its colour.
-        private static readonly Color[] kEdgePalette = new[]
-        {
-            new Color(1.00f, 0.55f, 0.20f, 0.85f), // orange
-            new Color(0.40f, 0.75f, 1.00f, 0.85f), // sky blue
-            new Color(0.55f, 0.95f, 0.55f, 0.85f), // mint green
-            new Color(1.00f, 0.40f, 0.75f, 0.85f), // pink
-            new Color(0.80f, 0.65f, 1.00f, 0.85f), // lavender
-            new Color(1.00f, 0.90f, 0.40f, 0.85f), // yellow
-            new Color(0.50f, 0.95f, 0.90f, 0.85f), // teal
-            new Color(0.95f, 0.65f, 0.50f, 0.85f), // salmon
-        };
-
-        private static Color EdgeDotColor(Entity edge)
-        {
-            // Mask off the sign bit so a negative Entity.Index can't produce a negative index.
-            int idx = (edge.Index & 0x7fffffff) % kEdgePalette.Length;
-            return kEdgePalette[idx];
-        }
-        // Crossing markers: a small red dot where two lines on the selected node cross.
-        private const float kIntersectionDotDiameter     = 0.32f;
-        private const float kIntersectionDotOutlineWidth = 0.06f;
-        private static readonly Color kColIntersection        = new Color(1.00f, 0.30f, 0.30f, 0.60f);
-        private static readonly Color kColIntersectionOutline = new Color(0.25f, 0.05f, 0.05f, 0.80f);
-
-        // Corner anchors sit where the kerbs of neighbouring edges meet. OverlayRenderSystem has
-        // no easy square or diamond shape, so they are told apart from lane endpoints by being
-        // smaller, whitish rings with a darker outline.
-        private const float kCornerDotDiameter      = 0.55f;
-        private const float kCornerDotOutlineWidth  = 0.10f;
-        private static readonly Color kColCornerFill    = new Color(0.95f, 0.95f, 0.95f, 0.55f);
-        private static readonly Color kColCornerOutline = new Color(0.15f, 0.20f, 0.25f, 0.90f);
-
-        // Area mode, with its own palette: candidates are hollow warm-yellow rings, the hovered
-        // candidate solid bright yellow, the placed contour solid white, the preview edge thin
-        // white, and the edge that would close the polygon bright green.
-        private const float kAreaCandDotDiameter      = 0.90f;
-        private const float kAreaCandDotOutlineWidth  = 0.12f;
-        private static readonly Color kColAreaCandFill         = new Color(1.00f, 0.85f, 0.20f, 0.14f);
-        private static readonly Color kColAreaCandRing         = new Color(1.00f, 0.85f, 0.20f, 0.95f);
-        private static readonly Color kColAreaCandOutline      = new Color(0.20f, 0.16f, 0.04f, 0.95f);
-        private static readonly Color kColAreaHoverFill        = new Color(1.00f, 0.95f, 0.45f, 1.00f);
-        private const float kAreaHoverDotDiameter     = 1.15f;
-        private const float kAreaPlacedDotDiameter    = 1.10f;
-        private static readonly Color kColAreaPlacedFill       = new Color(1.00f, 1.00f, 1.00f, 0.95f);
-        private const float kAreaContourWidth         = 0.16f;
-        private static readonly Color kColAreaContour          = new Color(1.00f, 1.00f, 1.00f, 0.90f);
-        private const float kAreaPreviewWidth         = 0.13f;
-        private static readonly Color kColAreaPreview          = new Color(1.00f, 1.00f, 1.00f, 0.55f);
-        // Also used for the ring around the start vertex once the polygon can be closed.
-        private static readonly Color kColAreaPreviewClose     = new Color(0.40f, 1.00f, 0.55f, 0.95f);
-        private const float kAreaStartRingDiameter    = 1.70f;
-        private const float kAreaStartRingWidth       = 0.14f;
-
-        // Node rings (hovered node, nodes with custom markings). Larger than the node so they
-        // read as a halo and don't compete with the dots as click targets.
-        private const float kNodeHoverDiameter      = 5.5f;
-        private const float kNodeHoverOutlineWidth  = 0.22f;
-        private const float kNodeHasPairsDiameter   = 3.6f;
-        private const float kNodeHasPairsOutlineWidth = 0.12f;
-        private static readonly Color kColNodeHoverRing    = new Color(0.30f, 0.95f, 1.00f, 0.70f);
-        private static readonly Color kColNodeHasPairsRing = new Color(0.45f, 1.00f, 0.55f, 0.55f);
-        private static readonly Color kColTransparent      = new Color(0f, 0f, 0f, 0f);
+        // Per-frame scratch buffers, reused to avoid allocations.
+        private readonly List<float3> _areaContourScratch = new List<float3>();
+        // (edge, gapIndex) of every dot that anchors a MarkingLine on the selected node.
+        private readonly HashSet<(Entity, int)> _connectedScratch = new HashSet<(Entity, int)>();
 
         protected override void OnCreate()
         {
@@ -145,21 +62,9 @@ namespace TownRoadLane
                 ComponentType.ReadOnly<MarkingLine>());
         }
 
-        /// <summary>Style for a dot or ring at the given position. At ground level it is
-        /// <see cref="OverlayRenderSystem.StyleFlags.Projected"/>, so the marker follows terrain on
-        /// slopes. On elevated decks (bridges, ramps) projection would drop the marker to the
-        /// ground below, so those draw at the true 3D position.</summary>
-        private OverlayRenderSystem.StyleFlags DotStyle(float3 pos)
-        {
-            float ground = TerrainUtils.SampleHeight(ref _heightData, pos);
-            return pos.y - ground > 0.75f
-                ? (OverlayRenderSystem.StyleFlags)0
-                : OverlayRenderSystem.StyleFlags.Projected;
-        }
-
         protected override void OnUpdate()
         {
-            if (_tool == null || _toolSystem.activeTool != _tool) return;
+            if (_toolSystem.activeTool != _tool) return;
 
             _heightData = _terrainSystem.GetHeightData();
             var buf = _overlayRenderSystem.GetBuffer(out JobHandle deps);
@@ -167,6 +72,18 @@ namespace TownRoadLane
             deps.Complete();
             Draw(buf);
             _overlayRenderSystem.AddBufferWriter(Dependency);
+        }
+
+        /// <summary>Style for a dot or ring at the given position. At ground level it is
+        /// <see cref="OverlayRenderSystem.StyleFlags.Projected"/>, so the marker follows terrain on
+        /// slopes. On elevated decks (bridges, ramps) projection would drop the marker to the
+        /// ground below, so those draw at the true 3D position.</summary>
+        private OverlayRenderSystem.StyleFlags DotStyle(float3 pos)
+        {
+            float ground = TerrainUtils.SampleHeight(ref _heightData, pos);
+            return pos.y - ground > kElevatedMinHeight
+                ? (OverlayRenderSystem.StyleFlags)0
+                : OverlayRenderSystem.StyleFlags.Projected;
         }
 
         private void Draw(OverlayRenderSystem.Buffer buf)
@@ -191,104 +108,125 @@ namespace TownRoadLane
             if (endpoints == null || endpoints.Count == 0)
                 return;
 
-            int sourceIdx = _tool.SourceEndpointIndex;
-            int hoverIdx  = _tool.HoveredEndpointIndex;
-
-            // 1. Committed lines and crossing markers (bottom layer). Per segment:
-            //      visible, not hovered: nothing (the road paint shows it)
-            //      visible, hovered:     thin cyan trace
-            //      hidden, not hovered:  thin red ghost
-            //      hidden, hovered:      brighter red ghost
-            //    Crossing markers are drawn at inner segment boundaries regardless of hover.
-            //
-            //    Hover sources: a segment hovered in the UI popover lights only that segment; a
-            //    line hovered in the UI panel (or, failing that, under the cursor in the world)
-            //    lights all of its segments.
-            int uiHoveredLine = _uiSystem?.UIHoveredLineIndex ?? -1;
-            if (uiHoveredLine < 0) uiHoveredLine = _tool?.HoveredLineInGame ?? -1;
-            int hoveredSegLine = _uiSystem?.UIHoveredSegmentLineIndex ?? -1;
-            int hoveredSegIdx  = _uiSystem?.UIHoveredSegmentIndex ?? -1;
+            var node = _tool.SelectedNode;
 
             // Hovered area: UI hover wins over the cursor inside an area, as for lines.
-            int hoveredArea = _uiSystem?.UIHoveredAreaIndex ?? -1;
-            if (hoveredArea < 0) hoveredArea = _tool?.HoveredAreaInGame ?? -1;
-
-            var node = _tool.SelectedNode;
+            int hoveredArea = _uiSystem.UIHoveredAreaIndex;
+            if (hoveredArea < 0) hoveredArea = _tool.HoveredAreaInGame;
             if (hoveredArea >= 0 && node != Entity.Null)
                 DrawHoveredAreaOutline(buf, node, hoveredArea);
-            if (node != Entity.Null && EntityManager.HasBuffer<MarkingLine>(node) && EntityManager.HasBuffer<MarkingSegment>(node))
+
+            DrawCommittedLines(buf, node, endpoints);
+            DrawDragPreview(buf, endpoints);
+            DrawEndpointDots(buf, node, endpoints);
+
+            // Corner anchors. Not clickable in line mode (only area mode uses them), so they are
+            // drawn smaller and with less contrast than lane endpoints.
+            var corners = _tool.CornerAnchors;
+            if (corners != null)
             {
-                var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
-                var segs  = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
-                int lineCount = lines.Length;
-                for (int l = 0; l < lineCount; l++)
+                for (int i = 0; i < corners.Count; i++)
+                    DrawDot(buf, corners[i].position, kCornerDotDiameter, kColCornerFill, kColCornerOutline, kCornerDotOutlineWidth);
+            }
+        }
+
+        /// <summary>
+        /// Committed lines and crossing markers (bottom layer). Per segment:
+        ///   visible, not hovered: nothing (the road paint shows it)
+        ///   visible, hovered:     thin cyan trace
+        ///   hidden, not hovered:  thin red ghost
+        ///   hidden, hovered:      brighter red ghost
+        /// Crossing markers are drawn at inner segment boundaries regardless of hover.
+        ///
+        /// Hover sources: a segment hovered in the UI popover lights only that segment; a line
+        /// hovered in the UI panel (or, failing that, under the cursor in the world) lights all of
+        /// its segments.
+        /// </summary>
+        private void DrawCommittedLines(OverlayRenderSystem.Buffer buf, Entity node, IReadOnlyList<MarkingEndpoint> endpoints)
+        {
+            if (node == Entity.Null || !EntityManager.HasBuffer<MarkingLine>(node) || !EntityManager.HasBuffer<MarkingSegment>(node))
+                return;
+
+            int hoveredLine = _uiSystem.UIHoveredLineIndex;
+            if (hoveredLine < 0) hoveredLine = _tool.HoveredLineInGame;
+            int hoveredSegLine = _uiSystem.UIHoveredSegmentLineIndex;
+            int hoveredSegIdx = _uiSystem.UIHoveredSegmentIndex;
+
+            var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
+            var segs = EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true);
+            for (int l = 0; l < lines.Length; l++)
+            {
+                if (!MarkingCurveBuilder.TryBuild(endpoints, lines[l], out var full)) continue;
+                bool isLineHighlighted = l == hoveredLine;
+                // The UI numbers segments 0..K-1 within each line, not by buffer index.
+                int perLineCounter = -1;
+                for (int s = 0; s < segs.Length; s++)
                 {
-                    if (!MarkingCurveBuilder.TryBuild(endpoints, lines[l], out var full)) continue;
-                    bool isLineHighlighted = (l == uiHoveredLine);
-                    // The UI numbers segments 0..K-1 within each line, not by buffer index.
-                    int perLineCounter = -1;
-                    for (int s = 0; s < segs.Length; s++)
+                    var seg = segs[s];
+                    if (seg.lineIndex != l) continue;
+                    perLineCounter++;
+                    bool isThisSegmentHovered = l == hoveredSegLine && perLineCounter == hoveredSegIdx;
+
+                    if (isLineHighlighted || isThisSegmentHovered)
                     {
-                        var seg = segs[s];
-                        if (seg.lineIndex != l) continue;
-                        perLineCounter++;
-                        bool isThisSegmentHovered = (l == hoveredSegLine && perLineCounter == hoveredSegIdx);
-                        bool isHighlighted = isLineHighlighted || isThisSegmentHovered;
-
-                        bool draw = false;
-                        Color color = default;
-                        float width = 0f;
-                        if (isHighlighted)
-                        {
-                            draw = true;
-                            color = seg.visible ? kColHighlightedCurve : kColHighlightedHidden;
-                            // Thicker for a hovered segment, so it stands out even when the
-                            // whole line is highlighted.
-                            width = isThisSegmentHovered ? kHighlightedPairCurveWidth * 1.8f : kHighlightedPairCurveWidth;
-                        }
-                        else if (!seg.visible)
-                        {
-                            draw = true;
-                            color = kColHiddenSegment;
-                            width = kHiddenSegmentWidth;
-                        }
-
-                        if (draw)
-                        {
-                            var segBez = Colossal.Mathematics.MathUtils.Cut(full, new float2(seg.tStart, seg.tEnd));
-                            buf.DrawCurve(color, segBez, width);
-                        }
-
-                        if (seg.tStart > 0.001f && seg.tStart < 0.999f)
-                            DrawIntersectionMarker(buf, Colossal.Mathematics.MathUtils.Position(full, seg.tStart));
-                        if (seg.tEnd > 0.001f && seg.tEnd < 0.999f)
-                            DrawIntersectionMarker(buf, Colossal.Mathematics.MathUtils.Position(full, seg.tEnd));
+                        Color color = seg.visible ? kColHighlightedCurve : kColHighlightedHidden;
+                        float width = isThisSegmentHovered ? kHoveredSegmentCurveWidth : kHighlightedPairCurveWidth;
+                        DrawSegmentCurve(buf, full, seg, color, width);
                     }
+                    else if (!seg.visible)
+                    {
+                        DrawSegmentCurve(buf, full, seg, kColHiddenSegment, kHiddenSegmentWidth);
+                    }
+
+                    if (IsInnerBoundary(seg.tStart))
+                        DrawIntersectionMarker(buf, MathUtils.Position(full, seg.tStart));
+                    if (IsInnerBoundary(seg.tEnd))
+                        DrawIntersectionMarker(buf, MathUtils.Position(full, seg.tEnd));
                 }
             }
+        }
 
-            // 2. Drag preview from the source dot to the hovered dot, or to the cursor.
-            if (sourceIdx >= 0 && sourceIdx < endpoints.Count)
+        private static bool IsInnerBoundary(float t) => t > 0.001f && t < 0.999f;
+
+        private static void DrawSegmentCurve(OverlayRenderSystem.Buffer buf, Bezier4x3 line, MarkingSegment seg, Color color, float width)
+            => buf.DrawCurve(color, MathUtils.Cut(line, new float2(seg.tStart, seg.tEnd)), width);
+
+        /// <summary>Drag preview from the source dot to the hovered dot, or to the cursor.</summary>
+        private void DrawDragPreview(OverlayRenderSystem.Buffer buf, IReadOnlyList<MarkingEndpoint> endpoints)
+        {
+            int sourceIdx = _tool.SourceEndpointIndex;
+            int hoverIdx = _tool.HoveredEndpointIndex;
+            if (sourceIdx < 0 || sourceIdx >= endpoints.Count) return;
+
+            var src = endpoints[sourceIdx];
+            if (hoverIdx >= 0 && hoverIdx < endpoints.Count && hoverIdx != sourceIdx)
             {
-                var src = endpoints[sourceIdx];
-                if (hoverIdx >= 0 && hoverIdx < endpoints.Count && hoverIdx != sourceIdx)
-                {
-                    var dst = endpoints[hoverIdx];
-                    var bezier = BuildSmoothCurve(src.position, src.tangent, dst.position, dst.tangent);
-                    buf.DrawCurve(kColPreviewCurve, bezier, kPreviewCurveWidth);
-                }
-                else
-                {
-                    // No dot hovered: straight line to the cursor's terrain hit.
-                    float3 to = _tool.CursorWorldPos;
-                    if (math.lengthsq(to - src.position) > 0.01f)
-                        buf.DrawLine(kColPreviewCurve, new Line3.Segment(src.position, to), kPreviewCurveWidth);
-                }
+                var dst = endpoints[hoverIdx];
+                var bezier = BuildSmoothCurve(src.position, src.tangent, dst.position, dst.tangent);
+                buf.DrawCurve(kColPreviewCurve, bezier, kPreviewCurveWidth);
             }
+            else
+            {
+                // No dot hovered: straight line to the cursor's terrain hit.
+                float3 to = _tool.CursorWorldPos;
+                if (math.lengthsq(to - src.position) > kMinPreviewLengthSq)
+                    buf.DrawLine(kColPreviewCurve, new Line3.Segment(src.position, to), kPreviewCurveWidth);
+            }
+        }
 
-            // 3. Endpoint dots: free ones as hollow rings in the edge colour, connected ones
-            //    filled with a white core, the source dot solid white inside a faint halo, the
-            //    hovered dot solid and slightly larger.
+        /// <summary>Drag-preview curve. Uses <see cref="MarkingCurveBuilder"/> with the same
+        /// starting pull factor a new line gets, so the preview matches the committed line.</summary>
+        private static Bezier4x3 BuildSmoothCurve(float3 a, float2 ta, float3 b, float2 tb)
+            => MarkingCurveBuilder.Build(a, ta, b, tb, MarkingCurveBuilder.AdaptivePullFactor(a, ta, b, tb));
+
+        /// <summary>Endpoint dots: free ones as hollow rings in the edge colour, connected ones
+        /// filled with a white core, the source dot solid white inside a faint halo, the hovered
+        /// dot solid and slightly larger.</summary>
+        private void DrawEndpointDots(OverlayRenderSystem.Buffer buf, Entity node, IReadOnlyList<MarkingEndpoint> endpoints)
+        {
+            int sourceIdx = _tool.SourceEndpointIndex;
+            int hoverIdx = _tool.HoveredEndpointIndex;
+
             _connectedScratch.Clear();
             if (node != Entity.Null && EntityManager.HasBuffer<MarkingLine>(node))
             {
@@ -299,6 +237,7 @@ namespace TownRoadLane
                     _connectedScratch.Add((lines[l].targetEdge, lines[l].targetGapIndex));
                 }
             }
+
             for (int i = 0; i < endpoints.Count; i++)
             {
                 var ep = endpoints[i];
@@ -314,18 +253,11 @@ namespace TownRoadLane
                     fill = kColDotFillSource;
                     outline = kColDotOutlineSrc;
                     // Halo, drawn first so the dot sits on top.
-                    buf.DrawCircle(
-                        outlineColor: new Color(1f, 1f, 1f, 0.55f),
-                        fillColor: kColTransparent,
-                        outlineWidth: 0.10f,
-                        styleFlags: DotStyle(ep.position),
-                        direction: new float2(0f, 1f),
-                        position: ep.position,
-                        diameter: kDotDiameter * 2.2f);
+                    DrawDot(buf, ep.position, kSourceHaloDiameter, kColTransparent, kColSourceHalo, kSourceHaloOutlineWidth);
                 }
                 else if (i == hoverIdx)
                 {
-                    fill = new Color(edgeColor.r, edgeColor.g, edgeColor.b, 1.00f);
+                    fill = WithAlpha(edgeColor, 1.00f);
                     outline = kColDotOutline;
                     diameter = kDotDiameterHover;
                     outlineWidth = kDotOutlineWidthHover;
@@ -338,55 +270,18 @@ namespace TownRoadLane
                 else
                 {
                     // Hollow ring; the faint fill keeps it readable on dark asphalt.
-                    fill = new Color(edgeColor.r, edgeColor.g, edgeColor.b, kDotFreeFillAlpha);
-                    outline = new Color(edgeColor.r, edgeColor.g, edgeColor.b, 0.95f);
+                    fill = WithAlpha(edgeColor, kDotFreeFillAlpha);
+                    outline = WithAlpha(edgeColor, kDotFreeOutlineAlpha);
                 }
 
-                buf.DrawCircle(
-                    outlineColor: outline,
-                    fillColor: fill,
-                    outlineWidth: outlineWidth,
-                    styleFlags: DotStyle(ep.position),
-                    direction: new float2(0f, 1f),
-                    position: ep.position,
-                    diameter: diameter);
+                DrawDot(buf, ep.position, diameter, fill, outline, outlineWidth);
 
                 if (connected && i != sourceIdx)
-                {
-                    buf.DrawCircle(
-                        outlineColor: kColTransparent,
-                        fillColor: kColDotConnectedCore,
-                        outlineWidth: 0f,
-                        styleFlags: DotStyle(ep.position),
-                        direction: new float2(0f, 1f),
-                        position: ep.position,
-                        diameter: kDotConnectedCoreDiameter);
-                }
-            }
-
-            // 4. Corner anchors. Not clickable in line mode (only area mode uses them), so they
-            //    are drawn smaller and with less contrast than lane endpoints.
-            var corners = _tool.CornerAnchors;
-            if (corners != null)
-            {
-                for (int i = 0; i < corners.Count; i++)
-                {
-                    buf.DrawCircle(
-                        outlineColor: kColCornerOutline,
-                        fillColor: kColCornerFill,
-                        outlineWidth: kCornerDotOutlineWidth,
-                        styleFlags: DotStyle(corners[i].position),
-                        direction: new float2(0f, 1f),
-                        position: corners[i].position,
-                        diameter: kCornerDotDiameter);
-                }
+                    DrawDot(buf, ep.position, kDotConnectedCoreDiameter, kColDotConnectedCore, kColTransparent, 0f);
             }
         }
 
-        /// <summary>Drag-preview curve. Uses <see cref="MarkingCurveBuilder"/> with the same
-        /// starting pull factor a new line gets, so the preview matches the committed line.</summary>
-        private static Bezier4x3 BuildSmoothCurve(float3 a, float2 ta, float3 b, float2 tb)
-            => MarkingCurveBuilder.Build(a, ta, b, tb, MarkingCurveBuilder.AdaptivePullFactor(a, ta, b, tb));
+        private static Color WithAlpha(Color c, float alpha) => new Color(c.r, c.g, c.b, alpha);
 
         /// <summary>Outlines every piece of the hovered area, the area counterpart of the line
         /// hover trace: cyan for visible pieces, red for hidden ones.</summary>
@@ -411,12 +306,6 @@ namespace TownRoadLane
             }
         }
 
-        // Per-frame scratch buffers, reused to avoid allocations.
-        private readonly List<float3> _areaContourScratch = new List<float3>();
-
-        // (edge, gapIndex) of every dot that anchors a MarkingLine on the selected node.
-        private readonly HashSet<(Entity, int)> _connectedScratch = new HashSet<(Entity, int)>();
-
         /// <summary>Overlay while the user places the vertices of an area polygon. Layers are
         /// drawn back to front, as numbered below.</summary>
         private void DrawAreaModeOverlay(OverlayRenderSystem.Buffer buf)
@@ -431,38 +320,11 @@ namespace TownRoadLane
             // 1. Candidates: lane endpoints, corner anchors and line crossings, all as hollow
             //    rings so the junction doesn't drown in solid dots.
             for (int i = 0; i < endpoints.Count; i++)
-            {
-                buf.DrawCircle(
-                    outlineColor: kColAreaCandRing,
-                    fillColor: kColAreaCandFill,
-                    outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: DotStyle(endpoints[i].position),
-                    direction: new float2(0f, 1f),
-                    position: endpoints[i].position,
-                    diameter: kAreaCandDotDiameter);
-            }
+                DrawAreaCandidate(buf, endpoints[i].position);
             for (int i = 0; i < corners.Count; i++)
-            {
-                buf.DrawCircle(
-                    outlineColor: kColAreaCandRing,
-                    fillColor: kColAreaCandFill,
-                    outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: DotStyle(corners[i].position),
-                    direction: new float2(0f, 1f),
-                    position: corners[i].position,
-                    diameter: kAreaCandDotDiameter);
-            }
+                DrawAreaCandidate(buf, corners[i].position);
             for (int i = 0; i < crossings.Count; i++)
-            {
-                buf.DrawCircle(
-                    outlineColor: kColAreaCandRing,
-                    fillColor: kColAreaCandFill,
-                    outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: DotStyle(crossings[i].position),
-                    direction: new float2(0f, 1f),
-                    position: crossings[i].position,
-                    diameter: kAreaCandDotDiameter);
-            }
+                DrawAreaCandidate(buf, crossings[i].position);
 
             // 2. Contour through the placed vertices. Edges that follow a line come back sampled
             //    along it, so the preview shows the arc the committed area will follow.
@@ -484,18 +346,15 @@ namespace TownRoadLane
                 if (hover.IsValid && _tool.TryGetAreaAnchorPos(hover, out var hovPos))
                 {
                     targetPos = hovPos;
-                    if (polygon.Count >= 3
+                    closingImminent = polygon.Count >= 3
                         && hover.kind == polygon[0].kind
-                        && hover.refIndex == polygon[0].refIndex)
-                    {
-                        closingImminent = true;
-                    }
+                        && hover.refIndex == polygon[0].refIndex;
                 }
                 else
                 {
                     targetPos = cursor;
                 }
-                if (math.lengthsq(targetPos - lastPos) > 0.01f)
+                if (math.lengthsq(targetPos - lastPos) > kMinPreviewLengthSq)
                 {
                     buf.DrawLine(
                         closingImminent ? kColAreaPreviewClose : kColAreaPreview,
@@ -506,55 +365,22 @@ namespace TownRoadLane
 
             // 4. Placed vertices, on top of the contour.
             for (int i = 0; i < polygon.Count; i++)
-            {
-                buf.DrawCircle(
-                    outlineColor: kColAreaCandOutline,
-                    fillColor: kColAreaPlacedFill,
-                    outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: DotStyle(polygon[i].position),
-                    direction: new float2(0f, 1f),
-                    position: polygon[i].position,
-                    diameter: kAreaPlacedDotDiameter);
-            }
+                DrawDot(buf, polygon[i].position, kAreaPlacedDotDiameter, kColAreaPlacedFill, kColAreaCandOutline, kAreaCandDotOutlineWidth);
 
             // 5. Ring around the start vertex once clicking it would close the polygon.
             if (polygon.Count >= 3)
-            {
-                buf.DrawCircle(
-                    outlineColor: kColAreaPreviewClose,
-                    fillColor: kColTransparent,
-                    outlineWidth: kAreaStartRingWidth,
-                    styleFlags: DotStyle(polygon[0].position),
-                    direction: new float2(0f, 1f),
-                    position: polygon[0].position,
-                    diameter: kAreaStartRingDiameter);
-            }
+                DrawDot(buf, polygon[0].position, kAreaStartRingDiameter, kColTransparent, kColAreaPreviewClose, kAreaStartRingWidth);
 
             // 6. Hovered candidate, on top of everything.
             if (hover.IsValid && _tool.TryGetAreaAnchorPos(hover, out var hp))
-            {
-                buf.DrawCircle(
-                    outlineColor: kColAreaCandOutline,
-                    fillColor: kColAreaHoverFill,
-                    outlineWidth: kAreaCandDotOutlineWidth,
-                    styleFlags: DotStyle(hp),
-                    direction: new float2(0f, 1f),
-                    position: hp,
-                    diameter: kAreaHoverDotDiameter);
-            }
+                DrawDot(buf, hp, kAreaHoverDotDiameter, kColAreaHoverFill, kColAreaCandOutline, kAreaCandDotOutlineWidth);
         }
 
+        private void DrawAreaCandidate(OverlayRenderSystem.Buffer buf, float3 position)
+            => DrawDot(buf, position, kAreaCandDotDiameter, kColAreaCandFill, kColAreaCandRing, kAreaCandDotOutlineWidth);
+
         private void DrawIntersectionMarker(OverlayRenderSystem.Buffer buf, float3 p)
-        {
-            buf.DrawCircle(
-                outlineColor: kColIntersectionOutline,
-                fillColor: kColIntersection,
-                outlineWidth: kIntersectionDotOutlineWidth,
-                styleFlags: DotStyle(p),
-                direction: new float2(0f, 1f),
-                position: p,
-                diameter: kIntersectionDotDiameter);
-        }
+            => DrawDot(buf, p, kIntersectionDotDiameter, kColIntersection, kColIntersectionOutline, kIntersectionDotOutlineWidth);
 
         /// <summary>Faint ring around every node with at least one MarkingLine, so customised
         /// junctions are easy to spot. Skips the selected node, whose dots already mark it.</summary>
@@ -575,13 +401,20 @@ namespace TownRoadLane
         {
             if (!EntityManager.HasComponent<Node>(node)) return;
             float3 pos = EntityManager.GetComponentData<Node>(node).m_Position;
+            DrawDot(buf, pos, diameter, kColTransparent, ringColor, outlineWidth);
+        }
+
+        /// <summary>Flat circle at <paramref name="position"/>, projected onto the terrain unless
+        /// it sits on an elevated deck (see <see cref="DotStyle"/>).</summary>
+        private void DrawDot(OverlayRenderSystem.Buffer buf, float3 position, float diameter, Color fill, Color outline, float outlineWidth)
+        {
             buf.DrawCircle(
-                outlineColor: ringColor,
-                fillColor: kColTransparent,
+                outlineColor: outline,
+                fillColor: fill,
                 outlineWidth: outlineWidth,
-                styleFlags: DotStyle(pos),
+                styleFlags: DotStyle(position),
                 direction: new float2(0f, 1f),
-                position: pos,
+                position: position,
                 diameter: diameter);
         }
     }
