@@ -1,8 +1,12 @@
 using System.Collections.Generic;
 using Unity.Entities;
 using Unity.Mathematics;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Systems.Topology;
+using TownRoadLane.Utilities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Tool
 {
     // Area mode: placing the vertices of an area polygon and committing it to the node.
     public partial class MarkingNodeToolSystem
@@ -300,9 +304,9 @@ namespace TownRoadLane
         {
             var av = new MarkingAreaVertex
             {
-                Kind = pv.kind,
+                kind = pv.kind,
                 refIndex = pv.refIndex,
-                EdgeToNext = pv.edgeToNext,
+                edgeToNext = pv.edgeToNext,
                 refPos = pv.position,
             };
             // List indexes don't survive save/load (the lane rebuild reorders extraction), so

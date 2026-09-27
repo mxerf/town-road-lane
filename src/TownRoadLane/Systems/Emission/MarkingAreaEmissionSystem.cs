@@ -8,9 +8,11 @@ using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using TownRoadLane.Components;
+using TownRoadLane.Systems.Prefabs;
 using GameAreas = Game.Areas;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Emission
 {
     /// <summary>
     /// Keeps one vanilla Game.Areas.Area surface entity (tagged <see cref="TRLAreaLink"/>) per

@@ -1,4 +1,4 @@
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Tool
 {
     /// <summary>State of <see cref="MarkingNodeToolSystem"/>. Esc steps back one state.</summary>
     public enum MarkingToolState

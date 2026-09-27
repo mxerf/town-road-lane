@@ -2,9 +2,10 @@ using System.Collections.Generic;
 using Colossal.Mathematics;
 using Unity.Entities;
 using Unity.Mathematics;
-using static TownRoadLane.PolygonUtils;
+using TownRoadLane.Components;
+using static TownRoadLane.Geometry.PolygonUtils;
 
-namespace TownRoadLane
+namespace TownRoadLane.Geometry
 {
     /// <summary>
     /// A crossing of two marking lines that the area tool can anchor a fill vertex to. Its

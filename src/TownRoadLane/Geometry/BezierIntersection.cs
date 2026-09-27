@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using Colossal.Mathematics;
 using Unity.Mathematics;
 
-namespace TownRoadLane
+namespace TownRoadLane.Geometry
 {
     /// <summary>
     /// Finds the parameter pairs (tA, tB) where two cubic Bezier curves cross in the XZ plane

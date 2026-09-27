@@ -18,7 +18,7 @@ using Unity.Entities;
 
 using UnityEngine;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.UI
 {
     /// <summary>
     /// UISystemBase with typed-binding helpers:

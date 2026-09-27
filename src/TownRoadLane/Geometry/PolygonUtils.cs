@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Mathematics;
 
-namespace TownRoadLane
+namespace TownRoadLane.Geometry
 {
     /// <summary>Polygon and point helpers in the XZ plane. Y is ignored.</summary>
     public static class PolygonUtils

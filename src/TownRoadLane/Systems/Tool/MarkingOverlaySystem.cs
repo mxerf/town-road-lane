@@ -10,10 +10,13 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
-using static TownRoadLane.OverlayPalette;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Systems.UI;
+using static TownRoadLane.Systems.Tool.OverlayPalette;
 using MathUtils = Colossal.Mathematics.MathUtils;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Tool
 {
     /// <summary>
     /// Overlay of the marking tool: node rings, endpoint and corner dots, crossing markers,

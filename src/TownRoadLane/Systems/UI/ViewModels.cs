@@ -1,6 +1,6 @@
 using System;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.UI
 {
     // Binding payloads. GenericUIWriter serializes field names verbatim, so they are camelCase
     // and must match the interfaces in useToolState.ts and usePinnedStyles.ts.

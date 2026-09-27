@@ -32,7 +32,7 @@ using UnityEngine.Scripting;
 // with the vanilla ones and MarkingSegmentEmissionSystem recreates them on the next frame. That is
 // how a line picks up a new style or a changed road: the emission diff does not compare geometry.
 // It also clears the untagged copies a save restores (the game saves the lanes, not our tag).
-//   - Namespace Game.Net renamed to TownRoadLane, class renamed, [CompilerGenerated] dropped.
+//   - Namespace Game.Net renamed to TownRoadLane.Systems.Emission, class renamed, [CompilerGenerated] dropped.
 //   - No Unity.Entities.Internal (mods cannot use the InternalCompilerInterface helpers): OnUpdate
 //     calls __TypeHandle.__AssignHandles and reads the fields directly, which is equivalent.
 //   - The using aliases below: inside namespace Game.Net, bare names like Node, Edge, SubLane and
@@ -40,6 +40,7 @@ using UnityEngine.Scripting;
 //     Game.Prefabs, so the aliases keep the body unchanged.
 using Game;
 using Game.Net;
+using TownRoadLane.Components;
 using Node = Game.Net.Node;
 using Edge = Game.Net.Edge;
 using SubLane = Game.Net.SubLane;
@@ -51,7 +52,7 @@ using SecondaryLane = Game.Net.SecondaryLane;
 using OutsideConnection = Game.Net.OutsideConnection;
 using Elevation = Game.Net.Elevation;
 
-namespace TownRoadLane;
+namespace TownRoadLane.Systems.Emission;
 
 // `partial` is required: the Unity.Entities source generator emits the other half of every SystemBase.
 // The decompiled vanilla class has it inlined.

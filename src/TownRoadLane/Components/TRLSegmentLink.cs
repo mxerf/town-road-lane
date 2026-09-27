@@ -1,6 +1,8 @@
 using Unity.Entities;
+using TownRoadLane.Systems.Emission;
+using TownRoadLane.Systems.Topology;
 
-namespace TownRoadLane
+namespace TownRoadLane.Components
 {
     /// <summary>
     /// Tag on every sublane spawned by <see cref="MarkingSegmentEmissionSystem"/>, keyed by

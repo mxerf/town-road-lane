@@ -1,8 +1,9 @@
 using System;
 using Colossal.Serialization.Entities;
 using Unity.Entities;
+using TownRoadLane.Systems.Emission;
 
-namespace TownRoadLane
+namespace TownRoadLane.Components
 {
     /// <summary>
     /// Marking categories a <see cref="MarkingOverride"/> can suppress. Only <see cref="All"/> is
@@ -25,6 +26,7 @@ namespace TownRoadLane
     /// <see cref="HideAll"/> set, no vanilla marking lanes are generated on the entity. The panel's
     /// "hide vanilla markings" toggle sets it.
     /// </summary>
+    [FormerlySerializedAs("TownRoadLane.MarkingOverride, TownRoadLane")]
     public struct MarkingOverride : IComponentData, ISerializable
     {
         public MarkingCategory hide;

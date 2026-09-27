@@ -1,7 +1,9 @@
 using Colossal.Serialization.Entities;
 using Unity.Entities;
+using TownRoadLane.Geometry;
+using TownRoadLane.Systems.Emission;
 
-namespace TownRoadLane
+namespace TownRoadLane.Components
 {
     /// <summary>
     /// Legacy per-node buffer of user-drawn lines, one entry per whole line. Kept only so old
@@ -12,6 +14,7 @@ namespace TownRoadLane
     /// with N car lanes at the node has N+1 endpoints (each lane-to-lane seam plus the two outer
     /// kerbs), and <c>gapIndex</c> selects one.
     /// </summary>
+    [FormerlySerializedAs("TownRoadLane.MarkingPair, TownRoadLane")]
     [InternalBufferCapacity(0)]
     public struct MarkingPair : IBufferElementData, ISerializable
     {

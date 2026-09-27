@@ -8,9 +8,13 @@ using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
-using static TownRoadLane.PolygonUtils;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Systems.Emission;
+using TownRoadLane.Utilities;
+using static TownRoadLane.Geometry.PolygonUtils;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Topology
 {
     /// <summary>
     /// Splits each node's <see cref="MarkingLine"/>s into <see cref="MarkingSegment"/>s at
@@ -360,7 +364,7 @@ namespace TownRoadLane
                 for (int v = 0; v < averts.Length; v++)
                 {
                     var av = averts[v];
-                    if (av.Kind != AreaAnchorKind.LineIntersection) continue;
+                    if (av.kind != AreaAnchorKind.LineIntersection) continue;
                     MarkingIntersectionExtractor.Unpack(av.refIndex, out int a, out int b, out int k);
                     if (a == lineIndex || b == lineIndex) continue;
                     if (a > lineIndex) a--;

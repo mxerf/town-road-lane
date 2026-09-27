@@ -1,7 +1,7 @@
 using Game.Common;
 using Unity.Entities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Utilities
 {
     public static class EntityManagerExtensions
     {

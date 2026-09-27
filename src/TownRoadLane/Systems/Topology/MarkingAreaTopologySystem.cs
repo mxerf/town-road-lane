@@ -8,9 +8,13 @@ using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
-using static TownRoadLane.PolygonUtils;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Systems.Emission;
+using TownRoadLane.Utilities;
+using static TownRoadLane.Geometry.PolygonUtils;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Topology
 {
     /// <summary>
     /// Resolves each <see cref="MarkingArea"/> into a world-space <see cref="MarkingAreaPiece"/>
@@ -246,12 +250,12 @@ namespace TownRoadLane
                         {
                             Entity edgeA, edgeB = Entity.Null;
                             int gap = 0;
-                            if (av.Kind == AreaAnchorKind.LaneEndpoint && av.refIndex >= 0 && av.refIndex < endpoints.Count)
+                            if (av.kind == AreaAnchorKind.LaneEndpoint && av.refIndex >= 0 && av.refIndex < endpoints.Count)
                             {
                                 var ep = endpoints[av.refIndex];
                                 pos = ep.position; edgeA = ep.edge; gap = ep.gapIndex;
                             }
-                            else if (av.Kind == AreaAnchorKind.NodeCorner && av.refIndex >= 0 && av.refIndex < corners.Count)
+                            else if (av.kind == AreaAnchorKind.NodeCorner && av.refIndex >= 0 && av.refIndex < corners.Count)
                             {
                                 var ca = corners[av.refIndex];
                                 pos = ca.position; edgeA = ca.edgeA; edgeB = ca.edgeB;
@@ -439,7 +443,7 @@ namespace TownRoadLane
             for (int v = 0; v < n; v++)
             {
                 ring.Add(anchors[v]);
-                if (avs[v].EdgeToNext == AreaEdgeKind.LineBezier
+                if (avs[v].edgeToNext == AreaEdgeKind.LineBezier
                     && TryFindSharedLine(avs[v], avs[(v + 1) % n], endpoints, lines, out _, out var bez, out float tFrom, out float tTo))
                 {
                     SampleCurvedEdge(bez, tFrom, tTo, ring);
@@ -495,21 +499,21 @@ namespace TownRoadLane
                                              List<MarkingCornerAnchor> corners, MarkingLine[] lines, out float3 pos)
         {
             pos = default;
-            if (av.Kind == AreaAnchorKind.LaneEndpoint)
+            if (av.kind == AreaAnchorKind.LaneEndpoint)
             {
                 int idx = MarkingEndpointExtractor.ResolveEndpointIndex(endpoints, av);
                 if (idx < 0) return false;
                 pos = endpoints[idx].position;
                 return true;
             }
-            if (av.Kind == AreaAnchorKind.NodeCorner)
+            if (av.kind == AreaAnchorKind.NodeCorner)
             {
                 int idx = MarkingEndpointExtractor.ResolveCornerIndex(corners, av);
                 if (idx < 0) return false;
                 pos = corners[idx].position;
                 return true;
             }
-            if (av.Kind == AreaAnchorKind.LineIntersection) // refIndex is the packed (lineA, lineB, hit)
+            if (av.kind == AreaAnchorKind.LineIntersection) // refIndex is the packed (lineA, lineB, hit)
                 return MarkingIntersectionExtractor.TryResolve(endpoints, lines, av.refIndex, out pos);
             return false;
         }
@@ -571,7 +575,7 @@ namespace TownRoadLane
                                                  List<MarkingEndpoint> endpoints, out float t)
         {
             t = 0f;
-            if (av.Kind == AreaAnchorKind.LaneEndpoint)
+            if (av.kind == AreaAnchorKind.LaneEndpoint)
             {
                 int epIdx = MarkingEndpointExtractor.ResolveEndpointIndex(endpoints, av);
                 if (epIdx < 0) return false;
@@ -581,7 +585,7 @@ namespace TownRoadLane
                 if (ln.targetEdge == ep.edge && ln.targetGapIndex == ep.gapIndex) { t = 1f; return true; }
                 return false;
             }
-            if (av.Kind == AreaAnchorKind.LineIntersection)
+            if (av.kind == AreaAnchorKind.LineIntersection)
             {
                 MarkingIntersectionExtractor.Unpack(av.refIndex, out int a, out int b, out _);
                 if (lineIndex != a && lineIndex != b) return false;

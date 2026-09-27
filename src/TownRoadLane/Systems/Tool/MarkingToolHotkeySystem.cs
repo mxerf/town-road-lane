@@ -4,7 +4,7 @@ using Game.Input;
 using Game.Tools;
 using Unity.Entities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Tool
 {
     /// <summary>
     /// Polls the tool hotkey (Ctrl+M by default, rebindable in the mod settings) and the settings

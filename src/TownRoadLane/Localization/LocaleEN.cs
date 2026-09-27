@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using Colossal;
 
-namespace TownRoadLane
+namespace TownRoadLane.Localization
 {
     public class LocaleEN : IDictionarySource
     {

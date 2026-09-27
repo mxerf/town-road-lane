@@ -9,8 +9,13 @@ using Game.Tools;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Systems.Emission;
+using TownRoadLane.Systems.Topology;
+using TownRoadLane.Utilities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Tool
 {
     /// <summary>
     /// The marking tool: per-node line and area editing, toggled by

@@ -11,9 +11,13 @@ using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Systems.Prefabs;
+using TownRoadLane.Systems.Topology;
 using SubLane = Game.Net.SubLane;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Emission
 {
     /// <summary>
     /// Keeps one vanilla SecondaryLane sublane (tagged <see cref="TRLSegmentLink"/>) per visible

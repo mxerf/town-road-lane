@@ -1,7 +1,7 @@
 using Unity.Entities;
 using UnityEngine;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Tool
 {
     /// <summary>
     /// Colours and sizes (metres) of the marking tool overlay drawn by

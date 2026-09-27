@@ -3,8 +3,11 @@ using Game;
 using Game.Common;
 using Unity.Collections;
 using Unity.Entities;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Utilities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Emission
 {
     /// <summary>
     /// Converts old saves: nodes that still carry a <see cref="MarkingPair"/> buffer (one entry per

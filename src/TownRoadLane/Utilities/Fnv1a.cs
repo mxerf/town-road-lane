@@ -1,6 +1,6 @@
 using Unity.Mathematics;
 
-namespace TownRoadLane
+namespace TownRoadLane.Utilities
 {
     /// <summary>64-bit FNV-1a over 32-bit words. Used for change detection only: a cheap
     /// fingerprint of buffer contents, compared against the one from the last rebuild.</summary>

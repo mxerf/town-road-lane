@@ -2,7 +2,7 @@ using Colossal.Serialization.Entities;
 using Unity.Entities;
 using Unity.Mathematics;
 
-namespace TownRoadLane
+namespace TownRoadLane.Components
 {
     /// <summary>
     /// Resolved world-space outline of a <see cref="MarkingArea"/>, built by
@@ -18,6 +18,7 @@ namespace TownRoadLane
     /// resolved, and it keeps per-piece visibility across loads. On a rebuild a new piece
     /// inherits the visibility of the old piece that contains its centroid.
     /// </summary>
+    [FormerlySerializedAs("TownRoadLane.MarkingAreaPiece, TownRoadLane")]
     [InternalBufferCapacity(0)]
     public struct MarkingAreaPiece : IBufferElementData, ISerializable
     {
@@ -58,6 +59,7 @@ namespace TownRoadLane
     /// World-space vertex of a <see cref="MarkingAreaPiece"/>. Emission copies the ring straight
     /// into the area's <c>Game.Areas.Node</c> buffer.
     /// </summary>
+    [FormerlySerializedAs("TownRoadLane.MarkingAreaPieceVertex, TownRoadLane")]
     [InternalBufferCapacity(0)]
     public struct MarkingAreaPieceVertex : IBufferElementData, ISerializable
     {

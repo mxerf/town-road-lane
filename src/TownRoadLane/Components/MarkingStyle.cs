@@ -1,4 +1,5 @@
-namespace TownRoadLane
+using TownRoadLane.Systems.Prefabs;
+namespace TownRoadLane.Components
 {
     /// <summary>
     /// Line style, saved as an int in <see cref="MarkingLine.style"/> and

@@ -4,8 +4,9 @@ using Colossal.Logging;
 using Game;
 using Game.Prefabs;
 using Unity.Entities;
+using TownRoadLane.Components;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Prefabs
 {
     /// <summary>
     /// Clones vanilla marking prefabs for two purposes.

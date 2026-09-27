@@ -4,8 +4,11 @@ using Colossal.Mathematics;
 using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Utilities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.UI
 {
     public partial class TownRoadLaneUISystem
     {
@@ -155,7 +158,7 @@ namespace TownRoadLane
                 int idx = area.firstVertex + v;
                 if (idx < 0 || idx >= verts.Length) return false;
                 var av = verts[idx];
-                switch (av.Kind)
+                switch (av.kind)
                 {
                     case AreaAnchorKind.LaneEndpoint:
                         int epIdx = MarkingEndpointExtractor.ResolveEndpointIndex(endpoints, av);

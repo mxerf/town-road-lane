@@ -11,9 +11,10 @@ using Game.Simulation;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
-using static TownRoadLane.PolygonUtils;
+using TownRoadLane.Components;
+using static TownRoadLane.Geometry.PolygonUtils;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Topology
 {
     /// <summary>
     /// Replaces the vanilla triangles of the mod's area fills with a triangulation of the exact
@@ -34,7 +35,7 @@ namespace TownRoadLane
     ///  - Triangle.m_HeightRange: terrain range over each triangle's bounding box
     ///    (<c>TerrainUtils.GetHeightRange</c>), slightly wider than vanilla's exact raster;
     ///  - Triangle.m_MinLod: vanilla's formula, brute force over the (small) ring;
-    ///  - Area.m_Flags (clears NoTriangles) and the Geometry component.
+    ///  - Area.m_Flags (clears NoTriangles) and the Game.Areas.Geometry component.
     ///
     /// If the ear-clip fails (self-intersecting ring) the vanilla triangles are left as they are.
     /// </summary>
@@ -280,7 +281,7 @@ namespace TownRoadLane
                 lodBias = geoData.m_LodBias;
             }
 
-            var geometry = new Geometry { m_Bounds = new Bounds3(float.MaxValue, float.MinValue) };
+            var geometry = new Game.Areas.Geometry { m_Bounds = new Bounds3(float.MaxValue, float.MinValue) };
             float bestCentreScore = -1f;
             // A fill on a bridge deck has nodes with an explicit elevation instead of the
             // terrain-following float.MinValue. It changes the height range and center below.
@@ -340,7 +341,7 @@ namespace TownRoadLane
             if (!elevated)
                 geometry.m_CenterPosition.y = TerrainUtils.SampleHeight(ref heightData, geometry.m_CenterPosition);
 
-            if (EntityManager.HasComponent<Geometry>(entity))
+            if (EntityManager.HasComponent<Game.Areas.Geometry>(entity))
                 EntityManager.SetComponentData(entity, geometry);
 
             var area = EntityManager.GetComponentData<Area>(entity);

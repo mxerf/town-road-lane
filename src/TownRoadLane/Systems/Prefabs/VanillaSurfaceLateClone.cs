@@ -9,7 +9,7 @@ using Game.SceneFlow;
 using Unity.Entities;
 using UnityEngine;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Prefabs
 {
     /// <summary>
     /// Builds the vanilla-surface fill styles (grass, sand, pavement, tiles; style slots 15+) by

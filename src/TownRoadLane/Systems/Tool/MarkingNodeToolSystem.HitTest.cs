@@ -2,8 +2,10 @@ using System.Collections.Generic;
 using Colossal.Mathematics;
 using Unity.Entities;
 using Unity.Mathematics;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Tool
 {
     // Cursor hit-testing against the selected node's dots, lines, areas and area anchors. All
     // distances are measured in the XZ plane: the raycast hit and the target can be at

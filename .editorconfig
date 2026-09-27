@@ -45,8 +45,7 @@ dotnet_style_qualification_for_method = false:suggestion
 # Naming, matching the code base:
 #   private instance fields  _camelCase
 #   constants                kPascalCase
-# Public fields of ECS components stay camelCase like the game's own serialized structs; other
-# mods read them by name, so they are not renamed.
+# Public fields of ECS components stay camelCase, like the game's own serialized structs.
 # Rules are matched in this order: constants, then other static fields (no rule: the logger is
 # `log` and lookup tables use the constant prefix), then private instance fields.
 dotnet_naming_symbols.constants.applicable_kinds = field

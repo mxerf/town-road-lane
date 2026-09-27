@@ -1,6 +1,7 @@
 using Unity.Mathematics;
+using TownRoadLane.Components;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Tool
 {
     /// <summary>A placed vertex of the area being drawn. The anchor reference lets positions be
     /// rebuilt after a topology change. edgeToNext is set once the following vertex is picked, so

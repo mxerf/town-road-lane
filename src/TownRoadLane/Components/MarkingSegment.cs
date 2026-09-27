@@ -1,7 +1,7 @@
 using Colossal.Serialization.Entities;
 using Unity.Entities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Components
 {
     /// <summary>
     /// One drawable piece of a <see cref="MarkingLine"/>, stored in a flat per-node buffer shared
@@ -12,6 +12,7 @@ namespace TownRoadLane
     /// <see cref="lineIndex"/> is the parent's position in the node's MarkingLine buffer. Deleting
     /// a line removes its segments and shifts the lineIndex of the segments after it.
     /// </summary>
+    [FormerlySerializedAs("TownRoadLane.MarkingSegment, TownRoadLane")]
     [InternalBufferCapacity(0)]
     public struct MarkingSegment : IBufferElementData, ISerializable
     {

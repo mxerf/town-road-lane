@@ -1,8 +1,9 @@
 using Colossal.Serialization.Entities;
 using Unity.Entities;
 using Unity.Mathematics;
+using TownRoadLane.Systems.Emission;
 
-namespace TownRoadLane
+namespace TownRoadLane.Components
 {
     /// <summary>
     /// User-drawn polygonal fill area at a road node, one buffer entry per closed area. Its
@@ -10,6 +11,7 @@ namespace TownRoadLane
     /// <see cref="MarkingAreaVertex"/> buffer. <see cref="MarkingAreaEmissionSystem"/> turns
     /// each area into vanilla <c>Game.Areas.Area</c> entities.
     /// </summary>
+    [FormerlySerializedAs("TownRoadLane.MarkingArea, TownRoadLane")]
     [InternalBufferCapacity(0)]
     public struct MarkingArea : IBufferElementData, ISerializable
     {
@@ -65,19 +67,18 @@ namespace TownRoadLane
     /// the polygon follows the road when lanes move. Areas own contiguous slices of this
     /// per-node buffer.
     /// </summary>
+    [FormerlySerializedAs("TownRoadLane.MarkingAreaVertex, TownRoadLane")]
     [InternalBufferCapacity(0)]
     public struct MarkingAreaVertex : IBufferElementData, ISerializable
     {
-        // Raw AreaAnchorKind; use Kind. The fields stay public bytes because other mods read them.
-        public byte kind;
+        public AreaAnchorKind kind;
         // kind 2: packed (lineA, lineB, hitIndex) crossing reference, stable across loads.
         // kind 0/1 in version 1 saves: raw index into the extracted endpoint/corner list. That
         // order is not stable across loads (the game rebuilds lanes and extraction follows them),
         // so version 2 vertices use the refEdge/refGap/refPos identity below instead and this
         // index only resolves version 1 vertices.
         public int refIndex;
-        // Raw AreaEdgeKind; use EdgeToNext.
-        public byte edgeToNext;
+        public AreaEdgeKind edgeToNext;
         // Stable identity for kind 0/1, the same scheme that keeps MarkingLine valid across loads:
         //   kind 0: refEdgeA = the endpoint's road edge, refGap = its gap index;
         //   kind 1: refEdgeA/refEdgeB = the corner's edge pair (refEdgeB may be Null).
@@ -89,29 +90,17 @@ namespace TownRoadLane
         public int refGap;
         public float3 refPos;
 
-        public AreaAnchorKind Kind
-        {
-            get => (AreaAnchorKind)kind;
-            set => kind = (byte)value;
-        }
-
-        public AreaEdgeKind EdgeToNext
-        {
-            get => (AreaEdgeKind)edgeToNext;
-            set => edgeToNext = (byte)value;
-        }
-
         /// <summary>Version 1 lane-endpoint or corner vertex, still named by a raw list index.</summary>
-        public bool IsLegacyIndexRef => Kind != AreaAnchorKind.LineIntersection && refEdgeA == Entity.Null;
+        public bool IsLegacyIndexRef => kind != AreaAnchorKind.LineIntersection && refEdgeA == Entity.Null;
 
         private const int kVersion = 2;
 
         public void Serialize<TWriter>(TWriter writer) where TWriter : IWriter
         {
             writer.Write(kVersion);
-            writer.Write(kind);
+            writer.Write((byte)kind);
             writer.Write(refIndex);
-            writer.Write(edgeToNext);
+            writer.Write((byte)edgeToNext);
             writer.Write(refEdgeA);
             writer.Write(refEdgeB);
             writer.Write(refGap);
@@ -121,9 +110,11 @@ namespace TownRoadLane
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
         {
             reader.Read(out int version);
-            reader.Read(out kind);
+            reader.Read(out byte k);
+            kind = (AreaAnchorKind)k;
             reader.Read(out refIndex);
-            reader.Read(out edgeToNext);
+            reader.Read(out byte e);
+            edgeToNext = (AreaEdgeKind)e;
             if (version >= 2)
             {
                 reader.Read(out refEdgeA);
@@ -159,6 +150,7 @@ namespace TownRoadLane
     /// copies of their sublanes are removed together with the node's other lanes when the node is
     /// rebuilt after load (see <see cref="TRLSegmentLink"/>).
     /// </remarks>
+    [FormerlySerializedAs("TownRoadLane.TRLAreaLink, TownRoadLane")]
     public struct TRLAreaLink : IComponentData, ISerializable
     {
         public Entity node;

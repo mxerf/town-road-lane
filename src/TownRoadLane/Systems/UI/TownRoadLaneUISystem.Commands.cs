@@ -2,8 +2,13 @@ using System;
 using System.Collections.Generic;
 using Unity.Entities;
 using Unity.Mathematics;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Systems.Tool;
+using TownRoadLane.Systems.Topology;
+using TownRoadLane.Utilities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.UI
 {
     public partial class TownRoadLaneUISystem
     {

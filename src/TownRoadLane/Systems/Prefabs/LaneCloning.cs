@@ -4,7 +4,7 @@ using Game.Prefabs;
 using Unity.Collections;
 using Unity.Entities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Prefabs
 {
     /// <summary>
     /// Prefab lookups and clone steps shared by <see cref="EdgeLineCloneSystem"/> and

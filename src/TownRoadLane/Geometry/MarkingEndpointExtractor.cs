@@ -5,8 +5,9 @@ using Game.Net;
 using Game.Prefabs;
 using Unity.Entities;
 using Unity.Mathematics;
+using TownRoadLane.Components;
 
-namespace TownRoadLane
+namespace TownRoadLane.Geometry
 {
     /// <summary>
     /// An attach point between two adjacent carriageway lanes (or on an outer kerb) at a road

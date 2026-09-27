@@ -6,8 +6,12 @@ using Game.SceneFlow;
 using Game.Tools;
 using Unity.Entities;
 using Unity.Mathematics;
+using TownRoadLane.Components;
+using TownRoadLane.Geometry;
+using TownRoadLane.Systems.Tool;
+using TownRoadLane.Utilities;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.UI
 {
     /// <summary>
     /// Bridge between the in-game React panel and the tool, topology and emission systems.

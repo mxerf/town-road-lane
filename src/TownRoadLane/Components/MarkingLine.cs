@@ -1,7 +1,8 @@
 using Colossal.Serialization.Entities;
 using Unity.Entities;
+using TownRoadLane.Geometry;
 
-namespace TownRoadLane
+namespace TownRoadLane.Components
 {
     /// <summary>
     /// User-drawn marking line at a road node, one buffer entry per line (endpoints, style and
@@ -12,6 +13,7 @@ namespace TownRoadLane
     /// Endpoints use the gap-based identity of <see cref="MarkingEndpointExtractor"/>, the same
     /// as the legacy <see cref="MarkingPair"/>, so migration copies them field for field.
     /// </summary>
+    [FormerlySerializedAs("TownRoadLane.MarkingLine, TownRoadLane")]
     [InternalBufferCapacity(0)]
     public struct MarkingLine : IBufferElementData, ISerializable
     {

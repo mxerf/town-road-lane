@@ -6,7 +6,7 @@ using Game.Prefabs;
 using Unity.Entities;
 using Unity.Mathematics;
 
-namespace TownRoadLane
+namespace TownRoadLane.Systems.Prefabs
 {
     /// <summary>
     /// Marks parallel street-parking zones, which vanilla leaves as bare asphalt.

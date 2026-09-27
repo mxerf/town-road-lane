@@ -2,8 +2,9 @@ using System.Collections.Generic;
 using Colossal.Mathematics;
 using Unity.Entities;
 using Unity.Mathematics;
+using TownRoadLane.Components;
 
-namespace TownRoadLane
+namespace TownRoadLane.Geometry
 {
     /// <summary>
     /// Builds the smooth Bezier between two marking endpoints. The drag preview, the emitted
