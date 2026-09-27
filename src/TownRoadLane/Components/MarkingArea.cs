@@ -122,8 +122,9 @@ namespace TownRoadLane
     /// Must be serialized. The game saves the spawned Area entities, and without the tag each
     /// load leaves an untagged copy: emission spawns a fresh fill on top, and hide/delete only
     /// affect the new one. Saves that predate the serialized tag are cleaned up by
-    /// <see cref="MarkingAreaEmissionSystem"/> on load. Lines don't need this because the game
-    /// does not save lanes.
+    /// <see cref="MarkingAreaEmissionSystem"/> on load. Lines get away without it: the untagged
+    /// copies of their sublanes are removed together with the node's other lanes when the node is
+    /// rebuilt after load (see <see cref="TRLSegmentLink"/>).
     /// </remarks>
     public struct TRLAreaLink : IComponentData, ISerializable
     {

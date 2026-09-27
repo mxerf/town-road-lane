@@ -8,6 +8,7 @@ using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using static TownRoadLane.PolygonUtils;
 
 namespace TownRoadLane
 {
@@ -72,7 +73,7 @@ namespace TownRoadLane
             {
                 if (RecomputeIfChanged(nodes[i])) rewritten++;
             }
-            if (rewritten > 0) log.Info($"MarkingTopologySystem: recomputed segments on {rewritten} node(s)");
+            if (rewritten > 0) log.Debug($"MarkingTopologySystem: recomputed segments on {rewritten} node(s)");
         }
 
         private bool RecomputeIfChanged(Entity node)
@@ -259,7 +260,7 @@ namespace TownRoadLane
             beziers.Dispose();
             bezierValid.Dispose();
 
-            log.Info($"topology node#{node.Index}: {lineCount} line(s) → {newSegments.Count} segment(s)");
+            log.Debug($"topology node#{node.Index}: {lineCount} line(s) → {newSegments.Count} segment(s)");
             return true;
         }
 
@@ -346,13 +347,6 @@ namespace TownRoadLane
             float rSq = marginM * marginM;
             return DistSqXZ(p, a.a) < rSq || DistSqXZ(p, a.d) < rSq
                 || DistSqXZ(p, b.a) < rSq || DistSqXZ(p, b.d) < rSq;
-        }
-
-        private static float DistSqXZ(float3 p, float3 q)
-        {
-            float dx = p.x - q.x;
-            float dz = p.z - q.z;
-            return dx * dx + dz * dz;
         }
 
         /// <summary>Removes inner boundaries that would leave a segment shorter than

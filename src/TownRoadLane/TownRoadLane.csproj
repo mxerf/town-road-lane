@@ -73,17 +73,6 @@
 		<Reference Include="Unity.Mathematics">
 			<Private>false</Private>
 		</Reference>
-		<!-- For HDMaterial.ValidateMaterial. A material created from Shader.Find("HDRP/Unlit")
-		     has no keywords, render queue or stencil state until validated, and Graphics.DrawMesh
-		     silently draws nothing. The game ships this assembly. -->
-		<Reference Include="Unity.RenderPipelines.HighDefinition.Runtime">
-			<Private>false</Private>
-		</Reference>
-		<!-- The UI bridge needs cohtml.Net (View.ExecuteScript); the binding classes come with
-		     the Game reference. -->
-		<Reference Include="cohtml.Net">
-			<Private>false</Private>
-		</Reference>
 	</ItemGroup>
 
 	<ItemGroup>

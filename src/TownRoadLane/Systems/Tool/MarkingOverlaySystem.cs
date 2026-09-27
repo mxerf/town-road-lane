@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Colossal.Logging;
 using Colossal.Mathematics;
 using Game;
 using Game.Net;
@@ -26,7 +25,6 @@ namespace TownRoadLane
     /// </summary>
     public partial class MarkingOverlaySystem : GameSystemBase
     {
-        private static readonly ILog log = Mod.log;
 
         private ToolSystem _toolSystem;
         private MarkingNodeToolSystem _tool;
@@ -165,8 +163,14 @@ namespace TownRoadLane
 
             _heightData = _terrainSystem.GetHeightData();
             var buf = _overlayRenderSystem.GetBuffer(out JobHandle deps);
-            JobHandle our = JobHandle.CombineDependencies(deps, Dependency);
+            // Drawing happens on the main thread, so jobs still writing to the buffer finish first.
+            deps.Complete();
+            Draw(buf);
+            _overlayRenderSystem.AddBufferWriter(Dependency);
+        }
 
+        private void Draw(OverlayRenderSystem.Buffer buf)
+        {
             DrawHasPairsRings(buf, _tool.SelectedNode);
 
             // Only before a node is selected; after that the dots show where the user is.
@@ -180,18 +184,12 @@ namespace TownRoadLane
             if (_tool.ToolState == MarkingNodeToolSystem.State.AreaSelecting)
             {
                 DrawAreaModeOverlay(buf);
-                _overlayRenderSystem.AddBufferWriter(our);
-                Dependency = our;
                 return;
             }
 
             var endpoints = _tool.Endpoints;
             if (endpoints == null || endpoints.Count == 0)
-            {
-                _overlayRenderSystem.AddBufferWriter(our);
-                Dependency = our;
                 return;
-            }
 
             int sourceIdx = _tool.SourceEndpointIndex;
             int hoverIdx  = _tool.HoveredEndpointIndex;
@@ -383,9 +381,6 @@ namespace TownRoadLane
                         diameter: kCornerDotDiameter);
                 }
             }
-
-            _overlayRenderSystem.AddBufferWriter(our);
-            Dependency = our;
         }
 
         /// <summary>Drag-preview curve. Uses <see cref="MarkingCurveBuilder"/> with the same

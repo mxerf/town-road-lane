@@ -65,7 +65,7 @@ namespace TownRoadLane
             VanillaSurfaceLateClone.kCloneTiles2,                                                                // 21 Tiles 2
             VanillaSurfaceLateClone.kCloneTiles3,                                                                // 22 Tiles 3
         };
-        public const int kStyleCount = 23;
+        public static readonly int kStyleCount = kStyleSurfaceNames.Length;
         public const int kStyleSolidConcrete = 0;
 
         /// <summary>False for retired slots: they never resolve, are hidden from the UI and are
@@ -278,7 +278,7 @@ namespace TownRoadLane
             {
                 int resolved = 0;
                 for (int i = 0; i < kStyleCount; i++) if (_stylePrefabEntities[i] != Entity.Null) resolved++;
-                log.Info($"[area-emission] nodesWithAreas={_nodesWithAreas.CalculateEntityCount()} stylesResolved={resolved}/{kStyleCount} spawned={spawned} deleted={deleted}");
+                log.Debug($"[area-emission] nodesWithAreas={_nodesWithAreas.CalculateEntityCount()} stylesResolved={resolved}/{kStyleCount} spawned={spawned} deleted={deleted}");
             }
         }
 
@@ -380,7 +380,7 @@ namespace TownRoadLane
                         string renderInfo = sp.TryGet<RenderedArea>(out var ra) && ra != null
                             ? $" prio={ra.m_RendererPriority} layer={ra.m_DecalLayerMask}"
                             : " (no RenderedArea)";
-                        log.Info($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}{renderInfo}");
+                        log.Debug($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}{renderInfo}");
                     }
                 }
             }

@@ -74,12 +74,12 @@ namespace TownRoadLane
             string src = fromHotkey ? "hotkey" : "button";
             if (_toolSystem.activeTool == _markingTool)
             {
-                log.Info($"{src}: deactivating MarkingNodeToolSystem");
+                log.Debug($"{src}: deactivating MarkingNodeToolSystem");
                 _toolSystem.activeTool = _defaultTool;
             }
             else
             {
-                log.Info($"{src}: activating MarkingNodeToolSystem");
+                log.Debug($"{src}: activating MarkingNodeToolSystem");
                 _toolSystem.activeTool = _markingTool;
             }
         }

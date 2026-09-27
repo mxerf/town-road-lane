@@ -58,9 +58,6 @@ namespace TownRoadLane
         private EntityQuery m_LanePrefabQuery;
         private bool m_Done;
 
-        /// <summary>Names of the marking prefabs this system creates, for diagnostics.</summary>
-        public static IEnumerable<string> CreatedPrefabNames { get { foreach (var r in kRecipes) yield return r.clone; } }
-
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -153,7 +150,7 @@ namespace TownRoadLane
                 int swapped = SwapMesh(cloneBase, mesh);
                 m_PrefabSystem.UpdatePrefab(cloneBase);
                 touched++;
-                log.Info($"applied '{cloneName}' ({role}): mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
+                log.Debug($"applied '{cloneName}' ({role}): mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
             }
 
             log.Info($"ParkingLineCloneSystem: applied {touched} prefab(s) (enabled={parkingOn}, line='{lineMeshName}', end='{endMeshName ?? "(none)"}')");

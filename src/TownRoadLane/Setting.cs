@@ -91,7 +91,7 @@ namespace TownRoadLane
             try
             {
                 await AssetDatabase.global.SaveSpecificSetting(GetType().Name);
-                Mod.log.Info($"settings: coalesced save landed (edge={EdgeLineEnabled}/{EdgeLineStyle}, parking={ParkingMarkingsEnabled}/{ParkingLineStyle}/{ParkingEndStyle})");
+                Mod.log.Debug($"settings: coalesced save landed (edge={EdgeLineEnabled}/{EdgeLineStyle}, parking={ParkingMarkingsEnabled}/{ParkingLineStyle}/{ParkingEndStyle})");
             }
             catch (System.Exception e)
             {
@@ -165,7 +165,7 @@ namespace TownRoadLane
         {
             set
             {
-                Mod.log.Info("settings button: activate marking tool");
+                Mod.log.Debug("settings button: activate marking tool");
                 MarkingToolHotkeySystem.RequestToggle();
             }
         }
@@ -198,6 +198,12 @@ namespace TownRoadLane
         [SettingsUIHidden]
         public string PinnedAreaStylesCsv { get; set; } = "";
 
+        // Per-action tool, panel and rebuild messages at Debug level, for bug reports. Hidden from
+        // the options screen; to enable, set "VerboseLogging": true in TownRoadLane.coc and
+        // restart the game.
+        [SettingsUIHidden]
+        public bool VerboseLogging { get; set; } = false;
+
 #if DEBUG
         // Developer prefab dumps at boot (RoadPrefabDumpSystem, AreasPrototypeSystem): tens of
         // thousands of log lines per start, enough for Skyve to flag the mod for extreme logging.
@@ -221,6 +227,7 @@ namespace TownRoadLane
             SegmentHitClusterM = MarkingTopologySystem.kDefaultHitClusterM;
             PinnedLineStylesCsv = "";
             PinnedAreaStylesCsv = "";
+            VerboseLogging = false;
 #if DEBUG
             DiagnosticDumps = false;
 #endif

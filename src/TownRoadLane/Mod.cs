@@ -59,6 +59,11 @@ namespace TownRoadLane
             // A decode failure silently falls back to SetDefaults(), so log what the load actually
             // produced; user reports then show the real state.
             log.Info($"settings loaded: edge={Settings.EdgeLineEnabled}/{Settings.EdgeLineStyle}, parking={Settings.ParkingMarkingsEnabled}/{Settings.ParkingLineStyle}/{Settings.ParkingEndStyle}, pins='{Settings.PinnedLineStylesCsv}'/'{Settings.PinnedAreaStylesCsv}'");
+            if (Settings.VerboseLogging)
+            {
+                log.effectivenessLevel = Level.Debug;
+                log.Info("verbose logging on");
+            }
 
             // Vanilla-surface fill styles; see VanillaSurfaceLateClone for why they are registered
             // after loading.
@@ -89,8 +94,9 @@ namespace TownRoadLane
             // Only the secondary lane pass (markings) is replaced; LaneSystem and traffic lanes are
             // untouched.
             var vanilla = updateSystem.World.GetOrCreateSystemManaged<SecondaryLaneSystem>();
+            bool wasEnabled = vanilla.Enabled;
             vanilla.Enabled = false;
-            log.Info($"vanilla SecondaryLaneSystem disabled (was Enabled={vanilla.Enabled})");
+            log.Info($"vanilla SecondaryLaneSystem disabled (was Enabled={wasEnabled})");
 
             // Must run in Modification4B, where vanilla SecondaryLaneSystem runs and
             // AllowBarrier<ModificationBarrier4B> applies (Game.Common.SystemOrder). In Modification4,

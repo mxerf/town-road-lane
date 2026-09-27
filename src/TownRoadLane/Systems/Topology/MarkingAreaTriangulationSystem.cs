@@ -10,6 +10,7 @@ using Game.Simulation;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using static TownRoadLane.PolygonUtils;
 
 namespace TownRoadLane
 {
@@ -123,7 +124,7 @@ namespace TownRoadLane
                     }
                 }
                 if (done > 0 || failed > 0)
-                    log.Info($"MarkingAreaTriangulationSystem: rewrote {done} fill(s){(failed > 0 ? $", {failed} left vanilla" : "")}");
+                    log.Debug($"MarkingAreaTriangulationSystem: rewrote {done} fill(s){(failed > 0 ? $", {failed} left vanilla" : "")}");
             }
 
             ReclaimClobberedFills(ref heightData);
@@ -393,18 +394,6 @@ namespace TownRoadLane
                 best = math.select(best, new float2(d, best.x), d < best.x);
             }
             return best;
-        }
-
-        private static float SignedAreaXZ(NativeArray<float3> pts)
-        {
-            float sum = 0f;
-            for (int i = 0; i < pts.Length; i++)
-            {
-                float3 a = pts[i];
-                float3 b = pts[(i + 1) % pts.Length];
-                sum += a.x * b.z - b.x * a.z;
-            }
-            return sum * 0.5f;
         }
 
         /// <summary>O(n²) ear-clipping in the XZ plane, without vanilla's shrink step or attempt

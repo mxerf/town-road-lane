@@ -140,18 +140,6 @@ namespace TownRoadLane
                 : Entity.Null;
         }
 
-        /// <summary>Entities of the Solid tool-style clones for the EU and NA themes.</summary>
-        public Entity CloneEntityEU => GetCloneEntity(MarkingStyle.Solid, isNA: false);
-        public Entity CloneEntityNA => GetCloneEntity(MarkingStyle.Solid, isNA: true);
-
-        /// <summary>The Solid EU and NA clone prefabs, e.g. for getting the material through
-        /// NetLaneMeshInfo.m_Mesh.ObtainMaterial(). Stable across UpdatePrefab.</summary>
-        public NetLanePrefab ClonePrefabEU => m_ClonesByStyle.TryGetValue((MarkingStyle.Solid, false), out var p) ? p : null;
-        public NetLanePrefab ClonePrefabNA => m_ClonesByStyle.TryGetValue((MarkingStyle.Solid, true),  out var p) ? p : null;
-
-        /// <summary>Names of the marking prefabs this system creates, for diagnostics.</summary>
-        public static IEnumerable<string> CreatedPrefabNames { get { foreach (var r in kStyleRecipes) yield return r.cloneName; } }
-
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -318,7 +306,7 @@ namespace TownRoadLane
                 // the same (style, isNA) key.
                 if (!recipe.hostOnCityLanes && !recipe.hostYellowLeft) m_ClonesByStyle[(recipe.style, recipe.isNA)] = cloneBase;
                 touched++;
-                log.Info($"applied '{recipe.cloneName}' [{recipe.style}/{(recipe.isNA ? "NA" : "EU")}]: hostedEntries={hostCount} mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
+                log.Debug($"applied '{recipe.cloneName}' [{recipe.style}/{(recipe.isNA ? "NA" : "EU")}]: hostedEntries={hostCount} mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
             }
 
             log.Info($"EdgeLineCloneSystem: applied {touched} prefab(s)");

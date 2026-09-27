@@ -168,7 +168,7 @@ namespace TownRoadLane
         public void SetCurrentStyle(MarkingStyle style)
         {
             _currentStyle = style;
-            log.Info($"tool: UI set next-line style → {_currentStyle}");
+            log.Debug($"tool: UI set next-line style → {_currentStyle}");
         }
 
         /// <summary>Sets the fill style for the next closed area (the state the area-style hotkey
@@ -178,7 +178,7 @@ namespace TownRoadLane
             _currentAreaStyle = math.clamp(styleId, 0, MarkingAreaEmissionSystem.kStyleCount - 1);
             if (!MarkingAreaEmissionSystem.IsStyleEnabled(_currentAreaStyle))
                 _currentAreaStyle = MarkingAreaEmissionSystem.kStyleSolidConcrete;
-            log.Info($"tool: UI set next-area style → {_currentAreaStyle}");
+            log.Debug($"tool: UI set next-area style → {_currentAreaStyle}");
         }
 
         /// <summary>Panel "Area" button. Drops a half-picked line first, so it works from any
@@ -194,7 +194,7 @@ namespace TownRoadLane
             _state = State.AreaSelecting;
             _areaPolygon.Clear();
             _areaHover = AreaCandidate.None;
-            log.Info($"area: entered AreaSelecting via UI on node #{_selectedNode.Index}");
+            log.Debug($"area: entered AreaSelecting via UI on node #{_selectedNode.Index}");
             return true;
         }
 
@@ -203,7 +203,7 @@ namespace TownRoadLane
         public void ExitAreaMode()
         {
             if (_state != State.AreaSelecting) return;
-            log.Info($"area: exited AreaSelecting via UI (had {_areaPolygon.Count} vertices)");
+            log.Debug($"area: exited AreaSelecting via UI (had {_areaPolygon.Count} vertices)");
             _areaPolygon.Clear();
             _areaHover = AreaCandidate.None;
             _state = State.NodeSelected;
@@ -236,12 +236,12 @@ namespace TownRoadLane
             if (_cycleStyleAction != null) _cycleStyleAction.shouldBeEnabled = true;
             if (_enterAreaAction != null) _enterAreaAction.shouldBeEnabled = true;
             if (_cycleAreaStyleAction != null) _cycleAreaStyleAction.shouldBeEnabled = true;
-            log.Info($"MarkingNodeToolSystem: activated, actions enabled (apply={applyAction != null}, cancel={cancelAction != null}, cycleStyle={_cycleStyleAction != null})");
+            log.Debug($"MarkingNodeToolSystem: activated, actions enabled (apply={applyAction != null}, cancel={cancelAction != null}, cycleStyle={_cycleStyleAction != null})");
         }
 
         protected override void OnStopRunning()
         {
-            log.Info($"MarkingNodeToolSystem: deactivated (state was {_state}, selectedNode #{_selectedNode.Index})");
+            log.Debug($"MarkingNodeToolSystem: deactivated (state was {_state}, selectedNode #{_selectedNode.Index})");
             if (_cycleStyleAction != null) _cycleStyleAction.shouldBeEnabled = false;
             if (_enterAreaAction != null) _enterAreaAction.shouldBeEnabled = false;
             if (_cycleAreaStyleAction != null) _cycleAreaStyleAction.shouldBeEnabled = false;
@@ -303,11 +303,11 @@ namespace TownRoadLane
                 if (_hoverIdx >= 0)
                 {
                     var ep = _endpoints[_hoverIdx];
-                    log.Info($"tool: hover endpoint idx={_hoverIdx} edge=#{ep.edge.Index} gap={ep.gapIndex}");
+                    log.Debug($"tool: hover endpoint idx={_hoverIdx} edge=#{ep.edge.Index} gap={ep.gapIndex}");
                 }
                 else if (_lastLoggedHoverIdx >= 0)
                 {
-                    log.Info($"tool: hover cleared (was idx={_lastLoggedHoverIdx})");
+                    log.Debug($"tool: hover cleared (was idx={_lastLoggedHoverIdx})");
                 }
                 _lastLoggedHoverIdx = _hoverIdx;
             }
@@ -316,13 +316,13 @@ namespace TownRoadLane
             if (_cycleStyleAction != null && _cycleStyleAction.WasPerformedThisFrame())
             {
                 _currentStyle = NextStyle(_currentStyle);
-                log.Info($"tool: cycled style → {_currentStyle}");
+                log.Debug($"tool: cycled style → {_currentStyle}");
             }
 
             if (_cycleAreaStyleAction != null && _cycleAreaStyleAction.WasPerformedThisFrame())
             {
                 _currentAreaStyle = MarkingAreaEmissionSystem.NextEnabledStyle(_currentAreaStyle);
-                log.Info($"tool: cycled area style → {_currentAreaStyle}");
+                log.Debug($"tool: cycled area style → {_currentAreaStyle}");
             }
 
             // The area hotkey enters area mode, and pressing it again leaves without committing.
@@ -333,11 +333,11 @@ namespace TownRoadLane
                     _state = State.AreaSelecting;
                     _areaPolygon.Clear();
                     _areaHover = AreaCandidate.None;
-                    log.Info($"area: entered AreaSelecting on node #{_selectedNode.Index}");
+                    log.Debug($"area: entered AreaSelecting on node #{_selectedNode.Index}");
                 }
                 else if (_state == State.AreaSelecting)
                 {
-                    log.Info($"area: cancelled AreaSelecting via hotkey (had {_areaPolygon.Count} vertices)");
+                    log.Debug($"area: cancelled AreaSelecting via hotkey (had {_areaPolygon.Count} vertices)");
                     _areaPolygon.Clear();
                     _areaHover = AreaCandidate.None;
                     _state = State.NodeSelected;
@@ -349,25 +349,25 @@ namespace TownRoadLane
             {
                 if (_state == State.AreaSelecting)
                 {
-                    log.Info($"area: cancelled AreaSelecting via Esc (had {_areaPolygon.Count} vertices)");
+                    log.Debug($"area: cancelled AreaSelecting via Esc (had {_areaPolygon.Count} vertices)");
                     _areaPolygon.Clear();
                     _areaHover = AreaCandidate.None;
                     _state = State.NodeSelected;
                 }
                 else if (_state == State.SourceSelected)
                 {
-                    log.Info($"tool: cancel — clearing source #{_sourceIdx}");
+                    log.Debug($"tool: cancel — clearing source #{_sourceIdx}");
                     _sourceIdx = -1;
                     _state = State.NodeSelected;
                 }
                 else if (_state == State.NodeSelected)
                 {
-                    log.Info($"tool: cancel — deselecting node #{_selectedNode.Index}");
+                    log.Debug($"tool: cancel — deselecting node #{_selectedNode.Index}");
                     ResetSelection();
                 }
                 else
                 {
-                    log.Info("tool: cancel from Default — deactivating tool");
+                    log.Debug("tool: cancel from Default — deactivating tool");
                     m_ToolSystem.activeTool = m_DefaultToolSystem;
                 }
                 return inputDeps;
@@ -379,11 +379,11 @@ namespace TownRoadLane
                 if (_areaPolygon.Count > 0)
                 {
                     _areaPolygon.RemoveAt(_areaPolygon.Count - 1);
-                    log.Info($"area: popped last vertex, {_areaPolygon.Count} remaining");
+                    log.Debug($"area: popped last vertex, {_areaPolygon.Count} remaining");
                 }
                 else
                 {
-                    log.Info("area: RMB on empty contour → leave AreaSelecting");
+                    log.Debug("area: RMB on empty contour → leave AreaSelecting");
                     _state = State.NodeSelected;
                 }
                 return inputDeps;
@@ -396,7 +396,7 @@ namespace TownRoadLane
             {
                 // Tells apart a missing apply event, a click with no raycast hit, and a hit on
                 // something that isn't a node.
-                log.Info($"tool: LMB fired — state={_state}, hitSomething={hitSomething}, hitEntity=#{(hitSomething ? hitEntity.Index : -1)}, hasNode={(hitSomething && EntityManager.HasComponent<Node>(hitEntity))}");
+                log.Debug($"tool: LMB fired — state={_state}, hitSomething={hitSomething}, hitEntity=#{(hitSomething ? hitEntity.Index : -1)}, hasNode={(hitSomething && EntityManager.HasComponent<Node>(hitEntity))}");
                 if (_state == State.Default)
                 {
                     if (hitSomething && EntityManager.HasComponent<Node>(hitEntity))
@@ -405,7 +405,7 @@ namespace TownRoadLane
                     }
                     else
                     {
-                        log.Info($"tool: click in Default ignored (hit #{(hitSomething ? hitEntity.Index : -1)}, no Node)");
+                        log.Debug($"tool: click in Default ignored (hit #{(hitSomething ? hitEntity.Index : -1)}, no Node)");
                     }
                 }
                 else if (_state == State.NodeSelected)
@@ -414,7 +414,7 @@ namespace TownRoadLane
                     {
                         _sourceIdx = _hoverIdx;
                         _state = State.SourceSelected;
-                        log.Info($"tool: source endpoint chosen — idx={_sourceIdx} edge=#{_endpoints[_sourceIdx].edge.Index} gap={_endpoints[_sourceIdx].gapIndex}");
+                        log.Debug($"tool: source endpoint chosen — idx={_sourceIdx} edge=#{_endpoints[_sourceIdx].edge.Index} gap={_endpoints[_sourceIdx].gapIndex}");
                     }
                     else if (hitSomething && EntityManager.HasComponent<Node>(hitEntity) && hitEntity != _selectedNode)
                     {
@@ -427,11 +427,11 @@ namespace TownRoadLane
                         int clickedLine = HitTestLines(_cursorWorldPos);
                         _lastClickedLine = clickedLine;
                         _lastClickedTick++;
-                        log.Info($"tool: click on line #{clickedLine} (or -1 = empty space)");
+                        log.Debug($"tool: click on line #{clickedLine} (or -1 = empty space)");
                     }
                     else
                     {
-                        log.Info("tool: click in NodeSelected — no dot/raycast, ignored");
+                        log.Debug("tool: click in NodeSelected — no dot/raycast, ignored");
                     }
                 }
                 else if (_state == State.SourceSelected)
@@ -444,14 +444,14 @@ namespace TownRoadLane
                     }
                     else
                     {
-                        log.Info("tool: click in SourceSelected — no different target dot hovered, ignored");
+                        log.Debug("tool: click in SourceSelected — no different target dot hovered, ignored");
                     }
                 }
                 else if (_state == State.AreaSelecting)
                 {
                     if (!_areaHover.IsValid)
                     {
-                        log.Info("area: LMB with no hovered candidate, ignored");
+                        log.Debug("area: LMB with no hovered candidate, ignored");
                     }
                     else if (AreaCanCloseOn(_areaHover))
                     {
@@ -483,7 +483,7 @@ namespace TownRoadLane
             int existingSegs = EntityManager.HasBuffer<MarkingSegment>(node)
                 ? EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true).Length
                 : 0;
-            log.Info($"tool: selected node #{node.Index} — {_endpoints.Count} endpoint(s), {_cornerAnchors.Count} corner(s), {existingLines} line(s), {existingSegs} segment(s)");
+            log.Debug($"tool: selected node #{node.Index} — {_endpoints.Count} endpoint(s), {_cornerAnchors.Count} corner(s), {existingLines} line(s), {existingSegs} segment(s)");
         }
 
         private int FindHoveredEndpoint(float3 cursor)
@@ -717,7 +717,7 @@ namespace TownRoadLane
                     if (idx < 0 || idx >= verts.Length) { ok = false; break; }
                     _areaHitScratch.Add(verts[idx].position);
                 }
-                if (ok && PolygonSplitter.ContainsXZ(_areaHitScratch, cursor)) return pd.areaIndex;
+                if (ok && PolygonUtils.ContainsXZ(_areaHitScratch, cursor)) return pd.areaIndex;
             }
             return -1;
         }
@@ -771,7 +771,7 @@ namespace TownRoadLane
                 position = pos,
                 edgeToNext = AreaEdgeKind.Straight,  // placeholder until the next click or closure
             });
-            log.Info($"area: vertex {_areaPolygon.Count} added (kind={c.kind}, ref={c.refIndex})");
+            log.Debug($"area: vertex {_areaPolygon.Count} added (kind={c.kind}, ref={c.refIndex})");
         }
 
         /// <summary>True when there are 3+ vertices and the candidate is the first one.</summary>
@@ -839,7 +839,7 @@ namespace TownRoadLane
             if (!EntityManager.HasComponent<Updated>(_selectedNode))
                 EntityManager.AddComponent<Updated>(_selectedNode);
 
-            log.Info($"area: closed with {_areaPolygon.Count} vertices on node #{_selectedNode.Index} — buffer now has {areas.Length} area(s)");
+            log.Debug($"area: closed with {_areaPolygon.Count} vertices on node #{_selectedNode.Index} — buffer now has {areas.Length} area(s)");
             _areaPolygon.Clear();
             _areaHover = AreaCandidate.None;
             _state = State.NodeSelected;
@@ -864,7 +864,7 @@ namespace TownRoadLane
                 bool swappedSides   = p.sourceEdge == dst.edge && p.sourceGapIndex == dst.gapIndex && p.targetEdge == src.edge && p.targetGapIndex == src.gapIndex;
                 if (sameDirection || swappedSides)
                 {
-                    log.Info($"tool: toggled OFF line #{i} on node #{_selectedNode.Index}");
+                    log.Debug($"tool: toggled OFF line #{i} on node #{_selectedNode.Index}");
                     buf.RemoveAt(i);
                     MarkingTopologySystem.OnLineRemoved(EntityManager, _selectedNode, i);
                     if (!EntityManager.HasComponent<Updated>(_selectedNode))
@@ -882,7 +882,7 @@ namespace TownRoadLane
             });
             if (!EntityManager.HasComponent<Updated>(_selectedNode))
                 EntityManager.AddComponent<Updated>(_selectedNode);
-            log.Info($"tool: toggled ON line #{buf.Length - 1} on node #{_selectedNode.Index} style={_currentStyle} — "
+            log.Debug($"tool: toggled ON line #{buf.Length - 1} on node #{_selectedNode.Index} style={_currentStyle} — "
                 + $"src(edge=#{src.edge.Index} gap={src.gapIndex}) → "
                 + $"dst(edge=#{dst.edge.Index} gap={dst.gapIndex})");
         }

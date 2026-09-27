@@ -539,12 +539,12 @@ namespace TownRoadLane
             if (_toolSystem.activeTool == _tool)
             {
                 _toolSystem.activeTool = _defaultTool;
-                log.Info("UI: toolbar button deactivated tool");
+                log.Debug("UI: toolbar button deactivated tool");
             }
             else
             {
                 _toolSystem.activeTool = _tool;
-                log.Info("UI: toolbar button activated tool");
+                log.Debug("UI: toolbar button activated tool");
             }
         }
 
@@ -566,7 +566,7 @@ namespace TownRoadLane
                     segs[s] = seg;
                     if (!EntityManager.HasComponent<Updated>(node))
                         EntityManager.AddComponent<Updated>(node);
-                    log.Info($"UI: toggled line#{lineIndex} seg#{segmentIndexPerLine} → visible={seg.visible}");
+                    log.Debug($"UI: toggled line#{lineIndex} seg#{segmentIndexPerLine} → visible={seg.visible}");
                     return;
                 }
                 perLineCounter++;
@@ -594,7 +594,7 @@ namespace TownRoadLane
                     segs[s] = seg;
                     if (!EntityManager.HasComponent<Updated>(node))
                         EntityManager.AddComponent<Updated>(node);
-                    log.Info($"UI: set line#{lineIndex} seg#{segmentIndexPerLine} style → {(MarkingStyle)style}");
+                    log.Debug($"UI: set line#{lineIndex} seg#{segmentIndexPerLine} style → {(MarkingStyle)style}");
                     return;
                 }
                 perLineCounter++;
@@ -632,7 +632,7 @@ namespace TownRoadLane
                 EntityManager.SetComponentData(node, new MarkingTopologyState { linesHash = 0 });
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
-            log.Info($"UI: set line#{lineIndex} style → {(MarkingStyle)style}");
+            log.Debug($"UI: set line#{lineIndex} style → {(MarkingStyle)style}");
         }
 
         /// <summary>Sets a line's pull factor from the panel stepper; percent 0..100 maps onto
@@ -651,7 +651,7 @@ namespace TownRoadLane
             lines[lineIndex] = ln;
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
-            log.Info($"UI: set line#{lineIndex} curvature → {percent}% (pull={ln.curvature:0.###})");
+            log.Debug($"UI: set line#{lineIndex} curvature → {percent}% (pull={ln.curvature:0.###})");
         }
 
         /// <summary>Toggles the "hide vanilla markings" override (<see cref="MarkingOverride"/>
@@ -679,7 +679,7 @@ namespace TownRoadLane
             }
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
-            log.Info($"UI: vanilla markings on node#{node.Index} → {(hidden ? "shown" : "hidden")}");
+            log.Debug($"UI: vanilla markings on node#{node.Index} → {(hidden ? "shown" : "hidden")}");
         }
 
         private void OnDeleteLine(int lineIndex)
@@ -697,7 +697,7 @@ namespace TownRoadLane
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
             ClearUIHover();
-            log.Info($"UI: deleted line#{lineIndex} on node#{node.Index} — segment overrides and area anchors reindexed");
+            log.Debug($"UI: deleted line#{lineIndex} on node#{node.Index} — segment overrides and area anchors reindexed");
         }
 
         // Panel counterparts of the Y / U / A hotkeys.
@@ -781,7 +781,7 @@ namespace TownRoadLane
             var area = areas[areaIndex];
             area.styleId = styleId;
             areas[areaIndex] = area;
-            log.Info($"UI: set area#{areaIndex} style → {styleId} on node#{node.Index}");
+            log.Debug($"UI: set area#{areaIndex} style → {styleId} on node#{node.Index}");
         }
 
         /// <summary>Pieces keep their own visibility flags, so hiding and showing an area again
@@ -797,7 +797,7 @@ namespace TownRoadLane
             var area = areas[areaIndex];
             area.visible = !area.visible;
             areas[areaIndex] = area;
-            log.Info($"UI: area#{areaIndex} on node#{node.Index} → visible={area.visible}");
+            log.Debug($"UI: area#{areaIndex} on node#{node.Index} → visible={area.visible}");
         }
 
         /// <summary>Removes the area and its vertex slice, shifts the firstVertex offsets of the
@@ -836,7 +836,7 @@ namespace TownRoadLane
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
             ClearUIHover();
-            log.Info($"UI: deleted area#{areaIndex} on node#{node.Index} ({areas.Length} remaining)");
+            log.Debug($"UI: deleted area#{areaIndex} on node#{node.Index} ({areas.Length} remaining)");
         }
 
         /// <summary>Removes every line, segment, area and the vanilla override from the selected
@@ -869,7 +869,7 @@ namespace TownRoadLane
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
             ClearUIHover();
-            log.Info($"UI: full reset of node#{node.Index} — lines, areas and vanilla override cleared");
+            log.Debug($"UI: full reset of node#{node.Index} — lines, areas and vanilla override cleared");
         }
     }
 

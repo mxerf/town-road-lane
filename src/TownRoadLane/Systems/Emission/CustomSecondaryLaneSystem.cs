@@ -26,7 +26,12 @@ using UnityEngine.Scripting;
 // lookups are wired up next to the vanilla ones in __AssignHandles and OnUpdate):
 //   - Edges and nodes with MarkingOverride{HideAll=true}, and nodes with a non-empty MarkingLine
 //     buffer, skip lane generation. Old-lane removal still runs, so their vanilla markings disappear.
-//   - FillOldLaneBuffer ignores sublanes tagged TRLPairLink.
+//
+// The mod's own line sublanes also land in the node's SubLane buffer (SecondaryLaneReferencesSystem
+// adds them), so when a node with user lines is updated, RemoveUnusedOldLanes deletes them along
+// with the vanilla ones and MarkingSegmentEmissionSystem recreates them on the next frame. That is
+// how a line picks up a new style or a changed road: the emission diff does not compare geometry.
+// It also clears the untagged copies a save restores (the game saves the lanes, not our tag).
 //   - Namespace Game.Net renamed to TownRoadLane, class renamed, [CompilerGenerated] dropped.
 //   - No Unity.Entities.Internal (mods cannot use the InternalCompilerInterface helpers): OnUpdate
 //     calls __TypeHandle.__AssignHandles and reads the fields directly, which is equivalent.
@@ -293,14 +298,9 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public ComponentLookup<MarkingOverride> m_MarkingOverrideData;
 
-		// TRL: user-drawn lines on a node. The field keeps its old name (the buffer used to be
-		// MarkingPair).
+		// TRL: user-drawn lines on a node.
 		[ReadOnly]
-		public BufferLookup<MarkingLine> m_MarkingPairs;
-
-		// TRL: tag on sublanes spawned by the mod from the old MarkingPair data. See FillOldLaneBuffer.
-		[ReadOnly]
-		public ComponentLookup<TRLPairLink> m_TRLPairLinkData;
+		public BufferLookup<MarkingLine> m_MarkingLines;
 
 		[ReadOnly]
 		public Entity m_DefaultTheme;
@@ -380,8 +380,8 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 				bool skipGeneration = m_MarkingOverrideData.TryGetComponent(owner, out var __markingOverride) && __markingOverride.HideAll;
 				// TRL: a node with user-drawn lines gets no vanilla markings at all; its lines are
 				// spawned by MarkingSegmentEmissionSystem.
-				bool hasUserPairs = isNode && m_MarkingPairs.TryGetBuffer(owner, out var __pairs) && __pairs.Length > 0;
-				if (hasUserPairs) skipGeneration = true;
+				if (isNode && m_MarkingLines.TryGetBuffer(owner, out var __userLines) && __userLines.Length > 0)
+					skipGeneration = true;
 				if (skipGeneration) { goto skipMarkingGeneration; }
 				EdgeGeometry edgeGeometry = default(EdgeGeometry);
 				Line3 line = default(Line3);
@@ -984,10 +984,6 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			for (int i = 0; i < lanes.Length; i++)
 			{
 				Entity subLane = lanes[i].m_SubLane;
-				// TRL: sublanes the mod spawned itself are managed outside this system.
-				// SecondaryLaneReferencesSystem adds them to the node's SubLane buffer, so without
-				// this check they end up in the old-lane buffer and RemoveUnusedOldLanes deletes them.
-				if (m_TRLPairLinkData.HasComponent(subLane)) continue;
 				if (m_SecondaryLaneData.HasComponent(subLane))
 				{
 					LaneKey key = new LaneKey(m_LaneData[subLane], m_PrefabRefData[subLane].m_Prefab);
@@ -1874,10 +1870,7 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		public ComponentLookup<MarkingOverride> __TownRoadLane_MarkingOverride_RO_ComponentLookup;
 
 		[ReadOnly]
-		public BufferLookup<MarkingLine> __TownRoadLane_MarkingPair_RO_BufferLookup;
-
-		[ReadOnly]
-		public ComponentLookup<TRLPairLink> __TownRoadLane_TRLPairLink_RO_ComponentLookup;
+		public BufferLookup<MarkingLine> __TownRoadLane_MarkingLine_RO_BufferLookup;
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public void __AssignHandles(ref SystemState state)
@@ -1919,8 +1912,7 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			__Game_Prefabs_SecondaryNetLane_RO_BufferLookup = state.GetBufferLookup<SecondaryNetLane>(isReadOnly: true);
 			__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup = state.GetBufferLookup<ObjectRequirementElement>(isReadOnly: true);
 			__TownRoadLane_MarkingOverride_RO_ComponentLookup = state.GetComponentLookup<MarkingOverride>(isReadOnly: true);
-			__TownRoadLane_MarkingPair_RO_BufferLookup = state.GetBufferLookup<MarkingLine>(isReadOnly: true);
-			__TownRoadLane_TRLPairLink_RO_ComponentLookup = state.GetComponentLookup<TRLPairLink>(isReadOnly: true);
+			__TownRoadLane_MarkingLine_RO_BufferLookup = state.GetBufferLookup<MarkingLine>(isReadOnly: true);
 		}
 	}
 
@@ -2012,8 +2004,7 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			m_PrefabSecondaryLanes = __TypeHandle.__Game_Prefabs_SecondaryNetLane_RO_BufferLookup,
 			m_LaneRequirements = __TypeHandle.__Game_Prefabs_ObjectRequirementElement_RO_BufferLookup,
 			m_MarkingOverrideData = __TypeHandle.__TownRoadLane_MarkingOverride_RO_ComponentLookup,
-			m_MarkingPairs = __TypeHandle.__TownRoadLane_MarkingPair_RO_BufferLookup,
-			m_TRLPairLinkData = __TypeHandle.__TownRoadLane_TRLPairLink_RO_ComponentLookup,
+			m_MarkingLines = __TypeHandle.__TownRoadLane_MarkingLine_RO_BufferLookup,
 			m_DefaultTheme = m_CityConfigurationSystem.defaultTheme,
 			m_LeftHandTraffic = m_CityConfigurationSystem.leftHandTraffic,
 			m_AppliedTypes = m_AppliedTypes,

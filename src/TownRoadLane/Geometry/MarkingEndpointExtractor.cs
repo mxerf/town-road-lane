@@ -315,12 +315,12 @@ namespace TownRoadLane
             if (!em.HasBuffer<ConnectedEdge>(node)) return results;
 
             var connected = em.GetBuffer<ConnectedEdge>(node, isReadOnly: true);
-            if (log) Mod.log.Info($"extractor: node #{node.Index} has {connected.Length} ConnectedEdge(s)");
+            if (log) Mod.log.Debug($"extractor: node #{node.Index} has {connected.Length} ConnectedEdge(s)");
             for (int e = 0; e < connected.Length; e++)
             {
                 ExtractForEdge(em, node, connected[e].m_Edge, results, log);
             }
-            if (log) Mod.log.Info($"extractor: total endpoints = {results.Count}");
+            if (log) Mod.log.Debug($"extractor: total endpoints = {results.Count}");
             return results;
         }
 
@@ -341,8 +341,8 @@ namespace TownRoadLane
             // code (GenerateConnectorsSystem) reads lanes from m_Edge too.
             Entity compEntity = composition.m_Edge;
             if (compEntity == Entity.Null) return;
-            if (!em.HasBuffer<NetCompositionLane>(compEntity)) { if (log) Mod.log.Info($"  edge #{edgeEntity.Index}: composition #{compEntity.Index} has no NetCompositionLane buffer"); return; }
-            if (!em.HasComponent<NetCompositionData>(compEntity)) { if (log) Mod.log.Info($"  edge #{edgeEntity.Index}: composition #{compEntity.Index} has no NetCompositionData"); return; }
+            if (!em.HasBuffer<NetCompositionLane>(compEntity)) { if (log) Mod.log.Debug($"  edge #{edgeEntity.Index}: composition #{compEntity.Index} has no NetCompositionLane buffer"); return; }
+            if (!em.HasComponent<NetCompositionData>(compEntity)) { if (log) Mod.log.Debug($"  edge #{edgeEntity.Index}: composition #{compEntity.Index} has no NetCompositionData"); return; }
 
             var compLanes = em.GetBuffer<NetCompositionLane>(compEntity, isReadOnly: true);
             var compData = em.GetComponentData<NetCompositionData>(compEntity);
@@ -380,7 +380,7 @@ namespace TownRoadLane
                 if (log)
                 {
                     float w = em.HasComponent<NetLaneData>(cl.m_Lane) ? em.GetComponentData<NetLaneData>(cl.m_Lane).m_Width : 0f;
-                    Mod.log.Info($"    comp lane[{i}]: x={cl.m_Position.x:F2} w={w:F2} flags={cl.m_Flags}");
+                    Mod.log.Debug($"    comp lane[{i}]: x={cl.m_Position.x:F2} w={w:F2} flags={cl.m_Flags}");
                 }
                 if ((cl.m_Flags & LaneFlags.Road) == 0) continue;
                 // Secondary lanes are markings, Utility lanes are power and water.
@@ -404,7 +404,7 @@ namespace TownRoadLane
                     lanesByX[x] = laneHalfWidth;
             }
 
-            if (log) Mod.log.Info($"  edge #{edgeEntity.Index} (nodeIsStart={nodeIsStart}, width={compData.m_Width:F2}): {total} composition lanes, {filtered} are Road, {lanesByX.Count} unique lateral positions");
+            if (log) Mod.log.Debug($"  edge #{edgeEntity.Index} (nodeIsStart={nodeIsStart}, width={compData.m_Width:F2}): {total} composition lanes, {filtered} are Road, {lanesByX.Count} unique lateral positions");
 
             if (lanesByX.Count == 0) return;
 

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Colossal.Mathematics;
 using Unity.Entities;
 using Unity.Mathematics;
+using static TownRoadLane.PolygonUtils;
 
 namespace TownRoadLane
 {
@@ -153,11 +154,5 @@ namespace TownRoadLane
                 || DistSqXZ(p, b.a) < rSq || DistSqXZ(p, b.d) < rSq;
         }
 
-        private static float DistSqXZ(float3 p, float3 q)
-        {
-            float dx = p.x - q.x;
-            float dz = p.z - q.z;
-            return dx * dx + dz * dz;
-        }
     }
 }

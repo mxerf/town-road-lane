@@ -22,8 +22,9 @@ namespace TownRoadLane
     /// <see cref="MarkingCurveBuilder"/> cut to the segment's range, so it matches the topology
     /// math exactly.
     ///
-    /// Sublanes tagged <see cref="TRLPairLink"/> come from old saves; their MarkingPair source is
-    /// removed by the migration, so they are deleted.
+    /// The diff compares keys only. A line whose style or road changed gets new sublanes because
+    /// <see cref="CustomSecondaryLaneSystem"/> deletes all lanes of an updated node that has user
+    /// lines, including ours, and this system respawns them on the next frame.
     /// </summary>
     [UpdateAfter(typeof(MarkingTopologySystem))]
     public partial class MarkingSegmentEmissionSystem : GameSystemBase
@@ -32,7 +33,6 @@ namespace TownRoadLane
 
         private EntityQuery _nodesWithLines;
         private EntityQuery _ourSubLanes;
-        private EntityQuery _legacyPairSubLanes;
         private readonly System.Text.StringBuilder _churnDetail = new System.Text.StringBuilder();
         // One warning per (node, line) over the PathNode slot capacity: the check fails every
         // tick for such a line, so unthrottled logging would flood.
@@ -58,25 +58,11 @@ namespace TownRoadLane
                 All = new[] { ComponentType.ReadOnly<TRLSegmentLink>() },
                 None = new[] { ComponentType.ReadOnly<Deleted>() },
             });
-            _legacyPairSubLanes = GetEntityQuery(new EntityQueryDesc
-            {
-                All = new[] { ComponentType.ReadOnly<TRLPairLink>() },
-                None = new[] { ComponentType.ReadOnly<Deleted>() },
-            });
         }
 
         protected override void OnUpdate()
         {
             var ecb = new EntityCommandBuffer(Allocator.Temp);
-
-            // Old-save sublanes; the migrated segments are emitted below like any other.
-            if (_legacyPairSubLanes.CalculateEntityCount() > 0)
-            {
-                var legacy = _legacyPairSubLanes.ToEntityArray(Allocator.Temp);
-                for (int i = 0; i < legacy.Length; i++) ecb.AddComponent<Deleted>(legacy[i]);
-                log.Info($"segment-emission: GC'd {legacy.Length} legacy TRLPairLink sublane(s)");
-                legacy.Dispose();
-            }
 
             // Wanted set: (node, lineIndex, segmentIndex, passIndex) for every visible segment.
             var wanted = new HashSet<(Entity, int, int, int)>();
@@ -207,9 +193,9 @@ namespace TownRoadLane
 
             if (created > 0 || deleted > 0)
             {
-                log.Info($"segment-emission: +{created} created, -{deleted} deleted (wanted={wanted.Count} unmet, existing={_ourSubLanes.CalculateEntityCount()})");
+                log.Debug($"segment-emission: +{created} created, -{deleted} deleted (wanted={wanted.Count} unmet, existing={_ourSubLanes.CalculateEntityCount()})");
                 if (_churnDetail.Length > 0 && created <= 12)
-                    log.Info($"segment-emission detail: {_churnDetail}");
+                    log.Debug($"segment-emission detail: {_churnDetail}");
             }
             _churnDetail.Clear();
 

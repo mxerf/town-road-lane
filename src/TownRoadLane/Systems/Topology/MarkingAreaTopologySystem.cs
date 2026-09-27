@@ -8,6 +8,7 @@ using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
+using static TownRoadLane.PolygonUtils;
 
 namespace TownRoadLane
 {
@@ -67,7 +68,7 @@ namespace TownRoadLane
             {
                 if (RecomputeIfChanged(nodes[i])) rewritten++;
             }
-            if (rewritten > 0) log.Info($"MarkingAreaTopologySystem: recomputed pieces on {rewritten} node(s)");
+            if (rewritten > 0) log.Debug($"MarkingAreaTopologySystem: recomputed pieces on {rewritten} node(s)");
         }
 
         private bool RecomputeIfChanged(Entity node)
@@ -304,7 +305,7 @@ namespace TownRoadLane
                     continue;
                 }
 
-                float3 c = PolygonSplitter.CentroidXZ(outerRing);
+                float3 c = PolygonUtils.CentroidXZ(outerRing);
                 bool visible = LookupInheritedVisibility(oldPiecesByArea[a], c, defaultVisible: true);
                 int firstVertexIdx = newVerts.Count;
                 for (int v = 0; v < outerRing.Count; v++)
@@ -356,7 +357,7 @@ namespace TownRoadLane
             areasSnap.Dispose();
             areaVertsSnap.Dispose();
 
-            log.Info($"area-topology node#{node.Index}: {areaCount} area(s) → {newPieces.Count} piece(s)");
+            log.Debug($"area-topology node#{node.Index}: {areaCount} area(s) → {newPieces.Count} piece(s)");
             return true;
         }
 
@@ -440,27 +441,8 @@ namespace TownRoadLane
             return best;
         }
 
-        private static float DistSqXZ(float3 p, float3 q)
-        {
-            float dx = p.x - q.x;
-            float dz = p.z - q.z;
-            return dx * dx + dz * dz;
-        }
-
         // Rings with a smaller area are dropped.
         private const float kMinPieceAreaM2 = 0.5f;
-
-        private static float SignedAreaXZ(List<float3> ring)
-        {
-            float sum = 0f;
-            for (int i = 0; i < ring.Count; i++)
-            {
-                var p = ring[i];
-                var q = ring[(i + 1) % ring.Count];
-                sum += p.x * q.z - q.x * p.z;
-            }
-            return sum * 0.5f;
-        }
 
         private static bool ResolveVertexPos(MarkingAreaVertex av, List<MarkingEndpoint> endpoints,
                                              List<MarkingCornerAnchor> corners, MarkingLine[] lines, out float3 pos)
@@ -570,7 +552,7 @@ namespace TownRoadLane
         {
             for (int i = 0; i < oldPieces.Count; i++)
             {
-                if (PolygonSplitter.ContainsXZ(oldPieces[i].ring, newCentroid))
+                if (PolygonUtils.ContainsXZ(oldPieces[i].ring, newCentroid))
                     return oldPieces[i].header.visible;
             }
             return defaultVisible;
