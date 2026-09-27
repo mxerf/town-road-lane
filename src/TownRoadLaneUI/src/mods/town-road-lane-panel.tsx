@@ -33,6 +33,7 @@ import {
   cmdTogglePinAreaStyle,
 } from "../hooks/usePinnedStyles";
 import { registerSegmentAnchor, setAnchorExpanded, segKey, areaKey } from "../hooks/positionRegistry";
+import { useConfirm, useKeyedConfirm, Confirm } from "../hooks/useConfirm";
 import { ChevronRight, Cross, Eye, EyeOff, Trash, Cycle } from "../components/icons";
 import { LineStylePreview, AreaStylePreview, isG87LineStyle } from "../components/stylePreviews";
 import { Dropdown, DropdownOption } from "../components/Dropdown";
@@ -192,37 +193,97 @@ export const TownRoadLanePanel = () => (
   </PanelErrorBoundary>
 );
 
-// In-world popover at a segment's midpoint. Collapsed it is a small dot (white visible, red
-// hidden), so a line with many segments doesn't fill the view with buttons; hovering shows
-// the visibility toggle, style picker and a two-press delete.
-//
-// Position is not React state: the root registers with positionRegistry, which writes
-// left/top/transform on each GetScreenPoints push, hides the popover while its segment is
-// off-screen and scales it with camera distance.
-const POPOVER_DELETE_CONFIRM_MS = 2500;
-
-const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
-  const t = useT();
-  const pinned = usePinnedStyles();
-  const key = segKey(seg.lineIndex, seg.segmentIndex);
+// Hover expansion shared by the in-world popovers. Collapsed, a popover is a small marker so
+// a line with many segments doesn't fill the view with buttons; hovering shows its buttons.
+// `hover` and `unhover` drive the in-world highlight.
+const usePopoverHover = (anchorKey: string, hover: () => void, unhover: () => void) => {
   const [expanded, setExpanded] = useState(false);
   // The style menu is portalled to document.body, so while it is open the cursor is outside
   // PopoverRoot. Collapsing then would unmount the dropdown mid-pick.
   const [styleOpen, setStyleOpen] = useState(false);
+  const deleteConfirm = useConfirm();
   const showButtons = expanded || styleOpen;
-  // Two-press delete: the first click arms it, a second click within the timeout deletes.
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  useEffect(() => {
-    if (!confirmingDelete) return;
-    const id = window.setTimeout(() => setConfirmingDelete(false), POPOVER_DELETE_CONFIRM_MS);
-    return () => window.clearTimeout(id);
-  }, [confirmingDelete]);
 
   // Lets the registry keep the popover at full size while the buttons are shown. The
   // flag is cleared on unmount when the ref callback unregisters the anchor.
   useEffect(() => {
-    setAnchorExpanded(key, showButtons);
-  }, [key, showButtons]);
+    setAnchorExpanded(anchorKey, showButtons);
+  }, [anchorKey, showButtons]);
+
+  return {
+    showButtons,
+    deleteConfirm,
+    onMouseEnter: () => {
+      setExpanded(true);
+      hover();
+    },
+    onMouseLeave: () => {
+      deleteConfirm.disarm();
+      // Moving into the portalled style menu also leaves the root. Keep the buttons
+      // while the menu is open; onStyleOpenChange collapses them when it closes.
+      if (styleOpen) return;
+      setExpanded(false);
+      unhover();
+    },
+    onStyleOpenChange: (open: boolean) => {
+      setStyleOpen(open);
+      // The cursor may be over the portalled menu, outside the root, so no mouseleave will
+      // come. Collapse here; hovering again re-expands.
+      if (!open) {
+        setExpanded(false);
+        unhover();
+      }
+    },
+  };
+};
+
+const ARMED_DELETE_STYLE = {
+  background: T.colorDangerSoft,
+  borderColor: T.colorDanger,
+  color: T.colorDanger,
+};
+
+// Two-press delete in a popover: one button, red while armed like the panel's confirm row.
+const PopoverDeleteButton = ({
+  confirm,
+  label,
+  onDelete,
+}: {
+  confirm: Confirm;
+  label: string;
+  onDelete: () => void;
+}) => {
+  const t = useT();
+  return (
+    <Tooltip content={confirm.armed ? t("line.delete.confirm.btn") : label}>
+      <PopoverBtn
+        $active={confirm.armed}
+        style={confirm.armed ? ARMED_DELETE_STYLE : undefined}
+        onClick={() => confirm.press(onDelete)}
+      >
+        <Trash size={14} color={confirm.armed ? T.colorDanger : undefined} />
+      </PopoverBtn>
+    </Tooltip>
+  );
+};
+
+// In-world popover at a segment's midpoint. The collapsed marker is white when the segment
+// is visible and red when hidden; the buttons are the visibility toggle, style picker and a
+// two-press delete of the whole line.
+//
+// Position is not React state: the root registers with positionRegistry, which writes
+// left/top/transform on each GetScreenPoints push, hides the popover while its segment is
+// off-screen and scales it with camera distance.
+const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
+  const t = useT();
+  const pinned = usePinnedStyles();
+  const key = segKey(seg.lineIndex, seg.segmentIndex);
+  const popover = usePopoverHover(
+    key,
+    // Highlight just this segment, not the whole line.
+    () => cmdSetHoveredSegment(seg.lineIndex, seg.segmentIndex),
+    () => cmdSetHoveredSegment(-1, -1),
+  );
 
   // Portalled to document.body: inside GameTopRight, `position: fixed` would be relative to
   // the slot rather than the viewport (the slot probably has a transform), while the screen
@@ -230,21 +291,10 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   return createPortal(
     <PopoverRoot
       ref={(el: HTMLElement | null) => registerSegmentAnchor(key, el)}
-      onMouseEnter={() => {
-        setExpanded(true);
-        // Highlight just this segment, not the whole line.
-        cmdSetHoveredSegment(seg.lineIndex, seg.segmentIndex);
-      }}
-      onMouseLeave={() => {
-        setConfirmingDelete(false);
-        // Moving into the portalled style menu also leaves the root. Keep the buttons
-        // while the menu is open; onOpenChange collapses them when it closes.
-        if (styleOpen) return;
-        setExpanded(false);
-        cmdSetHoveredSegment(-1, -1);
-      }}
+      onMouseEnter={popover.onMouseEnter}
+      onMouseLeave={popover.onMouseLeave}
     >
-      {!showButtons ? (
+      {!popover.showButtons ? (
         <PopoverMarker $hidden={!seg.visible} />
       ) : (
         <>
@@ -265,46 +315,14 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
               options={makeLineStyleOptions(t, pinned.lineStyles)}
               onChange={(s) => cmdSetSegmentStyle(seg.lineIndex, seg.segmentIndex, s)}
               onTogglePin={cmdTogglePinLineStyle}
-              onOpenChange={(open) => {
-                setStyleOpen(open);
-                // The cursor may be over the portalled menu, outside the root, so no
-                // mouseleave will come. Collapse here; hovering again re-expands.
-                if (!open) {
-                  setExpanded(false);
-                  cmdSetHoveredSegment(-1, -1);
-                }
-              }}
+              onOpenChange={popover.onStyleOpenChange}
             />
           </PopoverDropdownWrap>
-          <Tooltip
-            content={
-              confirmingDelete ? t("line.delete.confirm.btn") : t("line.delete")
-            }
-          >
-            <PopoverBtn
-              // Red while armed, like the panel's delete confirm row.
-              $active={confirmingDelete}
-              style={
-                confirmingDelete
-                  ? {
-                      background: T.colorDangerSoft,
-                      borderColor: T.colorDanger,
-                      color: T.colorDanger,
-                    }
-                  : undefined
-              }
-              onClick={() => {
-                if (confirmingDelete) {
-                  cmdDeleteLine(seg.lineIndex);
-                  setConfirmingDelete(false);
-                } else {
-                  setConfirmingDelete(true);
-                }
-              }}
-            >
-              <Trash size={14} color={confirmingDelete ? T.colorDanger : undefined} />
-            </PopoverBtn>
-          </Tooltip>
+          <PopoverDeleteButton
+            confirm={popover.deleteConfirm}
+            label={t("line.delete")}
+            onDelete={() => cmdDeleteLine(seg.lineIndex)}
+          />
         </>
       )}
     </PopoverRoot>,
@@ -318,36 +336,19 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
   const t = useT();
   const pinned = usePinnedStyles();
   const key = areaKey(area.areaIndex);
-  const [expanded, setExpanded] = useState(false);
-  // As in SegmentPopover: keep the buttons while the portalled style menu is open.
-  const [styleOpen, setStyleOpen] = useState(false);
-  const showButtons = expanded || styleOpen;
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  useEffect(() => {
-    if (!confirmingDelete) return;
-    const id = window.setTimeout(() => setConfirmingDelete(false), POPOVER_DELETE_CONFIRM_MS);
-    return () => window.clearTimeout(id);
-  }, [confirmingDelete]);
-
-  useEffect(() => {
-    setAnchorExpanded(key, showButtons);
-  }, [key, showButtons]);
+  const popover = usePopoverHover(
+    key,
+    () => cmdSetHoveredArea(area.areaIndex),
+    () => cmdClearHoveredArea(area.areaIndex),
+  );
 
   return createPortal(
     <PopoverRoot
       ref={(el: HTMLElement | null) => registerSegmentAnchor(key, el)}
-      onMouseEnter={() => {
-        setExpanded(true);
-        cmdSetHoveredArea(area.areaIndex);
-      }}
-      onMouseLeave={() => {
-        setConfirmingDelete(false);
-        if (styleOpen) return;
-        setExpanded(false);
-        cmdClearHoveredArea(area.areaIndex);
-      }}
+      onMouseEnter={popover.onMouseEnter}
+      onMouseLeave={popover.onMouseLeave}
     >
-      {!showButtons ? (
+      {!popover.showButtons ? (
         area.visible ? (
           <AreaStylePreview styleId={area.styleId} size={12} />
         ) : (
@@ -369,39 +370,14 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
               options={makeAreaStyleOptions(t, pinned.areaStyles)}
               onChange={(s) => cmdSetAreaStyle(area.areaIndex, s)}
               onTogglePin={cmdTogglePinAreaStyle}
-              onOpenChange={(open) => {
-                setStyleOpen(open);
-                if (!open) {
-                  setExpanded(false);
-                  cmdClearHoveredArea(area.areaIndex);
-                }
-              }}
+              onOpenChange={popover.onStyleOpenChange}
             />
           </PopoverDropdownWrap>
-          <Tooltip content={confirmingDelete ? t("line.delete.confirm.btn") : t("area.delete")}>
-            <PopoverBtn
-              $active={confirmingDelete}
-              style={
-                confirmingDelete
-                  ? {
-                      background: T.colorDangerSoft,
-                      borderColor: T.colorDanger,
-                      color: T.colorDanger,
-                    }
-                  : undefined
-              }
-              onClick={() => {
-                if (confirmingDelete) {
-                  cmdDeleteArea(area.areaIndex);
-                  setConfirmingDelete(false);
-                } else {
-                  setConfirmingDelete(true);
-                }
-              }}
-            >
-              <Trash size={14} color={confirmingDelete ? T.colorDanger : undefined} />
-            </PopoverBtn>
-          </Tooltip>
+          <PopoverDeleteButton
+            confirm={popover.deleteConfirm}
+            label={t("area.delete")}
+            onDelete={() => cmdDeleteArea(area.areaIndex)}
+          />
         </>
       )}
     </PopoverRoot>,
@@ -436,6 +412,21 @@ const HotkeysFoldout = ({ defaultOpen = false }: { defaultOpen?: boolean }) => {
   );
 };
 
+// Title and close button, the same on both panel states.
+const PanelHeader = () => {
+  const t = useT();
+  return (
+    <PanelHeaderRow>
+      <PanelTitle>{t("panel.appTitle")}</PanelTitle>
+      <Tooltip content={t("panel.close.tooltip")}>
+        <CloseBtn onClick={() => cmdActivateTool()}>
+          <Cross size={10} />
+        </CloseBtn>
+      </Tooltip>
+    </PanelHeaderRow>
+  );
+};
+
 // The next step for the user in the current tool state.
 const toolStatus = (t: ReturnType<typeof useT>, state: { toolState: number; areaVertexCount: number }): string => {
   if (state.toolState === TOOL_STATE.AreaSelecting) {
@@ -455,40 +446,52 @@ const TownRoadLanePanelInner = () => {
   const [expandedLine, setExpandedLine] = useState<number>(-1);
   // Expanded area row, independent of expandedLine.
   const [expandedArea, setExpandedArea] = useState<number>(-1);
-  // Line armed for deletion by the Delete key; a second press within 3 s deletes it.
+  // Line armed for deletion by the Delete key; a second press in time deletes it.
   // DeleteLineButton shows its confirm row while this matches its line.
-  const [pendingDelete, setPendingDelete] = useState<number>(-1);
+  const keyDelete = useKeyedConfirm<number>();
   // Folded lists keep only the header (with count) and the row that is expanded or hovered
   // in the world, so a busy junction doesn't turn the panel into a wall. Kept across node
   // switches on purpose.
   const [linesFolded, setLinesFolded] = useState(false);
   const [areasFolded, setAreasFolded] = useState(false);
 
-  // A node with a single line opens with that line expanded.
-  useEffect(() => {
-    if (state.lines.length === 0) {
-      setExpandedLine(-1);
-    } else if (state.lines.length === 1) {
-      setExpandedLine(0);
-    } else if (expandedLine >= state.lines.length) {
-      setExpandedLine(-1);
+  // The expanded rows react to changes pushed by C#. They are adjusted while rendering, on
+  // the render that first sees the change, instead of in effects that would commit a frame
+  // with the stale row first. The seen values start out null so the first render applies
+  // them too.
+  const lineListKey = `${state.selectedNodeIndex}:${state.lines.length}`;
+  const areaListKey = `${state.selectedNodeIndex}:${state.areas.length}`;
+  const [seenLineListKey, setSeenLineListKey] = useState<string | null>(null);
+  const [seenAreaListKey, setSeenAreaListKey] = useState<string | null>(null);
+  const [seenClickTick, setSeenClickTick] = useState<number | null>(null);
+
+  if (lineListKey !== seenLineListKey || state.lastClickedTick !== seenClickTick) {
+    let next = expandedLine;
+    // Another node or line count: a node with a single line opens with that line expanded,
+    // and a row past the end of the list is dropped.
+    if (lineListKey !== seenLineListKey) {
+      setSeenLineListKey(lineListKey);
+      if (state.lines.length === 1) next = 0;
+      else if (next >= state.lines.length) next = -1;
     }
-  }, [state.selectedNodeIndex, state.lines.length]);
+    // A click on a line in the world expands its row, a click that hit no line collapses.
+    // The tick changes on every click, so clicking the same line again still counts.
+    if (state.lastClickedTick !== seenClickTick) {
+      setSeenClickTick(state.lastClickedTick);
+      if (state.lastClickedLine >= 0 && state.lastClickedLine < state.lines.length) {
+        next = state.lastClickedLine;
+      } else if (state.lastClickedTick > 0 && state.lastClickedLine === -1) {
+        next = -1;
+      }
+    }
+    if (next !== expandedLine) setExpandedLine(next);
+  }
 
   // Drop the expanded area row when the list shrinks below it.
-  useEffect(() => {
+  if (areaListKey !== seenAreaListKey) {
+    setSeenAreaListKey(areaListKey);
     if (expandedArea >= state.areas.length) setExpandedArea(-1);
-  }, [state.selectedNodeIndex, state.areas.length]);
-
-  // A click on a line in the world expands its row. Keyed on the tick, which changes on
-  // every click, so clicking the same line again still fires.
-  useEffect(() => {
-    if (state.lastClickedLine >= 0 && state.lastClickedLine < state.lines.length) {
-      setExpandedLine(state.lastClickedLine);
-    } else if (state.lastClickedTick > 0 && state.lastClickedLine === -1) {
-      setExpandedLine(-1);
-    }
-  }, [state.lastClickedTick]);
+  }
 
   // Panel shortcuts while a node is selected. Keys typed into text fields and combos with
   // Ctrl/Meta/Alt are left alone; those belong to the input or the game.
@@ -509,14 +512,14 @@ const TownRoadLanePanelInner = () => {
         const step = e.shiftKey ? -1 : 1;
         const next = ((cur + step) % lineCount + lineCount) % lineCount;
         setExpandedLine(next);
-        setPendingDelete(-1);
+        keyDelete.disarm();
         return;
       }
 
       // Esc: cancel a pending delete first, then collapse.
       if (e.key === "Escape") {
-        if (pendingDelete >= 0) {
-          setPendingDelete(-1);
+        if (keyDelete.armed !== null) {
+          keyDelete.disarm();
         } else if (expandedLine >= 0) {
           setExpandedLine(-1);
         }
@@ -531,12 +534,7 @@ const TownRoadLanePanelInner = () => {
 
       // Delete: the first press arms, the second deletes, as with the button.
       if (e.key === "Delete" && expandedLine >= 0) {
-        if (pendingDelete === expandedLine) {
-          cmdDeleteLine(expandedLine);
-          setPendingDelete(-1);
-        } else {
-          setPendingDelete(expandedLine);
-        }
+        keyDelete.press(expandedLine, () => cmdDeleteLine(expandedLine));
         return;
       }
 
@@ -552,14 +550,7 @@ const TownRoadLanePanelInner = () => {
 
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [state.isActive, state.selectedNodeIndex, state.lines.length, expandedLine, pendingDelete]);
-
-  // Disarm the Delete key after the same 3 s the button uses.
-  useEffect(() => {
-    if (pendingDelete < 0) return;
-    const id = window.setTimeout(() => setPendingDelete(-1), 3000);
-    return () => window.clearTimeout(id);
-  }, [pendingDelete]);
+  }, [state.isActive, state.selectedNodeIndex, state.lines.length, expandedLine, keyDelete]);
 
   if (!state.isActive) return null;
 
@@ -570,14 +561,7 @@ const TownRoadLanePanelInner = () => {
   if (state.selectedNodeIndex < 0) {
     return (
       <Panel>
-        <PanelHeaderRow>
-          <PanelTitle>{t("panel.appTitle")}</PanelTitle>
-          <Tooltip content={t("panel.close.tooltip")}>
-            <CloseBtn onClick={() => cmdActivateTool()}>
-              <Cross size={10} />
-            </CloseBtn>
-          </Tooltip>
-        </PanelHeaderRow>
+        <PanelHeader />
         <StatusRow>
           <StatusDot />
           <span>{t("panel.hint.selectNode")}</span>
@@ -598,14 +582,7 @@ const TownRoadLanePanelInner = () => {
     <>
       <Panel>
         <PanelStickyChrome>
-          <PanelHeaderRow>
-            <PanelTitle>{t("panel.appTitle")}</PanelTitle>
-            <Tooltip content={t("panel.close.tooltip")}>
-              <CloseBtn onClick={() => cmdActivateTool()}>
-                <Cross size={10} />
-              </CloseBtn>
-            </Tooltip>
-          </PanelHeaderRow>
+          <PanelHeader />
           <StatusRow>
             <StatusDot />
             <span>{toolStatus(t, state)}</span>
@@ -690,11 +667,11 @@ const TownRoadLanePanelInner = () => {
                     line={line}
                     isExpanded={expandedLine === line.lineIndex}
                     isGameHovered={state.hoveredLineInGame === line.lineIndex}
-                    isPendingDelete={pendingDelete === line.lineIndex}
+                    isPendingDelete={keyDelete.armed === line.lineIndex}
                     onToggleExpand={() =>
                       setExpandedLine(expandedLine === line.lineIndex ? -1 : line.lineIndex)
                     }
-                    onCancelPendingDelete={() => setPendingDelete(-1)}
+                    onCancelPendingDelete={keyDelete.disarm}
                   />
                 );
               })}
@@ -841,12 +818,7 @@ const AreaRow = ({
   onToggleExpand: () => void;
 }) => {
   const t = useT();
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  useEffect(() => {
-    if (!confirmingDelete) return;
-    const id = window.setTimeout(() => setConfirmingDelete(false), 3000);
-    return () => window.clearTimeout(id);
-  }, [confirmingDelete]);
+  const deleteConfirm = useConfirm();
 
   return (
     <LineRowOuter
@@ -888,21 +860,16 @@ const AreaRow = ({
             <span>{area.visible ? t("area.hide.tooltip") : t("area.show.tooltip")}</span>
           </Btn>
         </Tooltip>
-        {!confirmingDelete ? (
-          <Btn $danger $full onClick={() => setConfirmingDelete(true)}>
+        {!deleteConfirm.armed ? (
+          <Btn $danger $full onClick={deleteConfirm.arm}>
             <Trash size={12} color={T.colorDanger} />
             <span>{t("area.delete")}</span>
           </Btn>
         ) : (
-          <ConfirmRow>
-            <Btn onClick={() => setConfirmingDelete(false)}>
-              <span>{t("line.delete.cancel")}</span>
-            </Btn>
-            <Btn $danger onClick={() => { cmdDeleteArea(area.areaIndex); setConfirmingDelete(false); }}>
-              <Trash size={12} color={T.colorDanger} />
-              <span>{t("line.delete.confirm.btn")}</span>
-            </Btn>
-          </ConfirmRow>
+          <ConfirmDeleteRow
+            onCancel={deleteConfirm.disarm}
+            onConfirm={() => deleteConfirm.confirm(() => cmdDeleteArea(area.areaIndex))}
+          />
         )}
       </LineBody>
     </LineRowOuter>
@@ -913,17 +880,12 @@ const AreaRow = ({
 // destructive, so it needs the same two-step confirm as deletes.
 const ResetNodeButton = () => {
   const t = useT();
-  const [confirming, setConfirming] = useState(false);
-  useEffect(() => {
-    if (!confirming) return;
-    const id = window.setTimeout(() => setConfirming(false), 3000);
-    return () => window.clearTimeout(id);
-  }, [confirming]);
+  const resetConfirm = useConfirm();
 
-  if (!confirming) {
+  if (!resetConfirm.armed) {
     return (
       <Tooltip content={t("node.reset.tooltip")}>
-        <Btn $danger $full onClick={() => setConfirming(true)}>
+        <Btn $danger $full onClick={resetConfirm.arm}>
           <Trash size={12} color={T.colorDanger} />
           <span>{t("node.reset")}</span>
         </Btn>
@@ -931,22 +893,30 @@ const ResetNodeButton = () => {
     );
   }
   return (
+    <ConfirmDeleteRow
+      onCancel={resetConfirm.disarm}
+      onConfirm={() => resetConfirm.confirm(cmdResetNode)}
+    />
+  );
+};
+
+// Second step of a panel delete: the first click swaps the button for this row, which goes
+// back after CONFIRM_TIMEOUT_MS. Inline rather than a modal, because overlay positioning in
+// cohtml is fragile and the item stays visible above while confirming.
+const ConfirmDeleteRow = ({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) => {
+  const t = useT();
+  return (
     <ConfirmRow>
-      <Btn onClick={() => setConfirming(false)}>
+      <Btn onClick={onCancel}>
         <span>{t("line.delete.cancel")}</span>
       </Btn>
-      <Btn $danger onClick={() => { cmdResetNode(); setConfirming(false); }}>
+      <Btn $danger onClick={onConfirm}>
         <Trash size={12} color={T.colorDanger} />
         <span>{t("line.delete.confirm.btn")}</span>
       </Btn>
     </ConfirmRow>
   );
 };
-
-// Two-step delete: the first click shows a confirm row, which resets after 3 seconds. Inline
-// rather than a modal, because overlay positioning in cohtml is fragile and the line stays
-// visible above while confirming.
-const DELETE_CONFIRM_TIMEOUT_MS = 3000;
 
 const DeleteLineButton = ({
   lineIndex,
@@ -958,25 +928,20 @@ const DeleteLineButton = ({
   onKeyboardCancel: () => void;
 }) => {
   const t = useT();
-  // Armed either by a click here or by the Delete key through keyboardConfirming.
-  const [mouseConfirming, setMouseConfirming] = useState(false);
-  const confirming = mouseConfirming || keyboardConfirming;
+  // Armed either by a click here or by the Delete key through keyboardConfirming. Only the
+  // click arm lives here; the parent owns and times out the keyboard one.
+  const clickConfirm = useConfirm();
 
-  // Only the mouse state times out here; the parent resets keyboardConfirming itself.
-  useEffect(() => {
-    if (!mouseConfirming) return;
-    const id = window.setTimeout(() => setMouseConfirming(false), DELETE_CONFIRM_TIMEOUT_MS);
-    return () => window.clearTimeout(id);
-  }, [mouseConfirming]);
-
-  const cancel = () => {
-    setMouseConfirming(false);
+  // Clears both arms. After a delete the next line takes over this row's index, and must
+  // not inherit the armed state.
+  const disarm = () => {
+    clickConfirm.disarm();
     if (keyboardConfirming) onKeyboardCancel();
   };
 
-  if (!confirming) {
+  if (!clickConfirm.armed && !keyboardConfirming) {
     return (
-      <Btn $danger $full onClick={() => setMouseConfirming(true)}>
+      <Btn $danger $full onClick={clickConfirm.arm}>
         <Trash size={12} color={T.colorDanger} />
         <span>{t("line.delete")}</span>
       </Btn>
@@ -984,15 +949,13 @@ const DeleteLineButton = ({
   }
 
   return (
-    <ConfirmRow>
-      <Btn onClick={cancel}>
-        <span>{t("line.delete.cancel")}</span>
-      </Btn>
-      <Btn $danger onClick={() => cmdDeleteLine(lineIndex)}>
-        <Trash size={12} color={T.colorDanger} />
-        <span>{t("line.delete.confirm.btn")}</span>
-      </Btn>
-    </ConfirmRow>
+    <ConfirmDeleteRow
+      onCancel={disarm}
+      onConfirm={() => {
+        disarm();
+        cmdDeleteLine(lineIndex);
+      }}
+    />
   );
 };
 

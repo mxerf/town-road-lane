@@ -1,4 +1,6 @@
+import { useMemo } from "react";
 import { bindValue, useValue, trigger } from "cs2/api";
+import { BINDING_GROUP } from "../bindingGroup";
 
 // Mirrors PanelStateVM published by the C# `TownRoadLaneUISystem`. The binding is typed
 // through GenericUIWriter, so field names are the contract. C# pushes a new object only when
@@ -13,7 +15,7 @@ export interface SegmentVM {
   visible: boolean;
   // Starts as the line's style; the user can override single segments in the popover.
   style: number;
-  lengthM: number;        // approximate chord length in metres
+  lengthM: number;        // arc length in metres along the segment's Bezier
 }
 
 export interface LineVM {
@@ -88,107 +90,113 @@ const EMPTY: ToolStateVM = {
   areas: [],
 };
 
-const STATE_BINDING = bindValue<ToolStateVM>("TownRoadLane", "GetPanelState", EMPTY);
+const STATE_BINDING = bindValue<ToolStateVM>(BINDING_GROUP, "GetPanelState", EMPTY);
 
+// GenericUIWriter always writes every field and C# initialises the arrays, so only a null or
+// undefined push needs guarding.
+const normalizeToolState = (state: ToolStateVM | null | undefined): ToolStateVM =>
+  state
+    ? {
+        ...state,
+        lines: Array.isArray(state.lines) ? state.lines : [],
+        areas: Array.isArray(state.areas) ? state.areas : [],
+      }
+    : EMPTY;
+
+// useValue returns the same object until C# pushes a new one, so memoizing on it keeps the
+// result stable between pushes.
 export const useToolState = (): ToolStateVM => {
   const state = useValue(STATE_BINDING);
-  // GenericUIWriter always writes every field and C# initialises the arrays, so only a
-  // null or undefined push needs guarding.
-  if (!state) return EMPTY;
-  return {
-    ...state,
-    lines: Array.isArray(state.lines) ? state.lines : [],
-    areas: Array.isArray(state.areas) ? state.areas : [],
-  };
+  return useMemo(() => normalizeToolState(state), [state]);
 };
 
 // Commands to C#.
 
 export const cmdToggleSegment = (lineIndex: number, segmentIndex: number) => {
-  trigger("TownRoadLane", "ToggleSegment", lineIndex, segmentIndex);
+  trigger(BINDING_GROUP, "ToggleSegment", lineIndex, segmentIndex);
 };
 
 export const cmdSetLineStyle = (lineIndex: number, style: number) => {
-  trigger("TownRoadLane", "SetLineStyle", lineIndex, style);
+  trigger(BINDING_GROUP, "SetLineStyle", lineIndex, style);
 };
 
 // Per-segment style override; the line's own style stays unchanged.
 export const cmdSetSegmentStyle = (lineIndex: number, segmentIndex: number, style: number) => {
-  trigger("TownRoadLane", "SetSegmentStyle", lineIndex, segmentIndex, style);
+  trigger(BINDING_GROUP, "SetSegmentStyle", lineIndex, segmentIndex, style);
 };
 
 export const cmdDeleteLine = (lineIndex: number) => {
-  trigger("TownRoadLane", "DeleteLine", lineIndex);
+  trigger(BINDING_GROUP, "DeleteLine", lineIndex);
 };
 
 // percent is 0..100; C# maps it onto the Bezier pull factor range 0..0.8.
 export const cmdSetLineCurvature = (lineIndex: number, percent: number) => {
-  trigger("TownRoadLane", "SetLineCurvature", lineIndex, percent);
+  trigger(BINDING_GROUP, "SetLineCurvature", lineIndex, percent);
 };
 
 // Toggles the "hide vanilla markings" override on the selected node. Works with no lines
 // drawn.
 export const cmdToggleVanillaMarkings = () => {
-  trigger("TownRoadLane", "ToggleVanillaMarkings");
+  trigger(BINDING_GROUP, "ToggleVanillaMarkings");
 };
 
 // Toggles the marking tool, same as Ctrl+M. Used by the toolbar button in GameTopLeft.
 export const cmdActivateTool = () => {
-  trigger("TownRoadLane", "ActivateTool");
+  trigger(BINDING_GROUP, "ActivateTool");
 };
 
 // Style for the next line drawn; the panel counterpart of the Y hotkey.
 export const cmdSetCurrentStyle = (style: number) => {
-  trigger("TownRoadLane", "SetCurrentStyle", style);
+  trigger(BINDING_GROUP, "SetCurrentStyle", style);
 };
 
 // Fill style for the next area closed; the panel counterpart of the U hotkey.
 export const cmdSetCurrentAreaStyle = (styleId: number) => {
-  trigger("TownRoadLane", "SetCurrentAreaStyle", styleId);
+  trigger(BINDING_GROUP, "SetCurrentAreaStyle", styleId);
 };
 
 // Switches between line drawing (NodeSelected) and area drawing (AreaSelecting), like the
 // A hotkey. Leaving area mode drops an unfinished contour.
 export const cmdToggleAreaMode = () => {
-  trigger("TownRoadLane", "ToggleAreaMode");
+  trigger(BINDING_GROUP, "ToggleAreaMode");
 };
 
 export const cmdSetAreaStyle = (areaIndex: number, styleId: number) => {
-  trigger("TownRoadLane", "SetAreaStyle", areaIndex, styleId);
+  trigger(BINDING_GROUP, "SetAreaStyle", areaIndex, styleId);
 };
 
 export const cmdToggleAreaVisible = (areaIndex: number) => {
-  trigger("TownRoadLane", "ToggleAreaVisible", areaIndex);
+  trigger(BINDING_GROUP, "ToggleAreaVisible", areaIndex);
 };
 
 // The area's pieces and vanilla Area entities go away on the next tick.
 export const cmdDeleteArea = (areaIndex: number) => {
-  trigger("TownRoadLane", "DeleteArea", areaIndex);
+  trigger(BINDING_GROUP, "DeleteArea", areaIndex);
 };
 
 // Removes all lines and areas from the selected node and clears the vanilla-hide override.
 export const cmdResetNode = () => {
-  trigger("TownRoadLane", "ResetNode");
+  trigger(BINDING_GROUP, "ResetNode");
 };
 
 // Line row hovered in the panel; MarkingOverlaySystem draws that line thicker and brighter
 // on the road. Pass -1 on leave.
 export const cmdSetHoveredLine = (lineIndex: number) => {
-  trigger("TownRoadLane", "SetHoveredLine", lineIndex);
+  trigger(BINDING_GROUP, "SetHoveredLine", lineIndex);
 };
 
 // Like cmdSetHoveredLine, but highlights a single segment. Pass (-1, -1) on leave.
 export const cmdSetHoveredSegment = (lineIndex: number, segmentIndex: number) => {
-  trigger("TownRoadLane", "SetHoveredSegment", lineIndex, segmentIndex);
+  trigger(BINDING_GROUP, "SetHoveredSegment", lineIndex, segmentIndex);
 };
 
 // Area counterpart of cmdSetHoveredLine: the overlay outlines every piece of the area.
 export const cmdSetHoveredArea = (areaIndex: number) => {
-  trigger("TownRoadLane", "SetHoveredArea", areaIndex);
+  trigger(BINDING_GROUP, "SetHoveredArea", areaIndex);
 };
 
 // Passes the row's own index, and C# clears the hover only if that index still holds it:
 // cohtml can deliver the next row's mouseenter before this row's mouseleave.
 export const cmdClearHoveredArea = (areaIndex: number) => {
-  trigger("TownRoadLane", "ClearHoveredArea", areaIndex);
+  trigger(BINDING_GROUP, "ClearHoveredArea", areaIndex);
 };

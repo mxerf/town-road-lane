@@ -4,9 +4,10 @@
 // dictionary needs. Same approach as TrafficToolEssentials' "C2VM.TLE/GetLocale" binding.
 
 import { bindValue, useValue } from "cs2/api";
+import { BINDING_GROUP } from "../bindingGroup";
 import { STRINGS, StringKey, Locale, DEFAULT_LOCALE, resolveLocale } from "./strings";
 
-const LOCALE_BINDING = bindValue<string>("TownRoadLane", "GetLocale", DEFAULT_LOCALE);
+const LOCALE_BINDING = bindValue<string>(BINDING_GROUP, "GetLocale", DEFAULT_LOCALE);
 
 const interpolate = (template: string, params?: Record<string, string | number>): string => {
   if (!params) return template;

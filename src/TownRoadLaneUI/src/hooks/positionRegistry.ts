@@ -1,4 +1,5 @@
 import { bindValue } from "cs2/api";
+import { BINDING_GROUP } from "../bindingGroup";
 
 // World-to-screen popover positioning outside React (same approach as TrafficToolEssentials'
 // positionRegistry). C# publishes `GetScreenPoints` on every tick the camera moves, which is
@@ -28,7 +29,7 @@ export const areaKey = (areaIndex: number): string => `area:${areaIndex}`;
 const pointKey = (p: SegmentPointVM): string =>
   p.areaIndex >= 0 ? areaKey(p.areaIndex) : segKey(p.lineIndex, p.segmentIndex);
 
-const POINTS_BINDING = bindValue<SegmentPointVM[]>("TownRoadLane", "GetScreenPoints", []);
+const POINTS_BINDING = bindValue<SegmentPointVM[]>(BINDING_GROUP, "GetScreenPoints", []);
 
 const anchors = new Map<string, HTMLElement>();
 
