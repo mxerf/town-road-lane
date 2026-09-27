@@ -235,9 +235,9 @@ namespace TownRoadLane
             ushort idxBase = (ushort)slotBase;
             var lane = new Lane
             {
-                m_StartNode  = new PathNode(new PathNode(node, idxBase),               secondaryNode: true),
+                m_StartNode = new PathNode(new PathNode(node, idxBase), secondaryNode: true),
                 m_MiddleNode = new PathNode(new PathNode(node, (ushort)(idxBase + 1)), secondaryNode: true),
-                m_EndNode    = new PathNode(new PathNode(node, (ushort)(idxBase + 2)), secondaryNode: true),
+                m_EndNode = new PathNode(new PathNode(node, (ushort)(idxBase + 2)), secondaryNode: true),
             };
 
             Entity e = ecb.CreateEntity(archetype);

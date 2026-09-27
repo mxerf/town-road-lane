@@ -17,11 +17,11 @@ namespace TownRoadLane
     public struct TRLSegmentLink : IComponentData
     {
         public Entity node;
-        public int    lineIndex;
-        public int    segmentIndex;
+        public int lineIndex;
+        public int segmentIndex;
         // 0 for the base copy, 1+ for the extra copies of styles drawn in several passes (see
         // MarkingStyleExtensions.DrawPasses). Part of the key, so the copies are not treated as
         // duplicates of each other.
-        public int    passIndex;
+        public int passIndex;
     }
 }

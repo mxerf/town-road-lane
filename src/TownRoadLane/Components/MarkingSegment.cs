@@ -15,16 +15,16 @@ namespace TownRoadLane
     [InternalBufferCapacity(0)]
     public struct MarkingSegment : IBufferElementData, ISerializable
     {
-        public int   lineIndex;
+        public int lineIndex;
 
         // Parameter range along the parent line's Bezier curve, [tStart, tEnd] ⊂ [0, 1].
         public float tStart;
         public float tEnd;
 
-        public bool  visible;
+        public bool visible;
 
         // Starts as the parent line's style and can be changed per segment.
-        public int   style;
+        public int style;
 
         private const int kVersion = 2;
 

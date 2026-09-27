@@ -16,16 +16,16 @@ namespace TownRoadLane
     public struct MarkingLine : IBufferElementData, ISerializable
     {
         public Entity sourceEdge;
-        public int    sourceGapIndex;
+        public int sourceGapIndex;
         public Entity targetEdge;
-        public int    targetGapIndex;
+        public int targetGapIndex;
 
         // Default style for new segments of this line (a MarkingStyle value).
-        public int    style;
+        public int style;
 
         // Bezier control-point offset as a fraction of the chord (see MarkingCurveBuilder):
         // 0 = straight, 0.4 = default arc, 0.55 ≈ quarter circle.
-        public float  curvature;
+        public float curvature;
 
         private const int kVersion = 4;
 

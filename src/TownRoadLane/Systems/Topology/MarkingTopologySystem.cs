@@ -397,7 +397,7 @@ namespace TownRoadLane
             while (i < boundaries.Count - 1)
             {
                 float3 pPrev = MathUtils.Position(curve, boundaries[i - 1]);
-                float3 pCur  = MathUtils.Position(curve, boundaries[i]);
+                float3 pCur = MathUtils.Position(curve, boundaries[i]);
                 if (DistSqXZ(pPrev, pCur) < minSq)
                 {
                     boundaries.RemoveAt(i);
@@ -411,7 +411,7 @@ namespace TownRoadLane
             {
                 int lastIdx = boundaries.Count - 1;
                 float3 pPrev = MathUtils.Position(curve, boundaries[lastIdx - 1]);
-                float3 pEnd  = MathUtils.Position(curve, boundaries[lastIdx]);
+                float3 pEnd = MathUtils.Position(curve, boundaries[lastIdx]);
                 if (DistSqXZ(pPrev, pEnd) < minSq) boundaries.RemoveAt(lastIdx - 1);
             }
         }

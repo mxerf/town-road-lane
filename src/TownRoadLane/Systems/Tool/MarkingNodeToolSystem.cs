@@ -50,7 +50,7 @@ namespace TownRoadLane
         // Candidate under the cursor in AreaSelecting.
         private AreaCandidate _areaHover = AreaCandidate.None;
         private int _sourceIdx = -1;
-        private int _hoverIdx  = -1;
+        private int _hoverIdx = -1;
         private int _lastLoggedHoverIdx = -2; // -2 = "never logged"; -1 = "no hover"
         private float3 _cursorWorldPos;
         private Entity _hoveredNode; // raycast result while tool is active; Entity.Null when no node under cursor
@@ -412,7 +412,7 @@ namespace TownRoadLane
             {
                 var p = buf[i];
                 bool sameDirection = LineStartsAt(p, src) && LineEndsAt(p, dst);
-                bool swappedSides  = LineStartsAt(p, dst) && LineEndsAt(p, src);
+                bool swappedSides = LineStartsAt(p, dst) && LineEndsAt(p, src);
                 if (sameDirection || swappedSides)
                 {
                     log.Debug($"tool: toggled OFF line #{i} on node #{_selectedNode.Index}");
@@ -425,8 +425,10 @@ namespace TownRoadLane
 
             buf.Add(new MarkingLine
             {
-                sourceEdge = src.edge, sourceGapIndex = src.gapIndex,
-                targetEdge = dst.edge, targetGapIndex = dst.gapIndex,
+                sourceEdge = src.edge,
+                sourceGapIndex = src.gapIndex,
+                targetEdge = dst.edge,
+                targetGapIndex = dst.gapIndex,
                 style = (int)_currentStyle,
                 curvature = MarkingCurveBuilder.AdaptivePullFactor(src, dst),
             });

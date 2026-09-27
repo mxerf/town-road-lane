@@ -12,12 +12,12 @@ namespace TownRoadLane
     [Flags]
     public enum MarkingCategory : uint
     {
-        None             = 0,
+        None = 0,
         // Categories the mod adds on top of vanilla.
-        EdgeLine         = 1u << 0,   // curb-side edge line on 3 m city drive lanes
-        ParkingLine      = 1u << 1,   // longitudinal line along parallel street parking
-        ParkingEnd       = 1u << 2,   // perpendicular tick at start+end of a parking block
-        All              = 0xFFFFFFFFu,
+        EdgeLine = 1u << 0,   // curb-side edge line on 3 m city drive lanes
+        ParkingLine = 1u << 1,   // longitudinal line along parallel street parking
+        ParkingEnd = 1u << 2,   // perpendicular tick at start+end of a parking block
+        All = 0xFFFFFFFFu,
     }
 
     /// <summary>

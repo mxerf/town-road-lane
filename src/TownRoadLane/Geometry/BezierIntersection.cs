@@ -30,8 +30,8 @@ namespace TownRoadLane
 
         public readonly struct Hit
         {
-            public readonly float  tA;     // parameter on curve A, [0, 1]
-            public readonly float  tB;     // parameter on curve B, [0, 1]
+            public readonly float tA;     // parameter on curve A, [0, 1]
+            public readonly float tB;     // parameter on curve B, [0, 1]
             public readonly float3 point;  // world-space point, Y averaged between the two curves
 
             public Hit(float tA, float tB, float3 point) { this.tA = tA; this.tB = tB; this.point = point; }

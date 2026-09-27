@@ -16,10 +16,10 @@ namespace TownRoadLane
     public struct MarkingPair : IBufferElementData, ISerializable
     {
         public Entity sourceEdge;
-        public int    sourceGapIndex;
+        public int sourceGapIndex;
 
         public Entity targetEdge;
-        public int    targetGapIndex;
+        public int targetGapIndex;
 
         // Version 1 had a different layout that never shipped, so only version 2 is read.
         private const int kVersion = 2;

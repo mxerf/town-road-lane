@@ -239,42 +239,42 @@ namespace TownRoadLane
         /// <summary>Resolves the chosen edge-line style to a render-prefab name (vanilla or G87).</summary>
         public string EdgeLineMeshName() => EdgeLineStyle switch
         {
-            EdgeLineStyleEnum.WhiteSolid          => "White Solid Line Mesh",
-            EdgeLineStyleEnum.WhiteSolidThick     => "White Solid Line Mesh - Thick",
-            EdgeLineStyleEnum.WhiteDashed         => "White Dashed Line Mesh",
-            EdgeLineStyleEnum.YellowSolid         => "Yellow Solid Line Mesh",
-            EdgeLineStyleEnum.WhiteSolid_G87      => kG87 + "UK Carriageway Line White NetLaneDecal_RenderPrefab",
-            EdgeLineStyleEnum.WhiteDashed_G87     => kG87 + "UK Carriageway Line White Dashed NetLaneDecal_RenderPrefab",
-            EdgeLineStyleEnum.YellowSolid_G87     => kG87 + "UK Carriageway Line Yellow NetLaneDecal_RenderPrefab",
+            EdgeLineStyleEnum.WhiteSolid => "White Solid Line Mesh",
+            EdgeLineStyleEnum.WhiteSolidThick => "White Solid Line Mesh - Thick",
+            EdgeLineStyleEnum.WhiteDashed => "White Dashed Line Mesh",
+            EdgeLineStyleEnum.YellowSolid => "Yellow Solid Line Mesh",
+            EdgeLineStyleEnum.WhiteSolid_G87 => kG87 + "UK Carriageway Line White NetLaneDecal_RenderPrefab",
+            EdgeLineStyleEnum.WhiteDashed_G87 => kG87 + "UK Carriageway Line White Dashed NetLaneDecal_RenderPrefab",
+            EdgeLineStyleEnum.YellowSolid_G87 => kG87 + "UK Carriageway Line Yellow NetLaneDecal_RenderPrefab",
             _ => "White Solid Line Mesh",
         };
 
         /// <summary>Resolves the chosen longitudinal parking-line style to a render-prefab name (vanilla or G87).</summary>
         public string ParkingLineMeshName() => ParkingLineStyle switch
         {
-            ParkingLineStyleEnum.WhiteDashedDense   => "White Dashed Line Mesh - Dense",
-            ParkingLineStyleEnum.WhiteDashed        => "White Dashed Line Mesh",
-            ParkingLineStyleEnum.WhiteSolid         => "White Solid Line Mesh",
-            ParkingLineStyleEnum.YellowDashed       => "Yellow Dashed Line Mesh - Long",
-            ParkingLineStyleEnum.YellowSolid        => "Yellow Solid Line Mesh",
-            ParkingLineStyleEnum.WhiteSolid_G87     => kG87 + "UK Carriageway Line White NetLaneDecal_RenderPrefab",
-            ParkingLineStyleEnum.WhiteDashed_G87    => kG87 + "UK Carriageway Line White Dashed NetLaneDecal_RenderPrefab",
-            ParkingLineStyleEnum.YellowSolid_G87    => kG87 + "UK Carriageway Line Yellow NetLaneDecal_RenderPrefab",
-            ParkingLineStyleEnum.YellowDashed_G87   => kG87 + "UK Carriageway Line Yellow Dashed NetLaneDecal_RenderPrefab",
-            ParkingLineStyleEnum.BlueSolid_G87      => kG87 + "RM Line Blue NetLaneDecal_RenderPrefab",
-            ParkingLineStyleEnum.BlueDashed_G87     => kG87 + "RM Line Blue Dashed NetLaneDecal_RenderPrefab",
+            ParkingLineStyleEnum.WhiteDashedDense => "White Dashed Line Mesh - Dense",
+            ParkingLineStyleEnum.WhiteDashed => "White Dashed Line Mesh",
+            ParkingLineStyleEnum.WhiteSolid => "White Solid Line Mesh",
+            ParkingLineStyleEnum.YellowDashed => "Yellow Dashed Line Mesh - Long",
+            ParkingLineStyleEnum.YellowSolid => "Yellow Solid Line Mesh",
+            ParkingLineStyleEnum.WhiteSolid_G87 => kG87 + "UK Carriageway Line White NetLaneDecal_RenderPrefab",
+            ParkingLineStyleEnum.WhiteDashed_G87 => kG87 + "UK Carriageway Line White Dashed NetLaneDecal_RenderPrefab",
+            ParkingLineStyleEnum.YellowSolid_G87 => kG87 + "UK Carriageway Line Yellow NetLaneDecal_RenderPrefab",
+            ParkingLineStyleEnum.YellowDashed_G87 => kG87 + "UK Carriageway Line Yellow Dashed NetLaneDecal_RenderPrefab",
+            ParkingLineStyleEnum.BlueSolid_G87 => kG87 + "RM Line Blue NetLaneDecal_RenderPrefab",
+            ParkingLineStyleEnum.BlueDashed_G87 => kG87 + "RM Line Blue Dashed NetLaneDecal_RenderPrefab",
             _ => "White Dashed Line Mesh - Dense",
         };
 
         /// <summary>Resolves the chosen end-tick style to a render-prefab name (vanilla or G87); null means no end ticks.</summary>
         public string ParkingEndMeshName() => ParkingEndStyle switch
         {
-            ParkingEndStyleEnum.None                => null,
-            ParkingEndStyleEnum.WhiteSolid          => "White Solid Line Mesh",
-            ParkingEndStyleEnum.WhiteSolidThick     => "White Solid Line Mesh - Thick",
-            ParkingEndStyleEnum.WhiteTerminal_G87   => kG87Dec + "UK Terminal Line White Decal_RenderPrefab",
-            ParkingEndStyleEnum.YellowTerminal_G87  => kG87Dec + "UK Terminal Line Yellow Decal_RenderPrefab",
-            ParkingEndStyleEnum.BlueSolid_G87       => kG87 + "RM Line Blue NetLaneDecal_RenderPrefab",
+            ParkingEndStyleEnum.None => null,
+            ParkingEndStyleEnum.WhiteSolid => "White Solid Line Mesh",
+            ParkingEndStyleEnum.WhiteSolidThick => "White Solid Line Mesh - Thick",
+            ParkingEndStyleEnum.WhiteTerminal_G87 => kG87Dec + "UK Terminal Line White Decal_RenderPrefab",
+            ParkingEndStyleEnum.YellowTerminal_G87 => kG87Dec + "UK Terminal Line Yellow Decal_RenderPrefab",
+            ParkingEndStyleEnum.BlueSolid_G87 => kG87 + "RM Line Blue NetLaneDecal_RenderPrefab",
             _ => "White Solid Line Mesh",
         };
 

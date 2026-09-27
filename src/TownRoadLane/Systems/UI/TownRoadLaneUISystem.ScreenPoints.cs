@@ -61,7 +61,11 @@ namespace TownRoadLane
                         float scale = PopoverScale(screen.z);
                         points.Add(new SegmentPointVM
                         {
-                            lineIndex = i, segmentIndex = segmentIndex, x = x, y = y, scale = scale,
+                            lineIndex = i,
+                            segmentIndex = segmentIndex,
+                            x = x,
+                            y = y,
+                            scale = scale,
                         });
                         hash.Add(i);
                         hash.Add(segmentIndex);
@@ -97,7 +101,12 @@ namespace TownRoadLane
                     float scale = PopoverScale(screen.z);
                     points.Add(new SegmentPointVM
                     {
-                        lineIndex = -1, segmentIndex = -1, areaIndex = a, x = x, y = y, scale = scale,
+                        lineIndex = -1,
+                        segmentIndex = -1,
+                        areaIndex = a,
+                        x = x,
+                        y = y,
+                        scale = scale,
                     });
                     hash.Add(0x41524541u); // 'AREA', keeps area points apart from (line, seg) pairs
                     hash.Add(a);

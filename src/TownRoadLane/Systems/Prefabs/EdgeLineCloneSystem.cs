@@ -40,29 +40,29 @@ namespace TownRoadLane
         private struct StyleRecipe
         {
             public MarkingStyle style;
-            public bool         isNA;
-            public string       sourcePrefabName;
-            public string       cloneName;
-            public string       fallbackMesh;
+            public bool isNA;
+            public string sourcePrefabName;
+            public string cloneName;
+            public string fallbackMesh;
             // True for the auto edge line: hosted on the city lanes, mesh from the "Edge line style"
             // setting, not registered as a tool style. False for tool styles: the clone is only a
             // prefab for spawned sublanes and must host nothing, otherwise the vanilla secondary
             // lane pass draws it on every city road (the dashed styles are cloned from the vanilla
             // lane divider 'Car Lane Line').
-            public bool         hostOnCityLanes;
+            public bool hostOnCityLanes;
             // True for the US-style yellow left edge line: hosted on the city lanes in m_RightLanes
             // only (the lane's left edge, see the side note in ApplyOrUpdate) with
             // canFlipSides=false, while both EdgeLineEnabled and YellowLeftLineEnabled are on.
             // Mutually exclusive with hostOnCityLanes.
-            public bool         hostYellowLeft;
+            public bool hostYellowLeft;
         }
 
         // G87 mesh names (the same prefix appears in Setting.cs). Without G87 they do not resolve
         // and the clone keeps the source prefab's vanilla mesh.
         private const string kG87Prefix = "G87 UK Road Markings RoadMarking G87 ";
-        private const string kG87SolidMesh        = kG87Prefix + "UK Carriageway Line White NetLaneDecal_RenderPrefab";
-        private const string kG87DashedMesh       = kG87Prefix + "UK Carriageway Line White Dashed NetLaneDecal_RenderPrefab";
-        private const string kG87YellowMesh       = kG87Prefix + "UK Carriageway Line Yellow NetLaneDecal_RenderPrefab";
+        private const string kG87SolidMesh = kG87Prefix + "UK Carriageway Line White NetLaneDecal_RenderPrefab";
+        private const string kG87DashedMesh = kG87Prefix + "UK Carriageway Line White Dashed NetLaneDecal_RenderPrefab";
+        private const string kG87YellowMesh = kG87Prefix + "UK Carriageway Line Yellow NetLaneDecal_RenderPrefab";
         private const string kG87YellowDashedMesh = kG87Prefix + "UK Carriageway Line Yellow Dashed NetLaneDecal_RenderPrefab";
         // From the "[G87] Vanilla Curb" pack, a dependency on Paradox Mods. Manual installs may lack
         // it; the clone then keeps the source prefab's mesh.
@@ -312,7 +312,7 @@ namespace TownRoadLane
             var arr = new SecondaryLaneInfo[lanes.Count * 2];
             for (int i = 0; i < lanes.Count; i++)
             {
-                arr[i * 2]     = new SecondaryLaneInfo { m_Lane = lanes[i], m_RequireSafe = true };
+                arr[i * 2] = new SecondaryLaneInfo { m_Lane = lanes[i], m_RequireSafe = true };
                 arr[i * 2 + 1] = new SecondaryLaneInfo { m_Lane = lanes[i], m_RequireMerge = true, m_RequireSafeMaster = true };
             }
             return arr;

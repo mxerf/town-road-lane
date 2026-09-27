@@ -1,0 +1,37 @@
+# Code checks that don't need the game: C# formatting against .editorconfig and a type check of
+# the UI. The mod itself only builds on Windows with the game's modding toolchain.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  csharp-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: dotnet format (whitespace)
+        run: dotnet format whitespace src/TownRoadLane --folder --verify-no-changes
+
+  ui-typecheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/TownRoadLaneUI
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: src/TownRoadLaneUI/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck

@@ -23,7 +23,7 @@ namespace TownRoadLane
     public struct MarkingEndpoint
     {
         public Entity edge;        // road edge this endpoint sits on
-        public int    gapIndex;    // see the summary for the numbering
+        public int gapIndex;    // see the summary for the numbering
         public float3 position;    // world-space point on the node-side cap of the edge
         public float2 tangent;     // normalized horizontal tangent into the edge, away from the node
     }
@@ -146,7 +146,7 @@ namespace TownRoadLane
         // solid stretch of a lane divider before the stop line, and as a usable row behind the
         // deformed cap of junctions stretched with Node Controller. gapIndex = kSetbackGapBase +
         // main gap.
-        private const int   kSetbackGapBase   = 2000;
+        private const int kSetbackGapBase = 2000;
         private const float kSetbackDistanceM = 8f;
 
         /// <summary>
@@ -234,7 +234,7 @@ namespace TownRoadLane
 
                 var edge = em.GetComponentData<Edge>(edgeEntity);
                 bool nodeIsStart = edge.m_Start == node;
-                bool nodeIsEnd   = edge.m_End == node;
+                bool nodeIsEnd = edge.m_End == node;
                 if (!nodeIsStart && !nodeIsEnd) continue;
 
                 var geom = em.GetComponentData<EdgeGeometry>(edgeEntity);
@@ -242,12 +242,12 @@ namespace TownRoadLane
                 float3 leftPt, rightPt;
                 if (nodeIsStart)
                 {
-                    leftPt  = geom.m_Start.m_Left.a;
+                    leftPt = geom.m_Start.m_Left.a;
                     rightPt = geom.m_Start.m_Right.a;
                 }
                 else
                 {
-                    leftPt  = geom.m_End.m_Left.d;
+                    leftPt = geom.m_End.m_Left.d;
                     rightPt = geom.m_End.m_Right.d;
                 }
                 kerbList.Add((edgeEntity, leftPt));
@@ -332,7 +332,7 @@ namespace TownRoadLane
 
             var edge = em.GetComponentData<Edge>(edgeEntity);
             bool nodeIsStart = edge.m_Start == node;
-            bool nodeIsEnd   = edge.m_End == node;
+            bool nodeIsEnd = edge.m_End == node;
             if (!nodeIsStart && !nodeIsEnd) return;
 
             var composition = em.GetComponentData<Composition>(edgeEntity);
@@ -352,18 +352,18 @@ namespace TownRoadLane
             Bezier4x3 capLeftCurve, capRightCurve;
             if (nodeIsStart)
             {
-                capLeftCurve  = edgeGeom.m_Start.m_Left;
+                capLeftCurve = edgeGeom.m_Start.m_Left;
                 capRightCurve = edgeGeom.m_Start.m_Right;
             }
             else
             {
-                capLeftCurve  = edgeGeom.m_End.m_Left;
+                capLeftCurve = edgeGeom.m_End.m_Left;
                 capRightCurve = edgeGeom.m_End.m_Right;
             }
             // The cross-section at the node is the chord between the left and right kerb curves:
             // their .a points at the start cap, their .d points at the end cap. Endpoints are
             // placed along it by lateral fraction.
-            float3 leftAtNode  = nodeIsStart ? capLeftCurve.a  : capLeftCurve.d;
+            float3 leftAtNode = nodeIsStart ? capLeftCurve.a : capLeftCurve.d;
             float3 rightAtNode = nodeIsStart ? capRightCurve.a : capRightCurve.d;
             // Tangent into the edge, away from the node; curves drawn from the dot are oriented
             // by it. Start-cap curves run a→d into the edge, end-cap curves the other way.
@@ -423,7 +423,7 @@ namespace TownRoadLane
             for (int i = 1; i < sorted.Count; i++)
             {
                 float prevRightEdge = sorted[i - 1].x + sorted[i - 1].hw;
-                float nextLeftEdge  = sorted[i].x - sorted[i].hw;
+                float nextLeftEdge = sorted[i].x - sorted[i].hw;
                 if (nextLeftEdge - prevRightEdge > kCarriagewayGapM)
                 {
                     outList.Add(MakeEndpoint(edgeEntity, gap++, prevRightEdge, halfWidth, leftAtNode, rightAtNode, tIntoEdge));
@@ -455,23 +455,23 @@ namespace TownRoadLane
             // from the opposite node.
             if (TryFindParamAtDistance(capLeftCurve, capRightCurve, nodeIsStart, kSetbackDistanceM, out float tSet))
             {
-                float3 setLeft   = MathUtils.Position(capLeftCurve, tSet);
-                float3 setRight  = MathUtils.Position(capRightCurve, tSet);
-                float3 tanLeft   = MathUtils.Tangent(capLeftCurve, tSet);
-                float3 tanRight  = MathUtils.Tangent(capRightCurve, tSet);
+                float3 setLeft = MathUtils.Position(capLeftCurve, tSet);
+                float3 setRight = MathUtils.Position(capRightCurve, tSet);
+                float3 tanLeft = MathUtils.Tangent(capLeftCurve, tSet);
+                float3 tanRight = MathUtils.Tangent(capRightCurve, tSet);
                 for (int i = 0; i < classicCount; i++)
                 {
                     float f = math.saturate((emittedX[i] + halfWidth) / math.max(0.001f, halfWidth * 2f));
-                    float3 pos  = math.lerp(setLeft, setRight, f);
+                    float3 pos = math.lerp(setLeft, setRight, f);
                     float3 tan3 = math.lerp(tanLeft, tanRight, f);
                     // The tangent must point away from the node; end-cap curves run toward it.
                     if (!nodeIsStart) tan3 = -tan3;
                     outList.Add(new MarkingEndpoint
                     {
-                        edge     = edgeEntity,
+                        edge = edgeEntity,
                         gapIndex = kSetbackGapBase + i,
                         position = pos,
-                        tangent  = math.normalizesafe(tan3.xz),
+                        tangent = math.normalizesafe(tan3.xz),
                     });
                 }
             }

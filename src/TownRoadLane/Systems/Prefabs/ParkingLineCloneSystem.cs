@@ -43,7 +43,7 @@ namespace TownRoadLane
 
         // Used when the chosen mesh cannot be resolved (e.g. a G87 option without G87 installed).
         private const string kFallbackLineMesh = "White Dashed Line Mesh - Dense";
-        private const string kFallbackEndMesh  = "White Solid Line Mesh";
+        private const string kFallbackEndMesh = "White Solid Line Mesh";
 
         private enum Role { Longitudinal, End }
         private static readonly (string src, string clone, Role role)[] kRecipes =
@@ -89,7 +89,7 @@ namespace TownRoadLane
         public void ApplyOrUpdate()
         {
             string lineMeshName = Mod.Settings?.ParkingLineMeshName() ?? kFallbackLineMesh;
-            string endMeshName  = Mod.Settings != null ? Mod.Settings.ParkingEndMeshName() : kFallbackEndMesh;
+            string endMeshName = Mod.Settings != null ? Mod.Settings.ParkingEndMeshName() : kFallbackEndMesh;
             bool parkingOn = Mod.Settings == null || Mod.Settings.ParkingMarkingsEnabled;
             bool wantEnds = parkingOn && endMeshName != null;
 
@@ -105,7 +105,7 @@ namespace TownRoadLane
 
             var meshByName = LaneCloning.ResolveMeshes(_prefabSystem, _meshPrefabQuery, new[] { lineMeshName, endMeshName, kFallbackLineMesh, kFallbackEndMesh });
             RenderPrefab lineMesh = LaneCloning.PickMesh(meshByName, lineMeshName, kFallbackLineMesh, "longitudinal line");
-            RenderPrefab endMesh  = wantEnds ? LaneCloning.PickMesh(meshByName, endMeshName, kFallbackEndMesh, "end tick") : null;
+            RenderPrefab endMesh = wantEnds ? LaneCloning.PickMesh(meshByName, endMeshName, kFallbackEndMesh, "end tick") : null;
 
             int touched = 0;
             foreach (var (srcName, cloneName, role) in kRecipes)

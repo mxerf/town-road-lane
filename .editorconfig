@@ -1,0 +1,79 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{ts,tsx,js,json,scss}]
+indent_style = space
+indent_size = 2
+
+[*.{csproj,props,targets,xml,pubxml}]
+indent_style = tab
+indent_size = 4
+# The toolchain writes these with a BOM.
+charset = utf-8-bom
+
+[*.cs]
+indent_style = space
+indent_size = 4
+
+# Layout
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_space_after_keywords_in_control_flow_statements = true
+csharp_space_after_cast = false
+csharp_preserve_single_line_statements = true
+csharp_preserve_single_line_blocks = true
+csharp_using_directive_placement = outside_namespace:suggestion
+dotnet_sort_system_directives_first = true
+
+# Style: suggestions only, so the IDE hints without the build failing.
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_expression_bodied_properties = when_on_single_line:suggestion
+csharp_prefer_braces = when_multiline:suggestion
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+
+# Naming, matching the code base:
+#   private instance fields  _camelCase
+#   constants                kPascalCase
+# Public fields of ECS components stay camelCase like the game's own serialized structs; other
+# mods read them by name, so they are not renamed.
+# Rules are matched in this order: constants, then other static fields (no rule: the logger is
+# `log` and lookup tables use the constant prefix), then private instance fields.
+dotnet_naming_symbols.constants.applicable_kinds = field
+dotnet_naming_symbols.constants.required_modifiers = const
+dotnet_naming_style.k_pascal.required_prefix = k
+dotnet_naming_style.k_pascal.capitalization = pascal_case
+dotnet_naming_rule.constants_k_prefix.symbols = constants
+dotnet_naming_rule.constants_k_prefix.style = k_pascal
+dotnet_naming_rule.constants_k_prefix.severity = suggestion
+
+dotnet_naming_symbols.static_fields.applicable_kinds = field
+dotnet_naming_symbols.static_fields.required_modifiers = static
+dotnet_naming_style.any_camel.capitalization = camel_case
+dotnet_naming_rule.static_fields_free.symbols = static_fields
+dotnet_naming_rule.static_fields_free.style = any_camel
+dotnet_naming_rule.static_fields_free.severity = none
+
+dotnet_naming_symbols.private_instance_fields.applicable_kinds = field
+dotnet_naming_symbols.private_instance_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+dotnet_naming_rule.private_instance_fields_underscore.symbols = private_instance_fields
+dotnet_naming_rule.private_instance_fields_underscore.style = underscore_camel
+dotnet_naming_rule.private_instance_fields_underscore.severity = suggestion
+
+# Copy of the decompiled vanilla SecondaryLaneSystem: kept as close to the decompiler output
+# as possible so game patches can be diffed against it. Formatters leave it alone.
+[src/TownRoadLane/Systems/Emission/CustomSecondaryLaneSystem.cs]
+generated_code = true
+indent_style = tab

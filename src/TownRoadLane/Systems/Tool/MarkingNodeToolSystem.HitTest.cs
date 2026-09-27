@@ -16,7 +16,7 @@ namespace TownRoadLane
         // Squared XZ distance within which the cursor counts as being on a line.
         private const float kLinePickRadiusSq = 2.0f * 2.0f;
         // Samples per Bezier: about 1 m spacing on a typical 10-12 m line.
-        private const int   kLineSampleCount  = 12;
+        private const int kLineSampleCount = 12;
 
         // Reused point-in-polygon ring, to avoid per-frame allocations.
         private readonly List<float3> _areaHitScratch = new List<float3>();
