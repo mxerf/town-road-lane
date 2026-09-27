@@ -25,6 +25,7 @@ namespace TownRoadLane
     {
         private static readonly ILog log = Mod.log;
 
+        // Prefab names are saved with the fill areas that use them, so they must never change.
         public const string kCloneGrass = "TRL Grass Surface";
         public const string kCloneGrassDark = "TRL Grass Dark Surface";
         public const string kCloneSand = "TRL Sand Surface";
@@ -33,20 +34,19 @@ namespace TownRoadLane
         public const string kCloneTiles2 = "TRL Tiles 2 Surface";
         public const string kCloneTiles3 = "TRL Tiles 3 Surface";
 
-        private const string kSourceGrass = "Grass Surface 01";
-
-        // Vanilla SurfacePrefab name, clone name.
-        private static readonly string[,] kVariantAClones =
+        private static readonly (string source, string clone)[] kSurfaceClones =
         {
-            { kSourceGrass,         kCloneGrass },
-            { "Grass Surface 02",   kCloneGrassDark },
-            { "Sand Surface 01",    kCloneSand },
-            { "Pavement Surface 01", kClonePavement },
-            { "Tiles Surface 01",   kCloneTiles1 },
-            { "Tiles Surface 02",   kCloneTiles2 },
-            { "Tiles Surface 03",   kCloneTiles3 },
+            ("Grass Surface 01",    kCloneGrass),
+            ("Grass Surface 02",    kCloneGrassDark),
+            ("Sand Surface 01",     kCloneSand),
+            ("Pavement Surface 01", kClonePavement),
+            ("Tiles Surface 01",    kCloneTiles1),
+            ("Tiles Surface 02",    kCloneTiles2),
+            ("Tiles Surface 03",    kCloneTiles3),
         };
 
+        // Process-wide on purpose, never reset: Register runs once from Mod.OnLoad and the clones
+        // stay in PrefabSystem for the whole process, so later save loads must not add them again.
         private static World _world;
         private static bool _done;
         // Without a warning, a gate that never opens leaves no trace in the log: the clone-backed
@@ -99,10 +99,8 @@ namespace TownRoadLane
             var prefabSystem = _world.GetOrCreateSystemManaged<PrefabSystem>();
             log.Info($"[late-clone] creating vanilla surface clones (gameMode={GameManager.instance.gameMode})");
 
-            for (int i = 0; i < kVariantAClones.GetLength(0); i++)
+            foreach (var (sourceName, cloneName) in kSurfaceClones)
             {
-                string sourceName = kVariantAClones[i, 0];
-                string cloneName = kVariantAClones[i, 1];
                 if (!TryGetSource(prefabSystem, sourceName, out var src, out var srcRa)) continue;
 
                 var clone = MakeClone(src, srcRa, cloneName);

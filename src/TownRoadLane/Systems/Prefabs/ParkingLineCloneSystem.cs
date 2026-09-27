@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using Colossal.Logging;
 using Game;
 using Game.Prefabs;
-using Unity.Collections;
 using Unity.Entities;
+using Unity.Mathematics;
 
 namespace TownRoadLane
 {
@@ -54,24 +54,26 @@ namespace TownRoadLane
             ("NA Parking Cross Line", "TownRoadLane NA Parallel Parking End",  Role.End),
         };
 
-        private PrefabSystem m_PrefabSystem;
-        private EntityQuery m_LanePrefabQuery;
-        private bool m_Done;
+        private PrefabSystem _prefabSystem;
+        private EntityQuery _lanePrefabQuery;
+        private EntityQuery _meshPrefabQuery;
+        private bool _done;
 
         protected override void OnCreate()
         {
             base.OnCreate();
-            m_PrefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
-            m_LanePrefabQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
-            RequireForUpdate(m_LanePrefabQuery);
+            _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            _lanePrefabQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
+            _meshPrefabQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<MeshData>());
+            RequireForUpdate(_lanePrefabQuery);
         }
 
         // Runs once per save load, with no mid-session re-run on purpose (see EdgeLineCloneSystem).
 
         protected override void OnUpdate()
         {
-            if (m_Done) return;
-            m_Done = true;
+            if (_done) return;
+            _done = true;
             Enabled = false;
             // Runs even when ParkingMarkingsEnabled is off: saved games reference the spawned
             // sublanes' prefabs by name, and missing clones mean "Unknown prefab ID" errors and
@@ -94,36 +96,23 @@ namespace TownRoadLane
             // Resolve every prefab we need by name in one pass over NetLanePrefab entities.
             var wantedLanes = new HashSet<string>(kCarriagewayLaneNames) { kParkingLaneName };
             foreach (var r in kRecipes) { wantedLanes.Add(r.src); wantedLanes.Add(r.clone); }
-            var laneByName = new Dictionary<string, NetLanePrefab>();
-            var laneEnts = m_LanePrefabQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < laneEnts.Length; i++)
-            {
-                if (!m_PrefabSystem.TryGetPrefab<NetLanePrefab>(laneEnts[i], out var lane) || lane == null) continue;
-                if (wantedLanes.Contains(lane.name) && !laneByName.ContainsKey(lane.name)) laneByName[lane.name] = lane;
-            }
-            laneEnts.Dispose();
+            var laneByName = LaneCloning.FindLanes(_prefabSystem, _lanePrefabQuery, wantedLanes);
 
-            var carriageway = ResolveList(laneByName, kCarriagewayLaneNames, "carriageway host lane");
+            var carriageway = LaneCloning.ResolveLanes(laneByName, kCarriagewayLaneNames, "carriageway host lane");
             if (!laneByName.TryGetValue(kParkingLaneName, out var parkingLane) || parkingLane == null)
             { log.Warn($"parallel parking lane '{kParkingLaneName}' not found — aborting"); return; }
             if (carriageway.Count == 0) { log.Warn("no carriageway host lanes found — aborting"); return; }
 
-            var meshByName = ResolveMeshes(new[] { lineMeshName, endMeshName, kFallbackLineMesh, kFallbackEndMesh });
-            RenderPrefab lineMesh = PickMesh(meshByName, lineMeshName, kFallbackLineMesh, "longitudinal line");
-            RenderPrefab endMesh  = wantEnds ? PickMesh(meshByName, endMeshName, kFallbackEndMesh, "end tick") : null;
+            var meshByName = LaneCloning.ResolveMeshes(_prefabSystem, _meshPrefabQuery, new[] { lineMeshName, endMeshName, kFallbackLineMesh, kFallbackEndMesh });
+            RenderPrefab lineMesh = LaneCloning.PickMesh(meshByName, lineMeshName, kFallbackLineMesh, "longitudinal line");
+            RenderPrefab endMesh  = wantEnds ? LaneCloning.PickMesh(meshByName, endMeshName, kFallbackEndMesh, "end tick") : null;
 
             int touched = 0;
             foreach (var (srcName, cloneName, role) in kRecipes)
             {
                 // Created unconditionally; the settings only decide whether hosting is attached.
-                if (!laneByName.TryGetValue(cloneName, out var cloneBase) || cloneBase == null)
-                {
-                    if (!laneByName.TryGetValue(srcName, out var src) || !(src is NetLaneGeometryPrefab) || !src.TryGet<SecondaryLane>(out _))
-                    { log.Warn($"source '{srcName}' missing/invalid — can't create '{cloneName}'"); continue; }
-                    cloneBase = m_PrefabSystem.DuplicatePrefab(src, cloneName) as NetLanePrefab;
-                    laneByName[cloneName] = cloneBase;
-                }
-                if (cloneBase == null || !cloneBase.TryGet<SecondaryLane>(out var sec)) { log.Warn($"'{cloneName}' has no SecondaryLane — skipping"); continue; }
+                if (!LaneCloning.TryGetOrDuplicate(_prefabSystem, laneByName, srcName, cloneName, out var cloneBase, out var sec))
+                    continue;
 
                 RenderPrefab mesh;
                 if (role == Role.Longitudinal)
@@ -142,59 +131,18 @@ namespace TownRoadLane
                     sec.m_CrossingLanes = wantEnds ? MakeCrossInfos(new[] { parkingLane }) : Array.Empty<SecondaryLaneInfo2>();
                     sec.m_FitToParkingSpaces = true;
                     sec.m_CanFlipSides = true;
-                    sec.m_LengthOffset = new Unity.Mathematics.float2(-0.1f, 0f);
-                    sec.m_PositionOffset = new Unity.Mathematics.float3(0.1f, 0f, 0f);
+                    sec.m_LengthOffset = new float2(-0.1f, 0f);
+                    sec.m_PositionOffset = new float3(0.1f, 0f, 0f);
                     mesh = endMesh ?? lineMesh;
                 }
 
-                int swapped = SwapMesh(cloneBase, mesh);
-                m_PrefabSystem.UpdatePrefab(cloneBase);
+                int swapped = LaneCloning.SwapMesh(cloneBase, mesh);
+                _prefabSystem.UpdatePrefab(cloneBase);
                 touched++;
                 log.Debug($"applied '{cloneName}' ({role}): mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
             }
 
             log.Info($"ParkingLineCloneSystem: applied {touched} prefab(s) (enabled={parkingOn}, line='{lineMeshName}', end='{endMeshName ?? "(none)"}')");
-        }
-
-        private static int SwapMesh(NetLanePrefab prefab, RenderPrefab mesh)
-        {
-            if (mesh == null || !(prefab is NetLaneGeometryPrefab g) || g.m_Meshes == null) return 0;
-            int n = 0;
-            for (int m = 0; m < g.m_Meshes.Length; m++)
-                if (g.m_Meshes[m].m_Mesh != null) { g.m_Meshes[m].m_Mesh = mesh; n++; }
-            return n;
-        }
-
-        private Dictionary<string, RenderPrefab> ResolveMeshes(IEnumerable<string> names)
-        {
-            var wanted = new HashSet<string>();
-            foreach (var n in names) if (!string.IsNullOrEmpty(n)) wanted.Add(n);
-            var result = new Dictionary<string, RenderPrefab>();
-            var meshQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<MeshData>());
-            var ents = meshQuery.ToEntityArray(Allocator.Temp);
-            for (int i = 0; i < ents.Length; i++)
-                if (m_PrefabSystem.TryGetPrefab<RenderPrefab>(ents[i], out var rp) && rp != null && wanted.Contains(rp.name) && !result.ContainsKey(rp.name))
-                    result[rp.name] = rp;
-            ents.Dispose();
-            return result;
-        }
-
-        private static RenderPrefab PickMesh(Dictionary<string, RenderPrefab> byName, string wanted, string fallback, string what)
-        {
-            if (!string.IsNullOrEmpty(wanted) && byName.TryGetValue(wanted, out var rp) && rp != null) return rp;
-            if (byName.TryGetValue(fallback, out var fb) && fb != null)
-            { log.Warn($"{what} mesh '{wanted}' not found (G87 not installed?) — falling back to '{fallback}'"); return fb; }
-            log.Warn($"{what} mesh '{wanted}' and fallback '{fallback}' both missing — keeping source mesh");
-            return null;
-        }
-
-        private List<NetLanePrefab> ResolveList(Dictionary<string, NetLanePrefab> byName, string[] names, string what)
-        {
-            var list = new List<NetLanePrefab>();
-            foreach (var n in names)
-                if (byName.TryGetValue(n, out var p) && p != null) list.Add(p);
-                else log.Warn($"{what} '{n}' not found — skipping it");
-            return list;
         }
 
         private static SecondaryLaneInfo[] MakeInfos(IReadOnlyList<NetLanePrefab> lanes)
