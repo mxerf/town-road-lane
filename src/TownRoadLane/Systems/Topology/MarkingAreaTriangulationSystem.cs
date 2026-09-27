@@ -14,33 +14,27 @@ using Unity.Mathematics;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Phase 8: re-triangulates OUR spawned area fills after the vanilla pipeline, replacing
-    /// its triangles with a faithful triangulation of the true node ring.
+    /// Replaces the vanilla triangles of the mod's area fills with a triangulation of the exact
+    /// node ring.
     ///
-    /// Why: vanilla <see cref="Game.Areas.GeometrySystem"/> shrinks every polygon inward by
-    /// 0.1 m per side (<c>AreaUtils.GetExpandedNode(-0.1f)</c> — sharp vertices fly metres
-    /// inward) and ear-clips with a hard 2·N attempt budget; on failure it CLEARS the triangle
-    /// buffer and the fill silently vanishes. That is why islands between marking lines need
-    /// the min-width envelope in <see cref="MarkingAreaTopologySystem"/>. Owning the triangles
-    /// removes the whole failure class: fills reach exactly to the ring, knife-tip corners
-    /// render honestly.
+    /// Vanilla <see cref="Game.Areas.GeometrySystem"/> shrinks every polygon by 0.1 m per side
+    /// (<c>AreaUtils.GetExpandedNode(-0.1f)</c>), which pulls sharp vertices metres inward, and
+    /// ear-clips with a budget of 2·N attempts. When that fails it clears the triangle buffer
+    /// and the fill disappears without a trace. Thin islands between marking lines hit this
+    /// constantly.
     ///
-    /// How: GeometrySystem only processes areas tagged <c>Updated</c> (ALL areas on the first
-    /// tick after a save loads), writing <c>DynamicBuffer&lt;Triangle&gt;</c> — which is
-    /// IEmptySerializable, i.e. never saved, so overwriting it is save-safe. This system runs
-    /// right after it in the same phase (Modification2B) over the same trigger set, restricted
-    /// to entities tagged <see cref="TRLAreaLink"/>, and rewrites per entity:
-    ///  - Triangle indices: robust ear-clip of the TRUE ring (no shrink, no budget), then
-    ///    vanilla's public <c>GeometrySystem.EqualizeTriangles</c> for mesh quality;
-    ///  - Triangle.m_HeightRange: conservative terrain range over each triangle's AABB
-    ///    (<c>TerrainUtils.GetHeightRange</c>) instead of vanilla's exact rasterisation —
-    ///    slightly wider bounds, safe for culling;
-    ///  - Triangle.m_MinLod: vanilla's formula (inner-edge midpoint candidates → distance to
-    ///    polygon boundary → CalculateLodLimit), brute-force over edges — our rings are small;
-    ///  - Area.m_Flags NoTriangles + the Geometry component (bounds / surface area / centre).
+    /// GeometrySystem handles areas tagged <c>Updated</c> (and all areas on the first tick
+    /// after a load). This system runs right after it in Modification2B on the same set,
+    /// limited to entities with <see cref="TRLAreaLink"/>. The Triangle buffer is
+    /// IEmptySerializable and never saved, so overwriting it is safe. Per entity it writes:
+    ///  - triangle indices: ear-clip of the exact ring, then vanilla's public
+    ///    <c>GeometrySystem.EqualizeTriangles</c> for mesh quality;
+    ///  - Triangle.m_HeightRange: terrain range over each triangle's bounding box
+    ///    (<c>TerrainUtils.GetHeightRange</c>), slightly wider than vanilla's exact raster;
+    ///  - Triangle.m_MinLod: vanilla's formula, brute force over the (small) ring;
+    ///  - Area.m_Flags (clears NoTriangles) and the Geometry component.
     ///
-    /// If OUR ear-clip fails (degenerate ring) the vanilla triangles are left untouched —
-    /// same graceful degradation as everywhere else in the mod.
+    /// If the ear-clip fails (self-intersecting ring) the vanilla triangles are left as they are.
     /// </summary>
     [UpdateAfter(typeof(Game.Areas.GeometrySystem))]
     public partial class MarkingAreaTriangulationSystem : GameSystemBase
@@ -52,16 +46,14 @@ namespace TownRoadLane
         private TerrainSystem _terrainSystem;
         private bool _loaded;
 
-        // Rings our own ear-clip could not solve (self-intersecting): the buffer stays empty,
-        // so without this set the reclaim scan below would retry (and warn) every tick.
-        // Entries are dropped when the entity comes back through the Updated pass — i.e. its
-        // ring actually changed and a retry is meaningful.
+        // Fills whose ring the ear-clip could not solve. Without this set the reclaim scan would
+        // retry and warn every tick. An entry is cleared when the entity passes through the
+        // Updated path again, meaning its ring changed.
         private readonly System.Collections.Generic.HashSet<Entity> _healFailed =
             new System.Collections.Generic.HashSet<Entity>();
 
-        // Hash of the triangle indices WE last wrote per fill. A mismatch on the reclaim scan
-        // means someone re-triangulated the fill behind our back without tagging it Updated —
-        // in practice vanilla GeometrySystem's post-load all-areas pass (see ReclaimClobberedFills).
+        // Hash of the triangle indices this system last wrote, per fill. A mismatch means the fill
+        // was re-triangulated without an Updated tag (see ReclaimClobberedFills).
         private readonly System.Collections.Generic.Dictionary<Entity, int> _ownedFingerprint =
             new System.Collections.Generic.Dictionary<Entity, int>();
 
@@ -88,8 +80,8 @@ namespace TownRoadLane
         protected override void OnGameLoaded(Colossal.Serialization.Entities.Context serializationContext)
         {
             base.OnGameLoaded(serializationContext);
-            // Vanilla GeometrySystem re-triangulates EVERY area on its first post-load tick,
-            // clobbering whatever we wrote in the previous session — mirror its behaviour.
+            // GeometrySystem re-triangulates every area on its first tick after a load, so this
+            // system handles all fills on that tick as well.
             _loaded = true;
         }
 
@@ -124,7 +116,7 @@ namespace TownRoadLane
                     }
                     catch (System.Exception e)
                     {
-                        // Never break the tick loop: vanilla triangles (possibly empty) stay.
+                        // Keep going with the other fills; this one keeps its vanilla triangles.
                         failed++;
                         _healFailed.Add(entities[i]);
                         log.Warn($"area-triangulation ent#{entities[i].Index}: {e.GetType().Name}: {e.Message} — keeping vanilla triangles");
@@ -137,9 +129,8 @@ namespace TownRoadLane
             ReclaimClobberedFills(ref heightData);
         }
 
-        /// <summary>Order-sensitive hash of the triangle index buffer — identifies a
-        /// triangulation as the one we last wrote (positions don't matter: indices into the
-        /// same ring fully determine the mesh).</summary>
+        /// <summary>Order-sensitive hash of the triangle indices. Indices into the same ring fully
+        /// determine the mesh, so positions are not needed.</summary>
         private static int Fingerprint(DynamicBuffer<Triangle> tris)
         {
             unchecked
@@ -157,21 +148,17 @@ namespace TownRoadLane
         }
 
         /// <summary>
-        /// Once the terrain heightmap finishes streaming after a load, vanilla
-        /// <see cref="Game.Areas.GeometrySystem"/> re-triangulates EVERY area
-        /// (<c>TerrainHeightsReadyAfterLoading</c> → its all-areas pass) WITHOUT tagging
-        /// anything <c>Updated</c>. That pass damages our fills two ways:
-        ///  - rings its shrink-and-budget ear-clip can't solve get their Triangle buffer
-        ///    CLEARED — the fill turns invisible;
-        ///  - rings it can solve get vanilla triangles whose ears were chosen on the 0.1 m
-        ///    SHRUNK workspace (sharp vertices fly metres inward) but whose indices render on
-        ///    the true ring — near sharp tips the mesh visibly spills past the drawn contour.
-        /// With no Updated tag, neither we nor the search tree / GPU batches ever hear about
-        /// either case. This scan runs right after GeometrySystem every tick and compares each
-        /// fill's triangle indices against the fingerprint of what WE last wrote: any mismatch
-        /// (cleared or vanilla-overwritten) is rewritten on the spot and tagged Updated so the
-        /// whole downstream pipeline (search tree, AreaBatchSystem upload) refreshes in the
-        /// same frame.
+        /// When the terrain heightmap finishes streaming after a load
+        /// (<c>TerrainHeightsReadyAfterLoading</c>), vanilla
+        /// <see cref="Game.Areas.GeometrySystem"/> re-triangulates every area without tagging
+        /// anything <c>Updated</c>. Fills it can't solve lose all their triangles and turn
+        /// invisible. Fills it can solve get ears chosen on the shrunk polygon but drawn on the
+        /// real ring, so the mesh spills past the contour near sharp tips.
+        ///
+        /// Nothing downstream is notified, so every tick this scan compares each fill's triangle
+        /// indices with the fingerprint of what this system last wrote. On a mismatch it
+        /// rewrites the triangles and tags the fill Updated, so the search tree and
+        /// AreaBatchSystem refresh in the same frame.
         /// </summary>
         private void ReclaimClobberedFills(ref TerrainHeightData heightData)
         {
@@ -208,7 +195,7 @@ namespace TownRoadLane
 
             if (healed > 0)
             {
-                // Structural change last: AddComponent invalidates cached buffers.
+                // Structural changes last: AddComponent invalidates buffer handles.
                 for (int i = 0; i < toHeal.Length; i++)
                     if (toHeal[i] != Entity.Null)
                         EntityManager.AddComponent<Updated>(toHeal[i]);
@@ -216,8 +203,8 @@ namespace TownRoadLane
             }
             toHeal.Dispose();
 
-            // The dictionary is keyed by (index, version) so recycled entities never collide,
-            // but dead keys accumulate across respawn cycles — prune when clearly bloated.
+            // Entity keys include the version, so recycled indices never collide, but keys of
+            // deleted fills pile up as fills are respawned. Prune them now and then.
             if (_ownedFingerprint.Count > all.Length * 2 + 32)
             {
                 var alive = new System.Collections.Generic.HashSet<Entity>();
@@ -230,8 +217,8 @@ namespace TownRoadLane
             }
         }
 
-        /// <summary>Replace the entity's triangles with our own triangulation of the true node
-        /// ring. Returns false (leaving vanilla data intact) when the ring can't be
+        /// <summary>Replaces the entity's triangles with a triangulation of its exact node ring.
+        /// Returns false, leaving the vanilla data as is, when the ring can't be
         /// triangulated.</summary>
         private bool RewriteTriangles(Entity entity, ref TerrainHeightData heightData)
         {
@@ -242,16 +229,16 @@ namespace TownRoadLane
             var positions = new NativeArray<float3>(n, Allocator.Temp);
             for (int i = 0; i < n; i++) positions[i] = nodes[i].m_Position;
 
-            // Vanilla marks rings CCW-positive via signed area; our ear-clip needs the winding
-            // to classify convex corners the same way regardless of draw direction.
+            // The ear-clip needs the winding to tell convex corners from reflex ones, whichever
+            // direction the area was drawn in.
             bool ccw = SignedAreaXZ(positions) > 0f;
 
             var tris = new NativeList<Triangle>(2 * n, Allocator.Temp);
             bool ok = EarClip(positions, ccw, tris);
             if (!ok)
             {
-                // Self-intersecting ring (e.g. a drawn chord crossing a curved edge) — vanilla
-                // triangles stay; one warn per recompute, no retry loop (hash is written).
+                // Self-intersecting ring, e.g. a straight edge crossing a curved one. The caller
+                // records the failure, so this warns once per ring change.
                 log.Warn($"area-triangulation ent#{entity.Index}: ear-clip failed on {n}-node ring — keeping vanilla triangles");
                 positions.Dispose();
                 tris.Dispose();
@@ -263,10 +250,9 @@ namespace TownRoadLane
             for (int i = 0; i < tris.Length; i++) triangles.Add(tris[i]);
             tris.Dispose();
 
-            // Vanilla mesh-quality pass (public static): Delaunay-style edge flips.
+            // Vanilla edge-flip pass for better-shaped triangles.
             Game.Areas.GeometrySystem.EqualizeTriangles(positions, triangles);
 
-            // Per-triangle terrain height range + LOD, then the aggregate Geometry component.
             var prefabRef = EntityManager.GetComponentData<PrefabRef>(entity);
             float heightOffset = 0f;
             float nodeDistance = 0f;
@@ -282,9 +268,8 @@ namespace TownRoadLane
 
             var geometry = new Geometry { m_Bounds = new Bounds3(float.MaxValue, float.MinValue) };
             float bestCentreScore = -1f;
-            // Elevated fill (bridge deck): any node carries an explicit elevation instead of the
-            // terrain-follow sentinel. Affects the height range (decal projection volume) and the
-            // centre position below.
+            // A fill on a bridge deck has nodes with an explicit elevation instead of the
+            // terrain-following float.MinValue. It changes the height range and center below.
             bool elevated = false;
             for (int i = 0; i < nodes.Length; i++)
                 if (nodes[i].m_Elevation != float.MinValue) { elevated = true; break; }
@@ -293,24 +278,21 @@ namespace TownRoadLane
                 Triangle tri = triangles[i];
                 Triangle3 tri3 = AreaUtils.GetTriangle3(nodes, tri);
 
-                // Conservative height range: terrain min/max over the triangle's world AABB,
-                // relative to the triangle's own vertical extent (vanilla rasterises the exact
-                // triangle; the AABB superset only ever widens the range — culling-safe).
                 Bounds3 triBounds = MathUtils.Bounds(tri3);
                 Bounds1 offsetBounds = new Bounds1(math.min(0f, heightOffset), math.max(0f, heightOffset));
                 if (elevated)
                 {
-                    // The height range is the DECAL PROJECTION volume (AreaBatchSystem feeds it
-                    // into m_YMinMax), not just a culling bound. Extending it down to terrain
-                    // painted the fill on both the deck AND the ground under the bridge — keep
-                    // it tight around the deck surface instead.
+                    // The height range is also the decal projection volume (AreaBatchSystem feeds
+                    // it into m_YMinMax), not only a culling bound. Reaching down to the terrain
+                    // would paint the fill on the ground under the bridge as well, so keep it
+                    // tight around the deck.
                     tri.m_HeightRange = new Bounds1(-0.5f, 0.5f) | offsetBounds;
                 }
                 else
                 {
-                    // Ground-level fill: terrain min/max over the triangle's world AABB, relative
-                    // to the triangle's own vertical extent (vanilla rasterises the exact
-                    // triangle; the AABB superset only ever widens the range — culling-safe).
+                    // Terrain min/max over the triangle's bounding box, relative to the triangle's
+                    // own height. Vanilla rasterizes the exact triangle; the box can only widen
+                    // the range, which is safe.
                     Bounds1 terrain = TerrainUtils.GetHeightRange(ref heightData, triBounds);
                     if (terrain.min <= terrain.max)
                     {
@@ -322,9 +304,8 @@ namespace TownRoadLane
                     }
                 }
 
-                // Vanilla MinLod: candidate points near the triangle's interior (midpoints of
-                // its non-boundary edges), scored by distance to the polygon boundary; the
-                // resulting clearance × 4 approximates the fill's local rendering size.
+                // Vanilla MinLod: the clearance to the polygon boundary at the best candidate
+                // point, times 4, approximates the fill's local rendering size.
                 float2 bestMinDistSq = ScoreTriangle(tri, tri3, positions, out float3 centreCandidate);
                 float2 size = math.sqrt(bestMinDistSq) * 4f;
                 tri.m_MinLod = RenderingUtils.CalculateLodLimit(
@@ -339,10 +320,9 @@ namespace TownRoadLane
                     geometry.m_CenterPosition = centreCandidate;
                 }
             }
-            // centreCandidate.y is already interpolated from the node heights. For ground-level
-            // fills snap it to terrain (vanilla convention); for elevated fills keep the deck
-            // height — a terrain sample would put the area popover and culling centre on the
-            // ground under the structure.
+            // The candidate's height comes from the nodes. Ground fills snap it to the terrain
+            // like vanilla; elevated fills keep the deck height, or the area popover and culling
+            // center would end up on the ground under the bridge.
             if (!elevated)
                 geometry.m_CenterPosition.y = TerrainUtils.SampleHeight(ref heightData, geometry.m_CenterPosition);
 
@@ -357,14 +337,11 @@ namespace TownRoadLane
             return true;
         }
 
-        // ── MinLod scoring (port of vanilla's candidate walk, brute-force edges) ────
-
-        /// <summary>Vanilla candidate scheme (port of CheckCenterPositionCandidate + its call
-        /// sites, brute-force over edges — our rings are small): for each triangle edge that is
-        /// NOT a boundary edge of the polygon (index gap > 1), take its midpoint; special-case
-        /// triangles with exactly one boundary edge (weighted centre) or none (centroid).
-        /// Score per candidate = the TWO smallest squared distances to polygon edges as
-        /// (min1, min2) — vanilla's local-width proxy; candidates compete on min1.</summary>
+        /// <summary>Port of vanilla's CheckCenterPositionCandidate scheme, brute force over the
+        /// ring's edges. Candidates are the midpoints of triangle edges that are not polygon
+        /// edges, plus a weighted center for triangles with one polygon edge and the centroid
+        /// as a fallback. Each candidate scores the two smallest squared distances to the
+        /// polygon edges (min1, min2); the largest min1 wins.</summary>
         private static float2 ScoreTriangle(Triangle tri, Triangle3 tri3, NativeArray<float3> positions, out float3 bestPos)
         {
             int n = positions.Length;
@@ -399,8 +376,8 @@ namespace TownRoadLane
             return math.max(best, 0f);
         }
 
-        /// <summary>(min1, min2) of squared distances from <paramref name="point"/> to every
-        /// polygon boundary segment — same accumulation as vanilla's candidate loop.</summary>
+        /// <summary>The two smallest squared XZ distances from <paramref name="point"/> to the
+        /// polygon's edges, as (min1, min2).</summary>
         private static float2 TwoMinDistSqToBoundary(float3 point, NativeArray<float3> positions)
         {
             int n = positions.Length;
@@ -418,8 +395,6 @@ namespace TownRoadLane
             return best;
         }
 
-        // ── Robust ear-clipping (true ring, no shrink, no attempt budget) ────────────
-
         private static float SignedAreaXZ(NativeArray<float3> pts)
         {
             float sum = 0f;
@@ -432,11 +407,10 @@ namespace TownRoadLane
             return sum * 0.5f;
         }
 
-        /// <summary>Classic O(n²) ear-clipping over the XZ plane. Unlike vanilla's version
-        /// there is no shrink pre-pass and no 2·N attempt cap: a valid simple polygon always
-        /// triangulates fully (n − 2 triangles). Degenerate corners (zero-area ears) are
-        /// clipped eagerly, matching how vanilla's snip tolerates collinear points. Returns
-        /// false only when no ear can be found (self-intersecting ring).</summary>
+        /// <summary>O(n²) ear-clipping in the XZ plane, without vanilla's shrink step or attempt
+        /// limit, so any simple polygon yields n - 2 triangles. Zero-area ears are clipped as
+        /// a fallback, as vanilla tolerates collinear points. Returns false only when no ear
+        /// exists (self-intersecting ring).</summary>
         private static bool EarClip(NativeArray<float3> positions, bool ccw, NativeList<Triangle> outTris)
         {
             int n = positions.Length;
@@ -447,12 +421,11 @@ namespace TownRoadLane
             {
                 int m = index.Length;
                 int earAt = -1;
-                // Pass 1: strictly convex, empty ears. Pass 2 (fallback): also allow zero-area
-                // (collinear) ears — clipping them is a no-op geometrically but unblocks rings
-                // with duplicate/collinear points. The emptiness check stays MANDATORY in both
-                // passes: an ear containing another vertex emits triangles outside the polygon
-                // (fills visually "spilling" past their contour) — a clean failure into the
-                // vanilla fallback is strictly better than garbage geometry.
+                // First pass: strictly convex ears. Second pass: also zero-area (collinear) ears,
+                // which unblocks rings with duplicate or collinear points. Both passes require
+                // the ear to contain no other vertex: such an ear puts triangles outside the
+                // polygon, and falling back to vanilla is better than a fill spilling past
+                // its contour.
                 for (int pass = 0; pass < 2 && earAt < 0; pass++)
                 {
                     float minCross = pass == 0 ? 1e-6f : -1e-6f;
@@ -462,7 +435,7 @@ namespace TownRoadLane
                         float2 a = positions[i0].xz, b = positions[i1].xz, c = positions[i2].xz;
                         float cross = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
                         if (!ccw) cross = -cross;
-                        if (cross < minCross) continue; // reflex corner — not an ear
+                        if (cross < minCross) continue; // reflex corner
                         if (ContainsOtherVertex(positions, index, i, a, b, c)) continue;
                         earAt = i;
                         break;
@@ -476,9 +449,8 @@ namespace TownRoadLane
                 int p0 = index[(earAt + index.Length - 1) % index.Length];
                 int p1 = index[earAt];
                 int p2 = index[(earAt + 1) % index.Length];
-                // Emit even zero-area ears: consumers (incremental search-tree diff, LOD
-                // sort) tolerate any count but vanilla's invariant is EXACTLY n − 2 triangles
-                // per ring — keep it. Degenerate triangles draw nothing and hit-test nothing.
+                // Zero-area ears are emitted too, to keep vanilla's invariant of exactly n - 2
+                // triangles per ring. They draw nothing and never hit-test.
                 outTris.Add(ccw ? new Triangle(p0, p1, p2) : new Triangle(p2, p1, p0));
                 index.RemoveAt(earAt);
             }

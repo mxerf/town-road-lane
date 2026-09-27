@@ -1,18 +1,13 @@
-// Custom tooltip system, cohtml-safe. Replaces native `title` attributes
-// which cohtml either renders ugly or not at all.
+// Tooltips in place of the native `title` attribute, which cohtml renders badly or not at
+// all. Adapted from TrafficToolEssentials' tooltip-context.tsx.
 //
-// Architecture (adapted from TTE's tooltip-context.tsx):
-//   - TooltipProvider creates a singleton "active tooltip" state via context.
-//   - <Tooltip> wraps a target element; on mouseenter it calls show(content,
-//     rect, position), on mouseleave it calls hide().
-//   - A single floating <div> renders the active tooltip's content, portalled
-//     to document.body so it escapes panel overflow / transforms.
+// TooltipProvider holds the one active tooltip, <Tooltip> wraps a target and calls
+// show/hide on mouse enter/leave, and a single <div> portalled to document.body renders the
+// content outside the panel's overflow and transforms.
 //
-// cohtml-safe checklist:
-//   - `display: block` (NOT flex — cohtml default is flex which line-wraps).
-//   - `position: fixed` works because we portal to body.
-//   - setTimeout(0) for post-render measurement (no requestAnimationFrame).
-//   - No transform; pointer-events: none so tooltip doesn't intercept clicks.
+// cohtml notes: the tooltip needs `display: block` (the default is flex, which wraps lines
+// badly); measurement after render uses setTimeout(0) rather than requestAnimationFrame; no
+// transform, and pointer-events: none so the tooltip never takes clicks.
 
 import {
   createContext,
@@ -45,9 +40,7 @@ interface TooltipContextValue {
 
 const TooltipContext = createContext<TooltipContextValue | null>(null);
 
-// Hook for the wrapper component. Tolerant of provider absence (returns no-op)
-// so a stray <Tooltip> outside the provider doesn't crash — useful during the
-// rollout when not every mount point has the provider yet.
+// Returns no-ops without a provider, so a <Tooltip> outside one doesn't crash.
 const useTooltip = (): TooltipContextValue => {
   const ctx = useContext(TooltipContext);
   return ctx ?? { show: () => {}, hide: () => {} };
@@ -58,8 +51,8 @@ const tooltipBaseStyle: CSSProperties = {
   display: "block",
   fontSize: "11rem",
   color: T.colorTextPrimary,
-  // Solid, no blur — tooltips frequently hover over the panel itself, where a
-  // glass surface smears the underlying controls (same reasoning as Dropdown).
+  // Solid, no blur: tooltips often sit over the panel itself, where a glass surface smears
+  // the controls underneath.
   background: T.colorSurfaceSolid,
   border: `1rem solid ${T.colorBorderMid}`,
   borderRadius: T.radiusSm,
@@ -85,7 +78,7 @@ export const TooltipProvider = ({ children }: { children: ReactNode }) => {
   const measureRef = useRef<HTMLDivElement>(null);
 
   const show = useCallback((content: ReactNode, rect: DOMRect, position: TooltipPosition) => {
-    // Render invisibly first so we can measure the tooltip box, then position.
+    // Render invisibly first to measure the box, then position it.
     setState({ content, left: 0, top: 0, visible: false });
 
     setTimeout(() => {
@@ -94,7 +87,7 @@ export const TooltipProvider = ({ children }: { children: ReactNode }) => {
       const screenW = window.innerWidth;
       const screenH = window.innerHeight;
 
-      // Auto-flip if requested position doesn't fit.
+      // Flip to the other side if the requested one doesn't fit.
       let pos = position;
       const spaceBelow = screenH - rect.bottom - EDGE_PADDING;
       const spaceAbove = rect.top - EDGE_PADDING;
@@ -108,7 +101,6 @@ export const TooltipProvider = ({ children }: { children: ReactNode }) => {
       const top =
         pos === "bottom" ? rect.bottom + OFFSET : rect.top - ttRect.height - OFFSET;
 
-      // Clamp horizontally to viewport.
       left = Math.max(
         EDGE_PADDING,
         Math.min(left, screenW - ttRect.width - EDGE_PADDING),
@@ -144,11 +136,9 @@ export const TooltipProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
-// Wrapper for any element that should show a tooltip. Renders children inside
-// a span that captures mouse events. display: flex (NOT inline-flex — cohtml
-// fails to parse it, see Player.log, leaving the span at its default display)
-// so the wrapper hugs its child deterministically; every mount point is a
-// flex container anyway (cohtml's default display is flex).
+// Wraps children in a span that catches the mouse events. The span uses display: flex
+// because cohtml fails to parse inline-flex (Player.log shows the error) and leaves the
+// default display; every mount point is a flex container anyway.
 export const Tooltip = ({
   content,
   position = "bottom",

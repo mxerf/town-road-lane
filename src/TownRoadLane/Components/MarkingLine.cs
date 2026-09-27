@@ -4,19 +4,13 @@ using Unity.Entities;
 namespace TownRoadLane
 {
     /// <summary>
-    /// User-defined logical marking line at a road node. Per-node DynamicBuffer; one entry per
-    /// line the user drew. Replaces the Phase-4 <see cref="MarkingPair"/> with a richer model
-    /// that supports segmentation (a line can be split into multiple drawable pieces at
-    /// intersections with other lines on the same node).
+    /// User-drawn marking line at a road node, one buffer entry per line (endpoints, style and
+    /// curvature). The drawn pieces live in the node's <see cref="MarkingSegment"/> buffer and
+    /// point back by <c>lineIndex</c>; a line is split into several segments where it crosses
+    /// other lines. A node with a non-empty MarkingLine buffer gets no vanilla markings.
     ///
-    /// A line is the LOGICAL entity (endpoint A → endpoint B + style). The DRAWABLE pieces are
-    /// stored in <see cref="MarkingSegment"/> on the same node and reference back via
-    /// <c>lineIndex</c> = the index of this entry in the MarkingLine buffer at the moment the
-    /// segment was created.
-    ///
-    /// Endpoint identity is the same gap-based scheme used by
-    /// <see cref="MarkingEndpointExtractor"/> and matches the old MarkingPair semantics —
-    /// migration is field-for-field copy.
+    /// Endpoints use the gap-based identity of <see cref="MarkingEndpointExtractor"/>, the same
+    /// as the legacy <see cref="MarkingPair"/>, so migration copies them field for field.
     /// </summary>
     [InternalBufferCapacity(0)]
     public struct MarkingLine : IBufferElementData, ISerializable
@@ -26,13 +20,11 @@ namespace TownRoadLane
         public Entity targetEdge;
         public int    targetGapIndex;
 
-        // Placeholder for Stage 5c (line styles). 0 = default solid line.
-        // Kept in v3 schema so future style work doesn't need another bump.
+        // Default style for new segments of this line (a MarkingStyle value).
         public int    style;
 
-        // v4: Bezier pull factor for this line's curve — control-point offset as a fraction of
-        // the chord (see MarkingCurveBuilder). 0 = straight chord, 0.4 = default arc,
-        // 0.55 ≈ quarter circle. User-adjustable per line via the panel stepper.
+        // Bezier control-point offset as a fraction of the chord (see MarkingCurveBuilder):
+        // 0 = straight, 0.4 = default arc, 0.55 ≈ quarter circle.
         public float  curvature;
 
         private const int kVersion = 4;
@@ -56,8 +48,7 @@ namespace TownRoadLane
             reader.Read(out targetEdge);
             reader.Read(out targetGapIndex);
             reader.Read(out style);
-            // v3 lines predate per-line curvature — take the historical constant so old saves
-            // render identically.
+            // Version 3 lines have no curvature field and used this constant.
             if (version >= 4) reader.Read(out curvature);
             else curvature = MarkingCurveBuilder.kPullFactor;
         }

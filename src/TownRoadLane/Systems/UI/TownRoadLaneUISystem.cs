@@ -15,71 +15,54 @@ using UnityEngine;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Stage 5d bridge between the in-game React panel and the C# tool / topology / emission stack.
+    /// Bridge between the in-game React panel and the tool, topology and emission systems.
     ///
-    /// Publishes two value bindings, split by update frequency (Stage 5e rework):
-    ///   - <c>TownRoadLane.GetPanelState</c> — typed <see cref="PanelStateVM"/> snapshot of the
-    ///     panel structure (tool state, lines, segments, areas). Rebuilt + pushed ONLY when a
-    ///     content hash of the authoritative buffers changes, so camera movement and idle frames
-    ///     cost neither serialization nor a React re-render.
-    ///   - <c>TownRoadLane.GetScreenPoints</c> — world→screen anchors for the per-segment
-    ///     popovers. Camera-dependent, so it refreshes every tick while the tool is active
-    ///     (gated by its own hash — a static camera pushes nothing). Consumed on the JS side
-    ///     imperatively (positionRegistry), bypassing React re-render entirely.
+    /// Publishes two value bindings, split by update frequency:
+    ///   - <c>TownRoadLane.GetPanelState</c>: a <see cref="PanelStateVM"/> snapshot of the
+    ///     panel structure (tool state, lines, segments, areas). Pushed only when a content hash
+    ///     of the node's buffers changes, so camera movement and idle frames cost neither
+    ///     serialization nor a React re-render.
+    ///   - <c>TownRoadLane.GetScreenPoints</c>: world-to-screen anchors for the in-world
+    ///     popovers. Camera-dependent, so it is recomputed every frame, but gated by its own
+    ///     hash. The JS side applies it imperatively (positionRegistry), without re-rendering.
     ///
-    /// Commands arrive from React as TriggerBindings (see OnCreate). All structural changes mark
-    /// the node Updated so the next-tick recompute + emission picks them up. None of these
-    /// commands bypass the existing pipelines — they just edit the authoritative buffers, then
-    /// let MarkingTopologySystem + MarkingSegmentEmissionSystem do their normal jobs. This means
-    /// the same invariants (PathNode slot allocation, archetype sourcing, GC protection) hold
-    /// automatically.
+    /// Commands arrive from React as triggers (see OnCreate). They only edit the node's buffers
+    /// and mark it Updated; MarkingTopologySystem and MarkingSegmentEmissionSystem then do
+    /// their normal work, so their invariants (PathNode slot allocation, archetype sourcing,
+    /// GC protection) hold for UI edits too.
     ///
-    /// UI bundle loading: handled by the game's normal UIModuleAsset pipeline. Our .mjs ships
-    /// next to the .dll, exports a default ModRegistrar that appends components into
-    /// GameTopLeft (toolbar button) + GameTopRight (panel) slots. No ExecuteScript hack
-    /// needed — that was carried over from SystemTimeMod and caused a NullReferenceException
-    /// in UIModuleAsset.PostCreate when AssetDatabase tried to register tags from an empty
-    /// mod.json manifest.
+    /// The UI bundle loads through the game's regular UIModuleAsset pipeline: the .mjs next to
+    /// the .dll exports a ModRegistrar that adds the toolbar button (GameTopLeft) and the panel
+    /// (GameTopRight).
     /// </summary>
     public partial class TownRoadLaneUISystem : ExtendedUISystemBase
     {
-        // Shadowing the inherited UISystemBase.log on purpose — Mod.log is the one wired into
-        // CS2's mod-aware logger (file name, prefix) and matches the rest of the code in this
-        // project. Using `new` to silence CS0108.
+        // Hides UISystemBase.log on purpose: Mod.log is the logger set up for this mod.
         private static new readonly ILog log = Mod.log;
 
         private ValueBindingHelper<PanelStateVM> _panelState;
         private ValueBindingHelper<SegmentPointVM[]> _screenPoints;
-        // Pinned "favourite" styles for the dropdowns — persisted as CSV in settings, pushed
-        // to React as int arrays. Toggled by the pin buttons on dropdown options.
+        // Pinned styles for the dropdowns, stored as CSV in the settings.
         private ValueBindingHelper<PinnedStylesVM> _pinnedStyles;
-        // Content hashes gating the pushes above — see RebuildBindings. 0 = "nothing published
-        // yet"; both start at the FNV offset so an all-default state still differs and pushes once.
+        // Hashes of the last pushed values (see RebuildBindings). Every computed hash starts
+        // from the FNV offset, never 0, so the first frame always pushes.
         private ulong _lastStateHash;
         private ulong _lastPointsHash;
         private MarkingNodeToolSystem _tool;
         private DefaultToolSystem _defaultTool;
         private ToolSystem _toolSystem;
 
-        // Stage 5d hover-bridge: which line is currently hovered in the React panel. -1 = none.
-        // Read by MarkingOverlaySystem to draw that line thicker/brighter so the user can
-        // visually correlate UI row ↔ on-road line. Republished into the state JSON so React
-        // can be the source of truth (single dispatcher) and overlay just reads it back.
+        // Line row hovered in the panel (-1 = none); MarkingOverlaySystem highlights that line.
         private int _uiHoveredLineIndex = -1;
         public int UIHoveredLineIndex => _uiHoveredLineIndex;
 
-        // Phase C3: per-segment hover. Set by React when the cursor is over a segment popover.
-        // When >= 0, MarkingOverlaySystem highlights only this specific segment (brighter
-        // than the rest of its line) so popover hover correlates with a single in-world
-        // segment rather than the whole line.
+        // Segment popover under the cursor; the overlay highlights only that segment.
         private int _uiHoveredSegmentLine = -1;
         private int _uiHoveredSegmentIndex = -1;
         public int UIHoveredSegmentLineIndex => _uiHoveredSegmentLine;
         public int UIHoveredSegmentIndex => _uiHoveredSegmentIndex;
 
-        // Phase 7c: which AREA is hovered in the React panel (row or its world popover).
-        // Read by MarkingOverlaySystem to outline every piece of that area — the area
-        // counterpart of _uiHoveredLineIndex.
+        // Area hovered in the panel (row or popover); the overlay outlines all of its pieces.
         private int _uiHoveredAreaIndex = -1;
         public int UIHoveredAreaIndex => _uiHoveredAreaIndex;
 
@@ -94,11 +77,8 @@ namespace TownRoadLane
             _screenPoints = CreateBinding("GetScreenPoints", Array.Empty<SegmentPointVM>());
             _pinnedStyles = CreateBinding("GetPinnedStyles", BuildPinnedStylesVM());
 
-            // i18n locale binding — React reads this to pick which dictionary
-            // (en-US, ru-RU, ...) to render strings from. Re-evaluated every
-            // tick; the binding only fires when the value actually changes, so
-            // this is cheap. Falls back to en-US if the locale manager isn't
-            // initialized yet (early load / unit-test contexts).
+            // React picks its string dictionary from this. Evaluated every frame, but the
+            // binding only pushes when the value changes.
             CreateBinding("GetLocale", GetActiveLocale);
 
             CreateTrigger<int, int>("ToggleSegment", OnToggleSegment);
@@ -127,15 +107,14 @@ namespace TownRoadLane
 
         protected override void OnUpdate()
         {
-            // Recompute hashes + stage new values on the dirty-buffered helpers, THEN let the
-            // base flush them — one binding push per frame max, and only on real change.
+            // Stage new values first, then let the base flush them: at most one push per binding
+            // per frame, and only on a real change.
             RebuildBindings();
             base.OnUpdate();
         }
 
-        /// <summary>Pull the current game locale id from CS2's localization manager. Returns the
-        /// BCP-47-ish code the game uses (e.g. "en-US", "ru-RU"). React resolves unsupported
-        /// locales to en-US via i18n.resolveLocale, so we don't need to translate here.</summary>
+        /// <summary>The game's active locale id (e.g. "en-US", "ru-RU"), or en-US while the
+        /// localization manager is not ready. React maps unsupported locales to en-US.</summary>
         private static string GetActiveLocale()
         {
             try
@@ -148,9 +127,7 @@ namespace TownRoadLane
             }
         }
 
-        // --- State publishing ---
-
-        // FNV-1a 64-bit — cheap incremental hash for the change gates below.
+        // FNV-1a 64-bit: a cheap incremental hash for the change gates below.
         private const ulong kFnvOffset = 14695981039346656037UL;
         private const ulong kFnvPrime = 1099511628211UL;
 
@@ -159,10 +136,9 @@ namespace TownRoadLane
         private static ulong Fold(ulong h, bool v) => Fold(h, v ? 1u : 0u);
         private static ulong Fold(ulong h, float v) => Fold(h, math.asuint(v));
 
-        /// <summary>Per-frame binding refresh. Pass 1 folds every UI-relevant scalar into a
-        /// content hash (zero allocation); only when the hash moved does pass 2 allocate and
-        /// stage a fresh <see cref="PanelStateVM"/>. Screen anchors are camera-dependent, so
-        /// they get their own hash + push cadence (camera pans push points, nothing else).</summary>
+        /// <summary>Per-frame binding refresh. Hashes every UI-relevant value without allocating,
+        /// and builds a new <see cref="PanelStateVM"/> only when the hash changed. Screen anchors
+        /// have their own hash, so a camera pan pushes only the points.</summary>
         private void RebuildBindings()
         {
             bool isActive = _toolSystem != null && _tool != null && _toolSystem.activeTool == _tool;
@@ -258,9 +234,8 @@ namespace TownRoadLane
                 vanillaHidden = node != Entity.Null
                     && EntityManager.HasComponent<MarkingOverride>(node)
                     && EntityManager.GetComponentData<MarkingOverride>(node).HideAll,
-                // Game→UI hover bridge (Phase B5): which line the cursor is currently hovering
-                // in the world; React highlights the matching row so the panel ↔ world
-                // correlation works both ways. -1 = nothing hovered.
+                // Line or area under the cursor in the world (-1 = none), so React can highlight
+                // the matching row.
                 lastClickedLine = _tool?.LastClickedLine ?? -1,
                 lastClickedTick = _tool?.LastClickedTick ?? 0,
                 hoveredLineInGame = _tool?.HoveredLineInGame ?? -1,
@@ -274,8 +249,7 @@ namespace TownRoadLane
                     ? EntityManager.GetBuffer<MarkingSegment>(node, isReadOnly: true)
                     : default;
 
-                // Per-line Beziers so segment length comes out right (segment length is the
-                // arc length of the cut-out Bezier slice, in metres).
+                // Segment length is the arc length of the segment's slice of the line's Bezier.
                 var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
 
                 vm.lines = new LineVM[lines.Length];
@@ -315,17 +289,15 @@ namespace TownRoadLane
                     {
                         lineIndex = i,
                         style = line.style,
-                        // Curvature exposed to the UI as an integer percent of the stepper range
-                        // [0, kMaxPullFactor] — 50% = the 0.4 default pull.
+                        // Integer percent of [0, kMaxPullFactor]; 50% is the 0.4 default pull.
                         curv = (int)math.round(math.saturate(line.curvature / MarkingCurveBuilder.kMaxPullFactor) * 100f),
                         segments = segScratch.ToArray(),
                     };
                 }
             }
 
-            // Areas list — one entry per user-closed polygon on the selected node. Piece counts
-            // come from the topology buffer so the panel can show "K piece(s)" when lines cut
-            // the area apart. Style + visibility mirror the MarkingArea buffer directly.
+            // Piece counts come from the topology buffer, so the panel can show how many pieces
+            // the lines cut an area into.
             if (node != Entity.Null && EntityManager.HasBuffer<MarkingArea>(node))
             {
                 var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
@@ -361,11 +333,10 @@ namespace TownRoadLane
             return vm;
         }
 
-        /// <summary>World→screen anchors for the in-world popovers (segment midpoints + area
-        /// centroids), refreshed every tick while a node is selected. Off-screen / behind-camera
-        /// anchors are simply omitted — the JS positionRegistry hides popovers whose key received
-        /// no point this sync. The hash gate (positions quantised to 0.1 px, scale to 0.01) keeps
-        /// a static camera from pushing anything.</summary>
+        /// <summary>Screen anchors for the in-world popovers (segment midpoints and area
+        /// centroids). Anchors behind the camera are omitted; the JS positionRegistry hides a
+        /// popover whose key got no point. Positions are hashed at 0.1 px and scale at 0.01, so
+        /// a static camera pushes nothing.</summary>
         private void RefreshScreenPoints(Entity node)
         {
             var cam = Camera.main;
@@ -405,7 +376,6 @@ namespace TownRoadLane
                         var seg = segs[s];
                         if (seg.lineIndex != i) continue;
                         int segmentIndex = perLineCounter++;
-                        // Midpoint world position of the segment — anchor for the popover.
                         var midWorld = MathUtils.Position(fullBez, (seg.tStart + seg.tEnd) * 0.5f);
                         var screen = cam.WorldToScreenPoint(midWorld);
                         if (screen.z <= 0f) continue; // behind camera
@@ -418,7 +388,7 @@ namespace TownRoadLane
                         });
                         h = Fold(h, i);
                         h = Fold(h, segmentIndex);
-                        // Quantise to 0.1 px so sub-pixel camera jitter doesn't force pushes.
+                        // Quantised so sub-pixel camera jitter does not force pushes.
                         h = Fold(h, (int)math.round(x * 10f));
                         h = Fold(h, (int)math.round(y * 10f));
                         h = Fold(h, (int)math.round(scale * 100f));
@@ -431,8 +401,8 @@ namespace TownRoadLane
                 var areas = EntityManager.GetBuffer<MarkingArea>(node, isReadOnly: true);
                 var verts = EntityManager.GetBuffer<MarkingAreaVertex>(node, isReadOnly: true);
                 var corners = MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node);
-                // Snapshot lines for intersection-vertex resolve (kind 2) — TryResolve wants an
-                // IReadOnlyList, which DynamicBuffer isn't.
+                // Crossing vertices (kind 2) resolve through an IReadOnlyList, which
+                // DynamicBuffer is not, so the lines are copied.
                 var linesSnap = Array.Empty<MarkingLine>();
                 if (EntityManager.HasBuffer<MarkingLine>(node))
                 {
@@ -452,7 +422,7 @@ namespace TownRoadLane
                     {
                         lineIndex = -1, segmentIndex = -1, areaIndex = a, x = x, y = y, scale = scale,
                     });
-                    h = Fold(h, unchecked((int)0x41524541)); // 'AREA' — keys area points apart from (line, seg) pairs
+                    h = Fold(h, unchecked((int)0x41524541)); // 'AREA', keeps area points apart from (line, seg) pairs
                     h = Fold(h, a);
                     h = Fold(h, (int)math.round(x * 10f));
                     h = Fold(h, (int)math.round(y * 10f));
@@ -476,19 +446,16 @@ namespace TownRoadLane
             }
         }
 
-        /// <summary>Camera-distance scale for the in-world popovers: full authored size while the
-        /// camera is near the intersection, shrinking gently (floor 0.65) as it pulls away so a
-        /// zoomed-out view isn't wallpapered with full-size chrome. Never grows above 1 — the JS
-        /// side clamps back UP to 1 while a popover is hover-expanded. screenZ is the world-unit
-        /// distance WorldToScreenPoint returned in its z component.</summary>
+        /// <summary>Popover scale by camera distance (the z of WorldToScreenPoint): full size up
+        /// close, shrinking down to 0.65 as the camera pulls away so a zoomed-out view is not
+        /// covered in popovers. The JS side restores 1 while a popover is hover-expanded.</summary>
         private static float PopoverScale(float screenZ)
             => math.clamp(math.sqrt(120f / math.max(screenZ, 1f)), 0.65f, 1f);
 
-        /// <summary>Popover anchor for one area: the average of its resolved vertex positions.
-        /// (Not the true polygon centroid — for the small convex-ish contours users draw at an
-        /// intersection the vertex average is indistinguishable and much cheaper.) Mirrors
-        /// MarkingAreaTopologySystem.ResolveOuterRing's lookup; false when any vertex fails to
-        /// resolve (line removed, road demolished — topology will clean the area up shortly).</summary>
+        /// <summary>Popover anchor for one area: the average of its resolved vertices, which for
+        /// the small, roughly convex contours drawn at a junction is as good as the true
+        /// centroid. Resolves vertices the same way as MarkingAreaTopologySystem.ResolveOuterRing.
+        /// False when any vertex fails to resolve; topology will clean such an area up.</summary>
         private static bool TryAreaAnchor(MarkingArea area, DynamicBuffer<MarkingAreaVertex> verts,
                                           List<MarkingEndpoint> endpoints, List<MarkingCornerAnchor> corners,
                                           MarkingLine[] lines, out float3 centroid)
@@ -513,7 +480,7 @@ namespace TownRoadLane
                     if (cIdx < 0) return false;
                     sum += corners[cIdx].position;
                 }
-                else if (av.kind == 2) // line crossing — refIndex is the packed (lineA, lineB, hit)
+                else if (av.kind == 2) // line crossing: refIndex is the packed (lineA, lineB, hit)
                 {
                     if (!MarkingIntersectionExtractor.TryResolve(endpoints, lines, av.refIndex, out var p)) return false;
                     sum += p;
@@ -524,46 +491,39 @@ namespace TownRoadLane
             return true;
         }
 
-        // --- Commands ---
+        // Commands
 
-        /// <summary>UI hover-bridge: React notifies us which line row the user is hovering over
-        /// in the panel. Stored as plain int — no validation; -1 (or any out-of-range value)
-        /// means "no hover" and overlay falls back to normal rendering. Cheap, no buffer needed.</summary>
+        /// <summary>Not validated: -1 or any out-of-range index simply highlights nothing.</summary>
         private void OnSetHoveredLine(int lineIndex)
         {
             _uiHoveredLineIndex = lineIndex;
         }
 
-        /// <summary>Phase C3 — per-segment hover bridge. React calls this when the cursor enters
-        /// a segment popover, so we can highlight only that segment in the overlay (rather than
-        /// the whole line). Pass (-1, -1) to clear.</summary>
+        /// <summary>Pass (-1, -1) to clear.</summary>
         private void OnSetHoveredSegment(int lineIndex, int segmentIndex)
         {
             _uiHoveredSegmentLine = lineIndex;
             _uiHoveredSegmentIndex = segmentIndex;
         }
 
-        /// <summary>Phase 7c — area hover bridge. React calls this from the area row and the
-        /// area popover; the overlay outlines every piece of that area.</summary>
         private void OnSetHoveredArea(int areaIndex)
         {
             _uiHoveredAreaIndex = areaIndex;
         }
 
-        /// <summary>Race-safe hover clear: cohtml can fire mouseenter of the NEXT row before
-        /// mouseleave of the previous one — an unconditional "-1" on leave would then wipe the
-        /// fresh hover. Leave passes its OWN index and only clears while it still owns it.</summary>
+        /// <summary>cohtml can fire mouseenter of the next row before mouseleave of the previous
+        /// one, so an unconditional clear on leave would wipe the new hover. Leave passes its own
+        /// index and clears only while that index is still the hovered one.</summary>
         private void OnClearHoveredArea(int areaIndex)
         {
             if (_uiHoveredAreaIndex == areaIndex)
                 _uiHoveredAreaIndex = -1;
         }
 
-        /// <summary>Drop every UI-driven hover index. Must run on ANY structural mutation
-        /// (delete line/area, node reset): rows shift under a stationary cursor and cohtml does
-        /// not re-fire mouseenter/leave for the reshuffled rows, so a stale index would keep
-        /// outlining — and visually "selecting" — a DIFFERENT object than the one the next
-        /// click acts on (7c bug report: hover shows one area, delete removes another).</summary>
+        /// <summary>Drops every UI hover index. Has to run on any structural change (deleting a
+        /// line or area, node reset): rows shift under a still cursor and cohtml does not re-fire
+        /// mouseenter/leave, so a stale index would highlight a different object than the one
+        /// the next click acts on.</summary>
         private void ClearUIHover()
         {
             _uiHoveredLineIndex = -1;
@@ -572,8 +532,7 @@ namespace TownRoadLane
             _uiHoveredAreaIndex = -1;
         }
 
-        /// <summary>Toolbar-button command: toggle our tool active/inactive. Same semantics as
-        /// the Ctrl+M hotkey path — flip activeTool between ours and DefaultToolSystem.</summary>
+        /// <summary>Toolbar button: toggles the tool, same as the Ctrl+M hotkey.</summary>
         private void OnActivateTool()
         {
             if (_toolSystem == null || _tool == null) return;
@@ -615,9 +574,8 @@ namespace TownRoadLane
             log.Warn($"ToggleSegment: line#{lineIndex} seg#{segmentIndexPerLine} not found");
         }
 
-        /// <summary>Override the style of a single segment. Same walk-and-count strategy as
-        /// <see cref="OnToggleSegment"/> — the per-line counter maps the React-side segmentIndex
-        /// to the flat buffer position. Other segments of the line keep their previous style.</summary>
+        /// <summary>Overrides the style of one segment. As in <see cref="OnToggleSegment"/>, the
+        /// per-line counter maps the UI's segment index to the flat buffer position.</summary>
         private void OnSetSegmentStyle(int lineIndex, int segmentIndexPerLine, int style)
         {
             var node = _tool?.SelectedNode ?? Entity.Null;
@@ -655,10 +613,8 @@ namespace TownRoadLane
             var ln = lines[lineIndex];
             ln.style = style;
             lines[lineIndex] = ln;
-            // Sweep every existing segment of this line over to the new style. Topology won't
-            // re-split here (boundaries are unaffected by style), so we don't wipe segments;
-            // we just rewrite the per-segment style field in-place. Emission picks up the new
-            // value next tick via the Updated marker below.
+            // Style does not move segment boundaries, so the segments are restyled in place
+            // rather than rebuilt.
             if (EntityManager.HasBuffer<MarkingSegment>(node))
             {
                 var segs = EntityManager.GetBuffer<MarkingSegment>(node);
@@ -670,8 +626,8 @@ namespace TownRoadLane
                     segs[s] = seg;
                 }
             }
-            // Bust the topology hash so MarkingTopologySystem re-emits on next tick. Without
-            // this the hash equality short-circuits because lineIndex+endpoints didn't change.
+            // Reset the topology hash: the lines' geometry did not change, so without this
+            // MarkingTopologySystem would skip the node and nothing would be re-emitted.
             if (EntityManager.HasComponent<MarkingTopologyState>(node))
                 EntityManager.SetComponentData(node, new MarkingTopologyState { linesHash = 0 });
             if (!EntityManager.HasComponent<Updated>(node))
@@ -679,11 +635,9 @@ namespace TownRoadLane
             log.Info($"UI: set line#{lineIndex} style → {(MarkingStyle)style}");
         }
 
-        /// <summary>Set the Bezier pull factor of one line from the panel stepper. Percent is
-        /// the UI-side 0..100 value mapped onto [0, kMaxPullFactor] (50% = the 0.4 default).
-        /// The topology hash includes curvature, so marking the node Updated is enough — the
-        /// next tick re-splits intersections against the new curve and the vanilla-side sublane
-        /// wipe + emission respawn redraws the decals.</summary>
+        /// <summary>Sets a line's pull factor from the panel stepper; percent 0..100 maps onto
+        /// [0, kMaxPullFactor]. The topology hash includes curvature, so marking the node Updated
+        /// is enough to re-split the line and redraw it.</summary>
         private void OnSetLineCurvature(int lineIndex, int percent)
         {
             var node = _tool?.SelectedNode ?? Entity.Null;
@@ -700,12 +654,10 @@ namespace TownRoadLane
             log.Info($"UI: set line#{lineIndex} curvature → {percent}% (pull={ln.curvature:0.###})");
         }
 
-        /// <summary>Toggle the "hide vanilla markings" override on the selected node. Sets or
-        /// removes <see cref="MarkingOverride"/>{All}; CustomSecondaryLaneSystem reads it and
-        /// skips (or resumes) vanilla marking generation on the next rebuild. Works with zero
-        /// user lines drawn — this is the standalone hide switch. Note: a node with user lines
-        /// already suppresses vanilla markings implicitly; the override simply makes that state
-        /// explicit and independent of the lines.</summary>
+        /// <summary>Toggles the "hide vanilla markings" override (<see cref="MarkingOverride"/>
+        /// with All) on the selected node; CustomSecondaryLaneSystem skips vanilla markings while
+        /// it is set. User lines already hide vanilla markings; this switch also works on a node
+        /// without any.</summary>
         private void OnToggleVanillaMarkings()
         {
             var node = _tool?.SelectedNode ?? Entity.Null;
@@ -739,8 +691,8 @@ namespace TownRoadLane
             var lines = EntityManager.GetBuffer<MarkingLine>(node);
             if (lineIndex < 0 || lineIndex >= lines.Length) return;
             lines.RemoveAt(lineIndex);
-            // Surgical reindex (segments keep their overrides, area anchors shift) — the old
-            // wipe-everything reset every user tweak on EVERY line when one was deleted.
+            // Reindex rather than rebuild, so the other lines keep their segment overrides and
+            // area anchors follow the shifted indices.
             MarkingTopologySystem.OnLineRemoved(EntityManager, node, lineIndex);
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
@@ -748,26 +700,24 @@ namespace TownRoadLane
             log.Info($"UI: deleted line#{lineIndex} on node#{node.Index} — segment overrides and area anchors reindexed");
         }
 
-        // --- Mode + next-style commands (panel mirrors of the Y / U / A hotkeys) ---
+        // Panel counterparts of the Y / U / A hotkeys.
 
-        /// <summary>Panel dropdown: style for the NEXT line drawn. Same state the Y hotkey cycles.</summary>
+        /// <summary>Style for the next line drawn (the Y hotkey cycles the same value).</summary>
         private void OnSetCurrentStyle(int style)
         {
             _tool?.SetCurrentStyle((MarkingStyle)style);
         }
 
-        /// <summary>Panel dropdown: fill style for the NEXT area closed. Same state the U hotkey cycles.</summary>
+        /// <summary>Fill style for the next area closed (the U hotkey cycles the same value).</summary>
         private void OnSetCurrentAreaStyle(int styleId)
         {
             _tool?.SetCurrentAreaStyle(styleId);
         }
 
-        // --- Pinned favourite styles (dropdown pin buttons) ---
-
-        // Apply() (not ApplyAndSave): each ApplyAndSave is an independent async read-modify-write
-        // of the settings file that races with the Options screen's own saves — a second
-        // concurrent writer was losing toggle edits (2.4.2 forum report). Apply() marks the
-        // state dirty and the coalesced saver in TownRoadLaneSetting lands one final write.
+        // Pinned styles. Apply(), not ApplyAndSave(): each ApplyAndSave is a separate async
+        // read-modify-write of the settings file that races with the Options screen's own saves
+        // and loses edits. Apply() marks the settings dirty and the coalescing saver in
+        // TownRoadLaneSetting writes once.
         private void OnTogglePinLineStyle(int style)
         {
             if (Mod.Settings == null) return;
@@ -807,8 +757,8 @@ namespace TownRoadLane
             return string.Join(",", ids);
         }
 
-        /// <summary>Panel mode switch: NodeSelected ⇄ AreaSelecting. Entering clears any running
-        /// contour; leaving drops a partial contour without committing (same as the A hotkey).</summary>
+        /// <summary>Switches between NodeSelected and AreaSelecting, like the A hotkey. Leaving
+        /// area mode drops an unfinished contour.</summary>
         private void OnToggleAreaMode()
         {
             if (_tool == null) return;
@@ -818,10 +768,8 @@ namespace TownRoadLane
                 _tool.TryEnterAreaMode();
         }
 
-        // --- Area commands (list rows in the panel) ---
-
-        /// <summary>Change the fill style of a committed area. Emission diffs prefab per tick and
-        /// respawns the vanilla Area entity when the style prefab changes — no hash bust needed.</summary>
+        /// <summary>Emission compares the prefab every frame and respawns the Area entity when it
+        /// changes, so no hash reset is needed here.</summary>
         private void OnSetAreaStyle(int areaIndex, int styleId)
         {
             var node = _tool?.SelectedNode ?? Entity.Null;
@@ -836,8 +784,8 @@ namespace TownRoadLane
             log.Info($"UI: set area#{areaIndex} style → {styleId} on node#{node.Index}");
         }
 
-        /// <summary>Hide/show a committed area without deleting it. Pieces keep their own
-        /// visibility flags, so hide → show restores the previous piece pattern.</summary>
+        /// <summary>Pieces keep their own visibility flags, so hiding and showing an area again
+        /// restores its previous piece pattern.</summary>
         private void OnToggleAreaVisible(int areaIndex)
         {
             var node = _tool?.SelectedNode ?? Entity.Null;
@@ -852,9 +800,8 @@ namespace TownRoadLane
             log.Info($"UI: area#{areaIndex} on node#{node.Index} → visible={area.visible}");
         }
 
-        /// <summary>Delete a committed area: drop its buffer entry + vertex slice, remap the
-        /// firstVertex offsets of the areas after it, then force a piece recompute (piece
-        /// headers reference areas by index, so every index after the deleted one shifts).</summary>
+        /// <summary>Removes the area and its vertex slice, shifts the firstVertex offsets of the
+        /// areas after it, and forces a piece recompute.</summary>
         private void OnDeleteArea(int areaIndex)
         {
             var node = _tool?.SelectedNode ?? Entity.Null;
@@ -882,8 +829,8 @@ namespace TownRoadLane
                 }
             }
 
-            // Piece headers address areas by index — bust the combined hash so
-            // MarkingAreaTopologySystem rebuilds them against the shifted list.
+            // Pieces refer to areas by index, so MarkingAreaTopologySystem has to rebuild them
+            // against the shifted list.
             if (EntityManager.HasComponent<MarkingAreaTopologyState>(node))
                 EntityManager.SetComponentData(node, new MarkingAreaTopologyState { combinedHash = 0 });
             if (!EntityManager.HasComponent<Updated>(node))
@@ -892,11 +839,10 @@ namespace TownRoadLane
             log.Info($"UI: deleted area#{areaIndex} on node#{node.Index} ({areas.Length} remaining)");
         }
 
-        /// <summary>Full reset of the selected node: every line, segment, area and the vanilla
-        /// override go away in one shot, restoring stock game markings. Buffers are cleared (not
-        /// removed) — emission systems diff against the now-empty desired sets and despawn all
-        /// our sublanes / Area entities on the next tick, and the absence of user lines plus the
-        /// removed MarkingOverride lets CustomSecondaryLaneSystem regenerate vanilla markings.</summary>
+        /// <summary>Removes every line, segment, area and the vanilla override from the selected
+        /// node, restoring the stock markings. Buffers are cleared rather than removed: emission
+        /// then sees empty sets and despawns all the mod's lanes and Area entities, and
+        /// CustomSecondaryLaneSystem regenerates the vanilla markings.</summary>
         private void OnResetNode()
         {
             var node = _tool?.SelectedNode ?? Entity.Null;
@@ -927,19 +873,18 @@ namespace TownRoadLane
         }
     }
 
-    // --- Binding payloads (serialized by GenericUIWriter; field names ARE the JS contract,
-    //     hence camelCase — they must match the interfaces in useToolState.ts) ---
+    // Binding payloads. GenericUIWriter serializes field names verbatim, so they are camelCase
+    // and must match the interfaces in useToolState.ts and usePinnedStyles.ts.
 
-    /// <summary>Panel structure snapshot — everything the React panel renders except the
-    /// camera-dependent popover anchors (those travel via <see cref="SegmentPointVM"/>).</summary>
-    /// <summary>Pinned favourite style ids for the UI dropdowns. Field names are the React
-    /// contract (GenericUIWriter serializes them verbatim) — see usePinnedStyles.ts.</summary>
+    /// <summary>Pinned style ids for the UI dropdowns.</summary>
     public class PinnedStylesVM
     {
         public int[] lineStyles = Array.Empty<int>();
         public int[] areaStyles = Array.Empty<int>();
     }
 
+    /// <summary>Everything the panel renders except the camera-dependent popover anchors
+    /// (those travel as <see cref="SegmentPointVM"/>).</summary>
     public class PanelStateVM
     {
         public bool isActive;
@@ -986,10 +931,9 @@ namespace TownRoadLane
         public int visiblePieces;
     }
 
-    /// <summary>Screen-space anchor of one in-world popover (CSS px, origin top-left).
-    /// Segment midpoints carry (lineIndex, segmentIndex); area centroids carry areaIndex
-    /// with the segment fields at -1 — both travel on the one GetScreenPoints binding.
-    /// Only on-screen anchors are sent — absence means "hide the popover".</summary>
+    /// <summary>Screen anchor of one in-world popover (CSS px, origin top-left). Segment
+    /// anchors carry (lineIndex, segmentIndex); area anchors carry areaIndex with the segment
+    /// fields at -1. A popover without an anchor is hidden.</summary>
     public class SegmentPointVM
     {
         public int lineIndex;
@@ -997,7 +941,7 @@ namespace TownRoadLane
         public int areaIndex = -1;
         public float x;
         public float y;
-        // Camera-distance popover scale, [0.65, 1] — see PopoverScale.
+        // Camera-distance popover scale in [0.65, 1], see PopoverScale.
         public float scale = 1f;
     }
 }

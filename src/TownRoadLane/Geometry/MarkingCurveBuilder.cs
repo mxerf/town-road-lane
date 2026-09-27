@@ -6,24 +6,19 @@ using Unity.Mathematics;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Single source of truth for "build the smooth Bezier between two MarkingEndpoint(s)".
-    /// Previously this lived in three places (MarkingOverlaySystem.BuildSmoothCurve,
-    /// MarkingPairEmissionSystem.SpawnSublane, and the implicit "drag preview must match emission"
-    /// invariant). Stage 5b adds a fourth caller (topology recompute), so it's time to centralise.
-    ///
-    /// Pull factor matches what users see in the drag preview and what gets emitted as a sublane —
-    /// changing it here updates all three call sites at once.
+    /// Builds the smooth Bezier between two marking endpoints. The drag preview, the emitted
+    /// lane and the topology recompute all go through here, so the line the user sees while
+    /// dragging is exactly the line that gets painted.
     /// </summary>
     public static class MarkingCurveBuilder
     {
-        // Control-point offset = chord * kPullFactor along each endpoint's inward tangent.
-        // 0.55 ≈ quarter circle; 0.4 = softer arc, matches vanilla divider feel.
-        // Default for new lines and the drag preview; existing lines carry their own
-        // per-line factor in MarkingLine.curvature (0 = straight chord).
+        // Control-point offset = chord * pull factor along each endpoint's travel tangent.
+        // 0.4 gives a softer arc than a true quarter circle, close to vanilla dividers. Each line
+        // stores its own factor in MarkingLine.curvature (0 = straight chord).
         public const float kPullFactor = 0.4f;
 
-        // Upper bound for the per-line factor — beyond ~0.8 the curve starts looping back on
-        // itself for short chords. UI maps its 0..100% stepper onto [0, kMaxPullFactor].
+        // Beyond ~0.8 the curve starts looping back on itself for short chords. The UI maps its
+        // 0..100% stepper onto [0, kMaxPullFactor].
         public const float kMaxPullFactor = 0.8f;
 
         public static Bezier4x3 Build(float3 a, float2 ta, float3 b, float2 tb)
@@ -37,12 +32,10 @@ namespace TownRoadLane
             return new Bezier4x3(a, a + ta3 * pull, b + tb3 * pull, b);
         }
 
-        /// <summary>Default pull factor for a NEW line between two endpoints: the cubic-Bezier
-        /// control offset that best approximates a circular arc matching the endpoint tangents.
-        /// The historic constant <see cref="kPullFactor"/> (0.4) is this formula's value at a 90°
-        /// turn; sharper connections (diverging ramp lanes, gores) need a larger pull or the
-        /// default curve runs visibly flatter than the carriageway edge. Existing lines keep
-        /// their stored per-line factor — this only seeds new ones.</summary>
+        /// <summary>Starting pull factor for a new line: the control offset that best approximates
+        /// a circular arc matching the endpoint tangents. <see cref="kPullFactor"/> is this
+        /// formula's value at a 90° turn; sharper connections (diverging ramp lanes, gores) need a
+        /// larger pull or the curve runs visibly flatter than the carriageway edge.</summary>
         public static float AdaptivePullFactor(float3 a, float2 ta, float3 b, float2 tb)
         {
             float chord = math.distance(a, b);
@@ -61,15 +54,13 @@ namespace TownRoadLane
         public static float AdaptivePullFactor(MarkingEndpoint src, MarkingEndpoint dst)
             => AdaptivePullFactor(src.position, src.tangent, dst.position, dst.tangent);
 
-        // MarkingEndpoint stores tangent pointing INTO the edge (away from the intersection).
-        // For a classic cross-junction pair the curve should leave each dot the other way —
-        // into the intersection — so the historic behaviour is to negate. But a SAME-LANE
-        // longitudinal pair (a setback dot with its node-cap dot) has one tangent already
-        // pointing straight at the partner; negating that one would loop the curve through
-        // the intersection and back. Per endpoint: if the into-edge tangent aligns strongly
-        // with the direction to the partner (cos > 0.5, i.e. within 60°), keep it; otherwise
-        // negate as before. Lateral pairs (stop lines across one road, cos ≈ 0) and all
-        // cross-junction pairs (cos < 0) keep their historic shape.
+        // MarkingEndpoint.tangent points into the edge, away from the intersection. A curve across
+        // the junction has to leave each dot the other way, so the tangent is normally negated.
+        // A longitudinal pair on the same lane (a setback dot and its node-cap dot) is different:
+        // one tangent already points at the partner, and negating it would loop the curve through
+        // the intersection and back. So a tangent within 60° of the direction to the partner
+        // (cos > 0.5) is kept as is. Lateral pairs (cos ≈ 0) and cross-junction pairs (cos < 0)
+        // are still negated.
         private static void ResolveTravelTangents(float3 a, float2 ta, float3 b, float2 tb, float chord, out float3 ta3, out float3 tb3)
         {
             ta3 = new float3(ta.x, 0f, ta.y);
@@ -95,10 +86,8 @@ namespace TownRoadLane
             return true;
         }
 
-        /// <summary>Variant that reuses an already-extracted endpoint list — cheaper when looking
-        /// up many lines on the same node (avoid re-extracting per line). Accepts
-        /// <see cref="IReadOnlyList{T}"/> so callers can pass either the extractor's
-        /// <c>List&lt;MarkingEndpoint&gt;</c> or the tool's exposed <see cref="IReadOnlyList{T}"/>.</summary>
+        /// <summary>Same as the node overload, but reuses an already extracted endpoint list,
+        /// which is cheaper when resolving many lines on one node.</summary>
         public static bool TryBuild(IReadOnlyList<MarkingEndpoint> endpoints, MarkingLine line, out Bezier4x3 bez)
         {
             bez = default;

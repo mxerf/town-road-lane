@@ -1,44 +1,42 @@
 import { bindValue, useValue, trigger } from "cs2/api";
 
-// Mirrors PanelStateVM published by C# `TownRoadLaneUISystem` (typed binding via
-// GenericUIWriter — field names ARE the contract). C# pushes a fresh object only
-// when a content hash of the authoritative buffers changes; React resync is
-// automatic via useValue. Screen-space popover anchors travel on a separate
-// per-frame binding — see positionRegistry.ts.
+// Mirrors PanelStateVM published by the C# `TownRoadLaneUISystem`. The binding is typed
+// through GenericUIWriter, so field names are the contract. C# pushes a new object only when
+// a hash of the marking buffers changes. Screen-space popover anchors travel on a separate
+// per-frame binding (positionRegistry.ts).
 
 export interface SegmentVM {
   lineIndex: number;
-  segmentIndex: number;   // dense per-line counter (0..K-1 for visible-or-not order in buffer)
+  segmentIndex: number;   // dense per-line index in buffer order, hidden segments included
   tStart: number;
   tEnd: number;
   visible: boolean;
-  // Per-segment style (Stage 5d) — defaults from MarkingLine.style at creation but the user
-  // can override individual pieces via the popover.
+  // Starts as the line's style; the user can override single segments in the popover.
   style: number;
-  lengthM: number;        // chord length of the segment in metres (approximated)
+  lengthM: number;        // approximate chord length in metres
 }
 
 export interface LineVM {
   lineIndex: number;
-  style: number;          // matches the MarkingStyle enum on C# side
-  // Curvature stepper value, integer percent 0..100. 0 = straight chord, 50 = the
-  // default arc (pull factor 0.4), 100 = maximum roundness (pull factor 0.8).
+  style: number;          // MarkingStyle enum value
+  // Curvature in integer percent: 0 is a straight chord, 50 the default arc (pull factor
+  // 0.4), 100 the roundest (pull factor 0.8).
   curv: number;
   segments: SegmentVM[];
 }
 
-// One user-closed polygon area on the selected node. pieceCount/visiblePieces
-// reflect the post-split state (lines crossing the area cut it into pieces).
+// A closed polygon area on the selected node. Lines crossing the area cut it into pieces;
+// pieceCount and visiblePieces count those.
 export interface AreaVM {
   areaIndex: number;
-  styleId: number;        // index into the C#-side kStyleSurfaceNames catalogue
+  styleId: number;        // index into the C# kStyleSurfaceNames catalogue
   visible: boolean;
   vertexCount: number;
   pieceCount: number;
   visiblePieces: number;
 }
 
-// Mirrors MarkingNodeToolSystem.State — drives the panel's mode UI.
+// Mirrors MarkingNodeToolSystem.State.
 export const TOOL_STATE = {
   Default: 0,
   NodeSelected: 1,
@@ -47,32 +45,28 @@ export const TOOL_STATE = {
 } as const;
 
 export interface ToolStateVM {
-  isActive: boolean;       // tool currently the active tool
-  // Tool sub-state (see TOOL_STATE). AreaSelecting means the user is collecting
-  // polygon vertices; the panel shows draft progress + a cancel affordance.
+  isActive: boolean;
+  // TOOL_STATE value. In AreaSelecting the panel shows the contour progress and a cancel
+  // button.
   toolState: number;
-  // Vertices collected so far in the running area contour (AreaSelecting only).
+  // Vertices collected so far in the area contour being drawn (AreaSelecting only).
   areaVertexCount: number;
-  // Fill style for the NEXT area the user closes (cycled by U / set by the panel).
+  // Fill style for the next area the user closes (cycled by U or set in the panel).
   currentAreaStyle: number;
-  selectedNodeIndex: number; // -1 when no node selected
-  currentStyle: number;    // enum value
-  // Reverse hover-bridge: lineIndex of the line the user clicked on in the game world
-  // (NodeSelected state, not a dot click — proximity to the line's Bezier). React watches
-  // lastClickedTick (monotonic, bumped on every click even if the same line) and
-  // auto-expands the matching accordion row.
+  selectedNodeIndex: number; // -1 when no node is selected
+  currentStyle: number;    // style for the next line drawn
+  // Line the user clicked in the world (near its Bezier, not on a dot). lastClickedTick is
+  // bumped on every click, even on the same line, and the panel expands the matching row
+  // when it changes.
   lastClickedLine: number;
   lastClickedTick: number;
-  // Game→UI hover (Phase B5): index of the line the cursor is currently over in the
-  // world (-1 when nothing). React mirrors this to highlight the matching panel row,
-  // making the bridge symmetric — UI hover lights up the line in the world, and
-  // world hover lights up the row in the panel.
+  // Line under the cursor in the world, -1 for none. The panel highlights its row, the
+  // counterpart of cmdSetHoveredLine.
   hoveredLineInGame: number;
-  // Same bridge for areas (Phase 7c): cursor inside a committed area's piece → its
-  // panel row lights up. Lines/dots win when both match.
+  // Area whose piece is under the cursor in the world. Lines and dots win when both match.
   hoveredAreaInGame: number;
-  // True when the selected node carries the MarkingOverride{All} component — vanilla
-  // markings on the node are suppressed regardless of user lines.
+  // The selected node carries MarkingOverride{All}: its vanilla markings are hidden
+  // regardless of user lines.
   vanillaHidden: boolean;
   lines: LineVM[];
   areas: AreaVM[];
@@ -98,9 +92,8 @@ const STATE_BINDING = bindValue<ToolStateVM>("TownRoadLane", "GetPanelState", EM
 
 export const useToolState = (): ToolStateVM => {
   const state = useValue(STATE_BINDING);
-  // The typed binding guarantees the full field set (GenericUIWriter serializes
-  // every VM field, arrays initialised empty on the C# side). Guard only against
-  // a wholesale null/undefined push so consumers can trust ToolStateVM invariants.
+  // GenericUIWriter always writes every field and C# initialises the arrays, so only a
+  // null or undefined push needs guarding.
   if (!state) return EMPTY;
   return {
     ...state,
@@ -109,7 +102,7 @@ export const useToolState = (): ToolStateVM => {
   };
 };
 
-// --- Commands (push, React → C#) ---
+// Commands to C#.
 
 export const cmdToggleSegment = (lineIndex: number, segmentIndex: number) => {
   trigger("TownRoadLane", "ToggleSegment", lineIndex, segmentIndex);
@@ -119,8 +112,7 @@ export const cmdSetLineStyle = (lineIndex: number, style: number) => {
   trigger("TownRoadLane", "SetLineStyle", lineIndex, style);
 };
 
-// Per-segment style override (Stage 5d). Same arg layout as cmdToggleSegment,
-// plus the new style value. The line-level default style stays unchanged.
+// Per-segment style override; the line's own style stays unchanged.
 export const cmdSetSegmentStyle = (lineIndex: number, segmentIndex: number, style: number) => {
   trigger("TownRoadLane", "SetSegmentStyle", lineIndex, segmentIndex, style);
 };
@@ -129,85 +121,74 @@ export const cmdDeleteLine = (lineIndex: number) => {
   trigger("TownRoadLane", "DeleteLine", lineIndex);
 };
 
-// Set the line's curvature from the panel stepper. percent ∈ [0, 100]; C# maps
-// it onto the Bezier pull-factor range [0, 0.8] (50% = the 0.4 default arc).
+// percent is 0..100; C# maps it onto the Bezier pull factor range 0..0.8.
 export const cmdSetLineCurvature = (lineIndex: number, percent: number) => {
   trigger("TownRoadLane", "SetLineCurvature", lineIndex, percent);
 };
 
-// Toggle the standalone "hide vanilla markings" override on the selected node.
-// Works with zero lines drawn — this is the pure hide switch.
+// Toggles the "hide vanilla markings" override on the selected node. Works with no lines
+// drawn.
 export const cmdToggleVanillaMarkings = () => {
   trigger("TownRoadLane", "ToggleVanillaMarkings");
 };
 
-// Toggle the marking tool active/inactive — same as Ctrl+M or the settings
-// button. Triggered from the toolbar button in GameTopLeft.
+// Toggles the marking tool, same as Ctrl+M. Used by the toolbar button in GameTopLeft.
 export const cmdActivateTool = () => {
   trigger("TownRoadLane", "ActivateTool");
 };
 
-// Style for the NEXT line drawn — panel dropdown mirror of the Y hotkey cycle.
+// Style for the next line drawn; the panel counterpart of the Y hotkey.
 export const cmdSetCurrentStyle = (style: number) => {
   trigger("TownRoadLane", "SetCurrentStyle", style);
 };
 
-// Fill style for the NEXT area closed — panel dropdown mirror of the U hotkey.
+// Fill style for the next area closed; the panel counterpart of the U hotkey.
 export const cmdSetCurrentAreaStyle = (styleId: number) => {
   trigger("TownRoadLane", "SetCurrentAreaStyle", styleId);
 };
 
-// Switch between line drawing (NodeSelected) and polygon-area collection
-// (AreaSelecting) — panel mode buttons, mirrors the A hotkey. Leaving area
-// mode drops any partially collected contour without committing.
+// Switches between line drawing (NodeSelected) and area drawing (AreaSelecting), like the
+// A hotkey. Leaving area mode drops an unfinished contour.
 export const cmdToggleAreaMode = () => {
   trigger("TownRoadLane", "ToggleAreaMode");
 };
 
-// Change the fill style of a committed area (panel dropdown per area row).
 export const cmdSetAreaStyle = (areaIndex: number, styleId: number) => {
   trigger("TownRoadLane", "SetAreaStyle", areaIndex, styleId);
 };
 
-// Hide/show a committed area without deleting it.
 export const cmdToggleAreaVisible = (areaIndex: number) => {
   trigger("TownRoadLane", "ToggleAreaVisible", areaIndex);
 };
 
-// Delete a committed area (its pieces + vanilla Area entities follow next tick).
+// The area's pieces and vanilla Area entities go away on the next tick.
 export const cmdDeleteArea = (areaIndex: number) => {
   trigger("TownRoadLane", "DeleteArea", areaIndex);
 };
 
-// Full reset of the selected node: all lines, all areas, and the vanilla-hide
-// override — back to stock game markings in one click.
+// Removes all lines and areas from the selected node and clears the vanilla-hide override.
 export const cmdResetNode = () => {
   trigger("TownRoadLane", "ResetNode");
 };
 
-// Tell C# which line row the user is currently hovering over in the panel.
-// MarkingOverlaySystem reads this and draws that line on the road thicker +
-// brighter so the user can correlate UI row ↔ physical line. Pass -1 on leave.
+// Line row hovered in the panel; MarkingOverlaySystem draws that line thicker and brighter
+// on the road. Pass -1 on leave.
 export const cmdSetHoveredLine = (lineIndex: number) => {
   trigger("TownRoadLane", "SetHoveredLine", lineIndex);
 };
 
-// Per-segment hover (C3). Same idea as cmdSetHoveredLine but scoped to a
-// specific segment of a specific line — overlay highlights ONLY that segment
-// (brighter, slightly thicker) rather than the whole line. Pass (-1, -1) on
-// leave. Used by SegmentPopover hover handlers.
+// Like cmdSetHoveredLine, but highlights a single segment. Pass (-1, -1) on leave.
 export const cmdSetHoveredSegment = (lineIndex: number, segmentIndex: number) => {
   trigger("TownRoadLane", "SetHoveredSegment", lineIndex, segmentIndex);
 };
 
-// Area counterpart of cmdSetHoveredLine (Phase 7c): the overlay outlines every piece
-// of this area in the world. Used by the area row and the area popover.
+// Area counterpart of cmdSetHoveredLine: the overlay outlines every piece of the area.
 export const cmdSetHoveredArea = (areaIndex: number) => {
   trigger("TownRoadLane", "SetHoveredArea", areaIndex);
 };
 
-// Race-safe leave: passes the row's OWN index; C# clears only while that index still
-// owns the hover (cohtml can deliver the next row's mouseenter before this mouseleave).
+// Passes the row's own index, and C# clears the hover only if that index still holds it:
+// cohtml can deliver the next row's mouseenter before this row's mouseleave.
 export const cmdClearHoveredArea = (areaIndex: number) => {
   trigger("TownRoadLane", "ClearHoveredArea", areaIndex);
 };

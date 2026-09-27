@@ -102,6 +102,7 @@ The build compiles the C# systems, bundles the React UI via webpack, and deploys
 ## Credits
 
 - **G87** — the marking prefab packs this mod builds its styles on.
+- **TrafficToolEssentials** (ZessonsDE) — the UI build pipeline and several cohtml UI patterns are modelled on it.
 - Author: **mxerf**
 
 ## License

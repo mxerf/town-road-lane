@@ -1,13 +1,9 @@
-// Typed i18n dictionary. The shape of en-US is the canonical key set — TS
-// will surface any missing keys in other locales as a compile error (via the
-// LocaleDict constraint below), so adding a string in EN and forgetting RU
-// fails the build instead of silently falling through to a default at runtime.
+// Typed i18n dictionary. en-US defines the key set, and LocaleDict makes a key missing from
+// another locale a compile error rather than a silent fallback at runtime.
 //
-// Interpolation: write placeholders as {name} in the string and pass them
-// through the params object to t(): t("panel.title", { n: 5 }).
-//
-// To add a new language: clone the en-US block, translate values, and add it
-// to the STRINGS object. TS will require every key to be present.
+// Placeholders are written as {name} and filled from t()'s params:
+// t("panel.title", { n: 5 }). A new language is a translated copy of the en-US block added
+// to STRINGS.
 
 const enUS = {
   // Toolbar
@@ -22,7 +18,7 @@ const enUS = {
   "panel.error.title":        "Panel error",
   "panel.error.retry":        "Retry",
 
-  // Live tool status (mirrors MarkingNodeToolSystem.State)
+  // Tool status (MarkingNodeToolSystem.State)
   "status.line.first":        "Click the first point of a line",
   "status.line.second":       "Click the second point to finish the line",
   "status.area":              "Area mode — points placed: {n}",
@@ -65,7 +61,7 @@ const enUS = {
   "area.delete":              "Delete area",
   "area.style":               "Fill style",
 
-  // Area fill styles (indexes match kStyleSurfaceNames on the C# side)
+  // Area fill styles (indexes match the C# kStyleSurfaceNames)
   "areaStyle.0":              "Concrete",
   "areaStyle.1":              "Junction box",
   "areaStyle.2":              "White stripes",
@@ -153,7 +149,7 @@ const ruRU: LocaleDict = {
   "panel.error.title":        "Ошибка панели",
   "panel.error.retry":        "Повторить",
 
-  // Live tool status (mirrors MarkingNodeToolSystem.State)
+  // Tool status (MarkingNodeToolSystem.State)
   "status.line.first":        "Кликните первую точку линии",
   "status.line.second":       "Кликните вторую точку — линия завершится",
   "status.area":              "Режим области — точек: {n}",
@@ -196,7 +192,7 @@ const ruRU: LocaleDict = {
   "area.delete":              "Удалить область",
   "area.style":               "Стиль заливки",
 
-  // Area fill styles (indexes match kStyleSurfaceNames on the C# side)
+  // Area fill styles (indexes match the C# kStyleSurfaceNames)
   "areaStyle.0":              "Бетон",
   "areaStyle.1":              "Вафельная разметка",
   "areaStyle.2":              "Белая штриховка",
@@ -279,9 +275,8 @@ export type StringKey = keyof typeof enUS;
 
 export const DEFAULT_LOCALE: Locale = "en-US";
 
-// Map an arbitrary CS2 locale code to one we ship. CS2 uses BCP-47-ish codes
-// (en-US, ru-RU, de-DE, ja-JP, etc); we collapse unsupported regions to the
-// base language and ultimately fall back to en-US.
+// Maps a CS2 locale code (en-US, de-DE, ...) to a shipped locale: exact match first, then
+// any locale with the same base language, then en-US.
 export const resolveLocale = (raw: string | null | undefined): Locale => {
   if (!raw) return DEFAULT_LOCALE;
   if (raw in STRINGS) return raw as Locale;

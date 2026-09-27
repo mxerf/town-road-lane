@@ -5,19 +5,18 @@ using Unity.Mathematics;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Phase 6e: one sub-polygon produced by splitting a <see cref="MarkingArea"/> along
-    /// every <see cref="MarkingLine"/> that fully crosses it. Computed by
-    /// <c>MarkingAreaTopologySystem</c> and consumed by <c>MarkingAreaEmissionSystem</c>:
-    /// each visible piece becomes one vanilla <c>Game.Areas.Area</c> entity.
+    /// Resolved world-space outline of a <see cref="MarkingArea"/>, built by
+    /// <c>MarkingAreaTopologySystem</c>. Each visible piece becomes one vanilla
+    /// <c>Game.Areas.Area</c> entity in <c>MarkingAreaEmissionSystem</c>. Every area currently
+    /// has exactly one piece (pieceIndex 0); lines drawn across an area do not cut it.
     ///
-    /// Buffer layout mirrors <see cref="MarkingSegment"/>: flat per-node list, every entry
-    /// names its owning area (areaIndex) + dense per-area counter (pieceIndex). Vertex
-    /// positions live in the companion <see cref="MarkingAreaPieceVertex"/> buffer, indexed
-    /// by [firstVertex, firstVertex+vertexCount).
+    /// Flat per-node list like <see cref="MarkingSegment"/>. Vertices are the slice
+    /// [firstVertex, firstVertex + vertexCount) of the node's
+    /// <see cref="MarkingAreaPieceVertex"/> buffer.
     ///
-    /// Persistence: serialised so save/load round-trips don't lose per-piece visibility
-    /// toggles. Topology system rebuilds the geometry from MarkingArea+MarkingLine, but
-    /// preserves visibility for pieces whose centroid still lies inside an old piece.
+    /// Serialized: the saved ring is the fallback geometry when an area's anchors can't be
+    /// resolved, and it keeps per-piece visibility across loads. On a rebuild a new piece
+    /// inherits the visibility of the old piece that contains its centroid.
     /// </summary>
     [InternalBufferCapacity(0)]
     public struct MarkingAreaPiece : IBufferElementData, ISerializable
@@ -27,8 +26,7 @@ namespace TownRoadLane
         public bool visible;
         public int firstVertex;
         public int vertexCount;
-        // Cached centroid so visibility-inheritance lookups don't have to re-read the vertex
-        // buffer just to compute it. Recomputed by MarkingAreaTopologySystem on each rewrite.
+        // Cached for visibility inheritance, recomputed on every rebuild.
         public float3 centroid;
 
         private const int kVersion = 1;
@@ -57,9 +55,8 @@ namespace TownRoadLane
     }
 
     /// <summary>
-    /// Phase 6e: one world-space vertex of a <see cref="MarkingAreaPiece"/>. Pre-computed so
-    /// emission doesn't re-run the polygon split on every tick — it just reads the cached
-    /// ring straight into <c>Game.Areas.Node[]</c> on the spawned area entity.
+    /// World-space vertex of a <see cref="MarkingAreaPiece"/>. Emission copies the ring straight
+    /// into the area's <c>Game.Areas.Node</c> buffer.
     /// </summary>
     [InternalBufferCapacity(0)]
     public struct MarkingAreaPieceVertex : IBufferElementData, ISerializable
@@ -81,10 +78,8 @@ namespace TownRoadLane
         }
     }
 
-    /// <summary>Per-node companion of <see cref="MarkingArea"/> + <see cref="MarkingLine"/>:
-    /// caches the combined hash at last successful piece recompute. Lets
-    /// <c>MarkingAreaTopologySystem</c> skip the O(areas * lines) split work when neither buffer
-    /// changed since last tick.</summary>
+    /// <summary>Hash of the node's area and line buffers at the last piece rebuild, so
+    /// <c>MarkingAreaTopologySystem</c> can skip the rebuild when neither changed.</summary>
     public struct MarkingAreaTopologyState : IComponentData
     {
         public int combinedHash;

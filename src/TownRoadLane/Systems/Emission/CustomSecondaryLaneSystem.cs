@@ -19,28 +19,20 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Scripting;
 
-// Verbatim copy of the vanilla `Game.Net.SecondaryLaneSystem` from `decomp/Game/Game.Net/SecondaryLaneSystem.cs`,
-// renamed and re-namespaced so we can register it instead of vanilla. Adds one extension on top of vanilla:
-// per-entity `MarkingOverride` check inside `UpdateLanesJob.UpdateLanes` — when an edge/node has
-// MarkingOverride{HideAll=true}, generation is skipped (old-lane removal still runs, so existing markings
-// disappear). Phase 4 will extend this with per-category gating and a node-pair suppression hashset.
-// MUST run on Modification4B, not 4 — that's where AllowBarrier<ModificationBarrier4B> lives. See K9 in
-// IMPLEMENTATION_PLAN.md.
+// Copy of the decompiled vanilla Game.Net.SecondaryLaneSystem, registered in its place. Must run in
+// Modification4B: that is where AllowBarrier<ModificationBarrier4B> applies.
 //
-// Differences from the decomp:
-//   - namespace renamed Game.Net → TownRoadLane.
-//   - class renamed SecondaryLaneSystem → CustomSecondaryLaneSystem.
-//   - [CompilerGenerated] dropped.
-//   - using Unity.Entities.Internal removed (mods can't use the InternalCompilerInterface helpers).
-//   - OnUpdate refreshed via __TypeHandle.__AssignHandles + direct field reads instead of
-//     InternalCompilerInterface.Get*; semantically equivalent.
-//   - Disambiguating using-aliases added below: in the original namespace `Game.Net`, bare names like
-//     `Node`/`Edge`/`SubLane`/`CarLane` resolved to the local Game.Net.* types. Outside that namespace
-//     the names collide with Game.Areas / Game.Pathfind / Game.Prefabs, so we alias bare → Game.Net.*
-//     to keep the body untouched.
-//
-// All Game.Net / Game.Prefabs / Game.Common / Game.Tools / Game.Rendering types touched here are public —
-// the portability audit (memory: project-v2-architecture.md) found zero blockers.
+// Differences from vanilla (marked "TRL:" in the body to help port future game patches; the extra
+// lookups are wired up next to the vanilla ones in __AssignHandles and OnUpdate):
+//   - Edges and nodes with MarkingOverride{HideAll=true}, and nodes with a non-empty MarkingLine
+//     buffer, skip lane generation. Old-lane removal still runs, so their vanilla markings disappear.
+//   - FillOldLaneBuffer ignores sublanes tagged TRLPairLink.
+//   - Namespace Game.Net renamed to TownRoadLane, class renamed, [CompilerGenerated] dropped.
+//   - No Unity.Entities.Internal (mods cannot use the InternalCompilerInterface helpers): OnUpdate
+//     calls __TypeHandle.__AssignHandles and reads the fields directly, which is equivalent.
+//   - The using aliases below: inside namespace Game.Net, bare names like Node, Edge, SubLane and
+//     CarLane resolve to Game.Net types; elsewhere they collide with Game.Areas, Game.Pathfind and
+//     Game.Prefabs, so the aliases keep the body unchanged.
 using Game;
 using Game.Net;
 using Node = Game.Net.Node;
@@ -56,8 +48,8 @@ using Elevation = Game.Net.Elevation;
 
 namespace TownRoadLane;
 
-// `partial` is required because Unity.Entities' Roslyn source generator emits a backing partial for any
-// SystemBase. (Vanilla doesn't have this in the decomp because the decompiler inlined the generated half.)
+// `partial` is required: the Unity.Entities source generator emits the other half of every SystemBase.
+// The decompiled vanilla class has it inlined.
 public partial class CustomSecondaryLaneSystem : GameSystemBase
 {
 	private struct LaneKey(Lane lane, Entity prefab) : IEquatable<LaneKey>
@@ -297,28 +289,16 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public BufferLookup<ObjectRequirementElement> m_LaneRequirements;
 
-		// === v2 phase 1 ===
-		// Per-edge / per-node user override. Read inside UpdateLanes — when an entity has
-		// MarkingOverride{hideAll=true}, generation is skipped but the old-lane removal pass
-		// still runs, so existing markings disappear.
+		// TRL: per-edge / per-node override, see UpdateLanes.
 		[ReadOnly]
 		public ComponentLookup<MarkingOverride> m_MarkingOverrideData;
 
-		// === v2 phase 4 / phase 5b ===
-		// Per-node user-drawn marking lines. When a node entity has a non-empty MarkingLine buffer,
-		// vanilla CreateSecondaryLane calls are skipped here; MarkingSegmentEmissionSystem
-		// (managed, Modification1) creates the actual marker sublanes off-job.
-		// Was MarkingPair pre-5b — same semantics, just the new schema. Field name kept so the
-		// _RO_BufferLookup wiring at the bottom of the file stays a one-line change.
+		// TRL: user-drawn lines on a node. The field keeps its old name (the buffer used to be
+		// MarkingPair).
 		[ReadOnly]
 		public BufferLookup<MarkingLine> m_MarkingPairs;
 
-		// Tag on sublanes we own (MarkingPairEmissionSystem). FillOldLaneBuffer must skip these:
-		// SecondaryLaneReferencesSystem registers them into node.SubLane buffer on the same tick
-		// they're created, and without this guard FillOldLaneBuffer scoops them into m_OldLanes →
-		// generation gate skips → RemoveUnusedOldLanes wipes them with Deleted. Net effect: every
-		// tick that Updates the node was killing our own pairs (root cause of "+6 created /
-		// existing returned 5" + half-render + flicker).
+		// TRL: tag on sublanes spawned by the mod from the old MarkingPair data. See FillOldLaneBuffer.
 		[ReadOnly]
 		public ComponentLookup<TRLPairLink> m_TRLPairLinkData;
 
@@ -394,14 +374,12 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 					}
 				}
 				FillOldLaneBuffer(lanes, laneBuffer.m_OldLanes);
-				// v2 phase 1: per-entity opt-out. We let FillOldLaneBuffer run above (collects existing
-				// secondary lanes), then skip both generation loops by jumping straight to
-				// RemoveUnusedOldLanes — anything we don't recreate gets cleaned up, so toggling the
-				// override on a live road removes its markings on the next update.
+				// TRL: skip generation for overridden edges and nodes. FillOldLaneBuffer has already
+				// collected the existing lanes, so RemoveUnusedOldLanes deletes them and the markings
+				// disappear on the next update.
 				bool skipGeneration = m_MarkingOverrideData.TryGetComponent(owner, out var __markingOverride) && __markingOverride.HideAll;
-				// v2 phase 4/5b: a node with a non-empty MarkingLine buffer fully overrides vanilla
-				// markings on that node — vanilla generation is skipped here. Actual marker
-				// sublanes are produced by MarkingSegmentEmissionSystem (managed, Modification1).
+				// TRL: a node with user-drawn lines gets no vanilla markings at all; its lines are
+				// spawned by MarkingSegmentEmissionSystem.
 				bool hasUserPairs = isNode && m_MarkingPairs.TryGetBuffer(owner, out var __pairs) && __pairs.Length > 0;
 				if (hasUserPairs) skipGeneration = true;
 				if (skipGeneration) { goto skipMarkingGeneration; }
@@ -892,28 +870,8 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 						CreateSecondaryLane(chunkIndex, ref laneIndex, owner, crossingLane.m_Prefab, laneBuffer, curveData, crossingLane.m_StartTangent, crossingLane.m_EndTangent, 0f, crossingLane.m_Hidden, flag, ownerTemp);
 					}
 				}
-				// === v2 phase 2a inject: anchor our edge-line on the curb-side city 3 m drive lanes ===
-				// Anchor pattern mirrors vanilla's DuplicateSides path (line ~855) for the RightLimit
-				// case, and the leftLane-only path for LeftLimit.
-				//
-				// Key rules learned from diagnosing in-game flag layout (see CarLaneFlagsDumpSystem):
-				//   1. m_LaneCorners contains BOTH edge lanes (physical lanes on this edge) and node
-				//      sublanes (per-direction routing lanes added on intersection chunks). We must
-				//      filter to EdgeLane only — otherwise on an intersection chunk we'd anchor an
-				//      edge-line on every turn-routing sublane and stack 6+ lines on a single curb.
-				//   2. RightLimit/LeftLimit are relative to the LANE's direction (not the road's).
-				//      For a Forward lane on right-hand traffic, RightLimit = curb side, LeftLimit
-				//      = median side. For an Inverted (backward) lane it's mirrored: RightLimit is
-				//      still curb (but the road's LEFT curb because the lane runs backward).
-				//   3. One-way road = no Invert mix on the entity's edge car lanes → both RightLimit
-				//      AND LeftLimit are curb (no median exists). Two-way → only RightLimit.
-				//   4. Anchor side: RightLimit → call CreateSecondaryLane with the lane as rightLane
-				//      (vanilla offsets the curve to the right of the lane). LeftLimit → leftLane
-				//      (offsets left). Without this distinction the line falls on the inner side.
+				// TRL: jump target for the skipped generation.
 				skipMarkingGeneration:
-				// Phase 4 step 2: managed emission via MarkingPairEmissionSystem (Modification1).
-				// Sublanes carrying TRLPairLink are explicitly skipped by FillOldLaneBuffer above,
-				// so they never enter m_OldLanes and RemoveUnusedOldLanes leaves them alone.
 				RemoveUnusedOldLanes(chunkIndex, lanes, laneBuffer.m_OldLanes);
 				laneBuffer.Clear();
 			}
@@ -1026,9 +984,9 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 			for (int i = 0; i < lanes.Length; i++)
 			{
 				Entity subLane = lanes[i].m_SubLane;
-				// Skip sublanes owned by MarkingPairEmissionSystem — their lifecycle is managed
-				// out-of-band (single ECB diff per tick, Modification1). If we let them through,
-				// the gate-skipped path drops to RemoveUnusedOldLanes and wipes them.
+				// TRL: sublanes the mod spawned itself are managed outside this system.
+				// SecondaryLaneReferencesSystem adds them to the node's SubLane buffer, so without
+				// this check they end up in the old-lane buffer and RemoveUnusedOldLanes deletes them.
 				if (m_TRLPairLinkData.HasComponent(subLane)) continue;
 				if (m_SecondaryLaneData.HasComponent(subLane))
 				{
@@ -1911,11 +1869,10 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 		[ReadOnly]
 		public BufferLookup<ObjectRequirementElement> __Game_Prefabs_ObjectRequirementElement_RO_BufferLookup;
 
-		// v2 phase 1
+		// TRL: lookups for the added job fields.
 		[ReadOnly]
 		public ComponentLookup<MarkingOverride> __TownRoadLane_MarkingOverride_RO_ComponentLookup;
 
-		// v2 phase 4 / 5b
 		[ReadOnly]
 		public BufferLookup<MarkingLine> __TownRoadLane_MarkingPair_RO_BufferLookup;
 
@@ -2012,9 +1969,8 @@ public partial class CustomSecondaryLaneSystem : GameSystemBase
 	[Preserve]
 	protected override void OnUpdate()
 	{
-		// Refresh the cached type handles for this frame. Vanilla generates one
-		// `InternalCompilerInterface.Get*(ref __TypeHandle.X, ref CheckedStateRef)` per handle which
-		// does the same thing (Update + read); a single __AssignHandles call is equivalent.
+		// TRL: vanilla calls InternalCompilerInterface.Get*(ref __TypeHandle.X, ref CheckedStateRef)
+		// per handle (update and read); a single __AssignHandles call is equivalent.
 		__TypeHandle.__AssignHandles(ref base.CheckedStateRef);
 
 		JobHandle jobHandle = JobChunkExtensions.ScheduleParallel(new UpdateLanesJob

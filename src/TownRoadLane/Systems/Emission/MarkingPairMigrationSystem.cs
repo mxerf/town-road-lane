@@ -7,18 +7,12 @@ using Unity.Entities;
 namespace TownRoadLane
 {
     /// <summary>
-    /// One-time-per-node migration from the v2 <see cref="MarkingPair"/> schema (one buffer entry =
-    /// one fully drawn line) to the v3 <see cref="MarkingLine"/> + <see cref="MarkingSegment"/>
-    /// schema (line = logical entity, segments = drawable pieces). Old saves load with MarkingPair
-    /// buffers populated; this system rewrites each one as MarkingLine + a single visible
-    /// MarkingSegment <c>[0,1]</c> covering the whole line, then removes the obsolete buffer.
-    ///
-    /// Idempotent: skips any node that already has a MarkingLine buffer (so re-running on a node
-    /// the user has touched since migration is a no-op). Runs every tick — query returns 0
-    /// entities in 99% of frames, so the cost is a single empty chunk iteration.
-    ///
-    /// Phase order: must run BEFORE MarkingSegmentEmissionSystem or the emission pass on a
-    /// freshly loaded save sees no input.
+    /// Converts old saves: nodes that still carry a <see cref="MarkingPair"/> buffer (one entry per
+    /// fully drawn line) get a <see cref="MarkingLine"/> per pair plus one visible
+    /// <see cref="MarkingSegment"/> <c>[0,1]</c> covering it, and the old buffer is removed.
+    /// Nodes that already have MarkingLine are never touched, and the query is empty on almost
+    /// every frame. Runs before MarkingSegmentEmissionSystem, otherwise the first emission pass
+    /// on a freshly loaded save sees no lines.
     /// </summary>
     [UpdateBefore(typeof(MarkingSegmentEmissionSystem))]
     public partial class MarkingPairMigrationSystem : GameSystemBase
@@ -30,9 +24,7 @@ namespace TownRoadLane
         protected override void OnCreate()
         {
             base.OnCreate();
-            // Match nodes with the legacy buffer but NOT the new one — exactly the set that still
-            // needs work. Tagging the new buffer as Absent makes this query stable: as soon as
-            // migration adds MarkingLine to a node, that node drops out of the query.
+            // A node leaves the query as soon as migration adds MarkingLine to it.
             _nodesNeedingMigration = GetEntityQuery(
                 ComponentType.ReadOnly<MarkingPair>(),
                 ComponentType.Exclude<MarkingLine>());
@@ -58,8 +50,7 @@ namespace TownRoadLane
             var pairs = EntityManager.GetBuffer<MarkingPair>(node, isReadOnly: true);
             int n = pairs.Length;
 
-            // Snapshot before any structural change — pairs becomes invalid the moment we
-            // AddBuffer below.
+            // AddBuffer is a structural change and invalidates the pairs buffer.
             var snapshot = new NativeArray<MarkingPair>(n, Allocator.Temp);
             for (int i = 0; i < n; i++) snapshot[i] = pairs[i];
 
@@ -87,11 +78,9 @@ namespace TownRoadLane
             }
             snapshot.Dispose();
 
-            // Drop the legacy buffer so the query stops matching this node and so future code
-            // doesn't have two sources of truth to keep in sync.
             EntityManager.RemoveComponent<MarkingPair>(node);
 
-            // Mark node Updated so the emission system picks up the new buffers this frame.
+            // Updated makes the emission systems pick up the new buffers this frame.
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
 

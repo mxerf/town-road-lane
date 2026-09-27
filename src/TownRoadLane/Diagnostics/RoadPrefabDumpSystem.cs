@@ -11,10 +11,9 @@ using Unity.Mathematics;
 namespace TownRoadLane.Diagnostics
 {
     /// <summary>
-    /// One-shot diagnostic system: walks every loaded road prefab and dumps its
-    /// section / piece / lane structure to the log, so we can see exactly which
-    /// lane prefabs and mesh prefabs are used for edge markings on highways and
-    /// which are missing on city roads. Read-only; disables itself after one run.
+    /// One-shot dump of every loaded road prefab's section, piece and lane structure, plus the
+    /// lane, marking, parking and net upgrade prefabs. Shows which lane and mesh prefabs carry
+    /// the edge markings on highways and which city roads lack them. Read-only.
     /// </summary>
     public partial class RoadPrefabDumpSystem : GameSystemBase
     {
@@ -28,7 +27,6 @@ namespace TownRoadLane.Diagnostics
         {
             base.OnCreate();
             m_PrefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
-            // Road prefab entities carry PrefabData + RoadData.
             m_RoadPrefabQuery = GetEntityQuery(
                 ComponentType.ReadOnly<PrefabData>(),
                 ComponentType.ReadOnly<RoadData>());
@@ -89,19 +87,16 @@ namespace TownRoadLane.Diagnostics
         }
 
         /// <summary>
-        /// Dumps every ParkingLane prefab: its slot size/angle/road-type, which roads use it
-        /// (reverse-indexed from road sections), and which marking prefabs host it
-        /// (search every NetLaneGeometryPrefab's SecondaryLane left/right/crossing arrays).
-        /// This is the data needed to add longitudinal markings to parallel street parking.
+        /// Dumps every ParkingLane prefab with the roads that use it and the marking prefabs whose
+        /// SecondaryLane left/right/crossing arrays host it.
         /// </summary>
         private void DumpParkingLanes()
         {
-            // 1. Collect all NetLanePrefab entities, split into parking lanes and marking prefabs.
             var laneQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
             var laneEntities = laneQuery.ToEntityArray(Unity.Collections.Allocator.Temp);
 
             var parkingLanes = new List<NetLanePrefab>();
-            var markingPrefabs = new List<NetLaneGeometryPrefab>(); // those with a SecondaryLane component
+            var markingPrefabs = new List<NetLaneGeometryPrefab>(); // prefabs with a SecondaryLane
             for (int i = 0; i < laneEntities.Length; i++)
             {
                 if (!m_PrefabSystem.TryGetPrefab<NetLanePrefab>(laneEntities[i], out var lane) || lane == null) continue;
@@ -110,7 +105,7 @@ namespace TownRoadLane.Diagnostics
             }
             laneEntities.Dispose();
 
-            // 2. Build reverse index: parking lane name -> set of road names that reference it.
+            // Parking lane name -> names of the roads that use it.
             var usedInRoads = new Dictionary<string, SortedSet<string>>();
             var roadEntities = m_RoadPrefabQuery.ToEntityArray(Unity.Collections.Allocator.Temp);
             for (int i = 0; i < roadEntities.Length; i++)
@@ -126,7 +121,6 @@ namespace TownRoadLane.Diagnostics
             }
             roadEntities.Dispose();
 
-            // 3. Emit.
             log.Info($"=== ParkingLane prefabs: {parkingLanes.Count} ===");
             var sb = new StringBuilder();
             foreach (var pk in parkingLanes)
@@ -146,7 +140,6 @@ namespace TownRoadLane.Diagnostics
                 {
                     sb.Append("  used in roads: (none directly referenced by a RoadPrefab section)").AppendLine();
                 }
-                // Which marking prefabs host this parking lane?
                 foreach (var mk in markingPrefabs)
                 {
                     if (!mk.TryGet<SecondaryLane>(out var sec)) continue;
@@ -165,16 +158,14 @@ namespace TownRoadLane.Diagnostics
         }
 
         /// <summary>
-        /// Dumps every NetUpgrade prefab (paint-only road decoration upgrades like grass / trees / lighting /
-        /// quay / sound barrier): its concrete prefab class, full ComponentBase list, the ECS component types on
-        /// the prefab entity (= the archetype), its PlaceableNetData (set/unset upgrade flags, placement flags),
-        /// its UIObject (group / priority / icon), and NetData flag masks. This is the template data we need to
-        /// build our own "Lane Markings" toolbar upgrade by cloning a suitable vanilla one.
+        /// Dumps every NetUpgrade prefab (grass, trees, lighting, quay, sound barrier): class, components,
+        /// archetype, PlaceableNetData flags, UIObject and NetData masks. Reference data for cloning a
+        /// vanilla upgrade into a toolbar entry of our own.
         /// </summary>
         private void DumpNetUpgrades()
         {
-            // Net upgrade prefabs are NetPrefab/RoadPrefab instances carrying a NetUpgrade component; once
-            // NetInitializeSystem has run they have PlaceableNetData. Scan everything with PlaceableNetData.
+            // Upgrade prefabs are net prefabs with a NetUpgrade component; NetInitializeSystem gives
+            // them PlaceableNetData.
             var q = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<PlaceableNetData>());
             var entities = q.ToEntityArray(Unity.Collections.Allocator.Temp);
             log.Info($"=== NetUpgrade prefabs: scanning {entities.Length} prefab entities with PlaceableNetData ===");
@@ -195,10 +186,8 @@ namespace TownRoadLane.Diagnostics
                   .Append(" unsetState=[").Append(Join(upg.m_UnsetState)).Append("]");
                 sb.AppendLine();
 
-                // ComponentBase list on the prefab.
                 DumpComponents(sb, prefab, "  ");
 
-                // ECS component types on the prefab entity (= the archetype the prefab was given).
                 sb.Append("  archetype: ");
                 using (var types = EntityManager.GetComponentTypes(entities[i], Unity.Collections.Allocator.Temp))
                 {
@@ -206,7 +195,6 @@ namespace TownRoadLane.Diagnostics
                 }
                 sb.AppendLine();
 
-                // PlaceableNetData.
                 var pnd = EntityManager.GetComponentData<PlaceableNetData>(entities[i]);
                 sb.Append("  PlaceableNetData: placementFlags=").Append(pnd.m_PlacementFlags)
                   .Append("  setUpgradeFlags={G=").Append(pnd.m_SetUpgradeFlags.m_General)
@@ -217,7 +205,7 @@ namespace TownRoadLane.Diagnostics
                   .Append(", R=").Append(pnd.m_UnsetUpgradeFlags.m_Right).Append("}");
                 sb.AppendLine();
 
-                // NetData flag masks (which composition bits this prefab "owns").
+                // Composition bits this prefab owns.
                 if (EntityManager.HasComponent<NetData>(entities[i]))
                 {
                     var nd = EntityManager.GetComponentData<NetData>(entities[i]);
@@ -227,7 +215,6 @@ namespace TownRoadLane.Diagnostics
                     sb.AppendLine();
                 }
 
-                // UIObject (toolbar group / icon / priority).
                 if (prefab.TryGet<UIObject>(out var ui))
                 {
                     sb.Append("  UIObject: group=").Append(ui.m_Group != null ? ui.m_Group.name : "<null>")
@@ -248,13 +235,11 @@ namespace TownRoadLane.Diagnostics
             entities.Dispose();
             log.Info($"=== NetUpgrade prefabs: {found} found ===");
 
-            // Also list all UI groups/categories that exist, so we can pick where to put our upgrade.
             DumpUIGroups();
         }
 
         private void DumpUIGroups()
         {
-            // Scan all prefabs for UIGroupPrefab subclasses (categories / menus).
             var allPrefabs = GetEntityQuery(ComponentType.ReadOnly<PrefabData>());
             var ents = allPrefabs.ToEntityArray(Unity.Collections.Allocator.Temp);
             log.Info("=== UI groups / categories (for placing the upgrade toolbar entry) ===");
@@ -339,7 +324,6 @@ namespace TownRoadLane.Diagnostics
                 for (int i = 0; i < subs.Length; i++)
                 {
                     var sub = subs[i];
-                    // NetSubSectionInfo: m_Section + requirement arrays (mirror of NetSectionInfo-ish).
                     var nested = new NetSectionInfo
                     {
                         m_Section = sub.m_Section,
@@ -392,7 +376,7 @@ namespace TownRoadLane.Diagnostics
                 }
             }
 
-            // Curb/sidewalk pieces sometimes carry other relevant components — list them.
+            // Curb and sidewalk pieces can carry other relevant components.
             DumpComponents(sb, piece, indent + "  ");
         }
 
@@ -524,7 +508,6 @@ namespace TownRoadLane.Diagnostics
 
         private void DumpLaneGeometryPrefabs()
         {
-            // Enumerate all NetLaneGeometryPrefab entities (likely the marking line prefabs).
             var q = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneGeometryData>());
             var entities = q.ToEntityArray(Unity.Collections.Allocator.Temp);
             log.Info($"=== NetLaneGeometryPrefab list: {entities.Length} ===");
@@ -577,7 +560,7 @@ namespace TownRoadLane.Diagnostics
                     || n.IndexOf("Marking", StringComparison.OrdinalIgnoreCase) >= 0
                     || n.IndexOf("Arrow", StringComparison.OrdinalIgnoreCase) >= 0
                     || n.IndexOf("Stripe", StringComparison.OrdinalIgnoreCase) >= 0;
-                // also always print anything from a mod (non-vanilla source)
+                // Mod-supplied meshes are listed whatever their name.
                 bool fromMod = p.asset != null && p.isSubscribedMod;
                 if (!looksLikeMarking && !fromMod) continue;
                 sb.Clear();
@@ -607,8 +590,7 @@ namespace TownRoadLane.Diagnostics
 
         private void DumpLanesWithSecondary()
         {
-            // Enumerate ALL NetLanePrefab entities and dump their SecondaryLane config (if any).
-            // This is the key data: which marking lines a drive-lane prefab attaches and under what conditions.
+            // SecondaryLane config: which lanes a marking prefab attaches to, and under what conditions.
             var q = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
             var entities = q.ToEntityArray(Unity.Collections.Allocator.Temp);
             log.Info($"=== Lane prefabs with SecondaryLane: scanning {entities.Length} NetLanePrefab entities ===");

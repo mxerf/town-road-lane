@@ -1,21 +1,20 @@
 namespace TownRoadLane
 {
     /// <summary>
-    /// User-pickable visual style for a <see cref="MarkingLine"/>. Stored as <c>int</c> in the
-    /// line buffer (see <see cref="MarkingLine.style"/>) for serialisation stability — never
-    /// reuse a numeric value for a different style or saves break.
+    /// Line style, saved as an int in <see cref="MarkingLine.style"/> and
+    /// <see cref="MarkingSegment.style"/>. Values are append-only: reusing or reordering one
+    /// changes the lines in existing saves.
     ///
-    /// Adding a new style is a three-step change:
-    ///   1. Append an entry here (do NOT reorder or reuse — append only).
-    ///   2. Register the corresponding prefab clone in <see cref="EdgeLineCloneSystem"/> (one
-    ///      clone per (style × theme) — EU + NA). Emission resolves clones generically via
-    ///      <see cref="EdgeLineCloneSystem.GetCloneEntity"/> — no per-style mapping needed.
-    ///   3. UI: STYLE_VALUES + STYLE_KEYS in town-road-lane-panel.tsx, the i18n strings, and
-    ///      a preview in stylePreviews.tsx.
+    /// Adding a style:
+    ///   1. Append a value here.
+    ///   2. Register its prefab clones (one per theme, EU and NA) in
+    ///      <see cref="EdgeLineCloneSystem"/>; emission finds them through
+    ///      <see cref="EdgeLineCloneSystem.GetCloneEntity"/>.
+    ///   3. UI: STYLE_VALUES and STYLE_KEYS in town-road-lane-panel.tsx, the i18n strings and a
+    ///      preview in stylePreviews.tsx.
     ///
-    /// The emission system falls back to <see cref="Solid"/> for unknown values, so old saves
-    /// with future-style numbers degrade gracefully (a line drawn in a not-yet-installed style
-    /// just renders as solid until the style is added).
+    /// Emission draws unknown values as <see cref="Solid"/>, so a save made with a newer version
+    /// of the mod still loads.
     /// </summary>
     public enum MarkingStyle : int
     {
@@ -24,23 +23,16 @@ namespace TownRoadLane
         G87Solid        = 2,
         G87Dashed       = 3,
         DoubleSolid     = 4,
-        // UI polish pass (2.3.0): short/long vanilla dashes + G87 yellow pair.
         DashedDense     = 5,
         G87Yellow       = 6,
         G87YellowDashed = 7,
         DashedLong      = 8,
-        // Vanilla curb texture from the "[G87] Vanilla Curb" pack (elGendo87) — a hard PDX
-        // dependency since 2.4.0, so it's always present in practice; PickMesh still degrades
-        // to the source prefab's own mesh if it somehow isn't. Candidate history (2026-07-19):
-        // VA "Road Border VFX GND" — Terrain-only decal mask, invisible on the road deck;
-        // PVM "Vanilla Pavement 01 XS" — renders, but 0.88 m reads as a pavement strip.
+        // Vanilla curb texture from the "[G87] Vanilla Curb" pack (elGendo87), a required
+        // dependency. PickMesh falls back to the source prefab's own mesh if the pack is missing.
         Curb            = 9,
-        // Vanilla yellow family (2.4.2, forum feedback: the tool declared only G87 yellows,
-        // no vanilla ones like the white set). Value 10 briefly held an unshipped Chevron
-        // experiment (G87 SC median band netlane — useless as a line style, cut same day);
-        // it never reached a public build, so the slot is safe to reuse.
-        // YellowDashed uses the '- Long' mesh: vanilla ships no plain-length yellow dashed.
-        // YellowSolidDashed is the US passing-zone centre line (solid one side, dashed other).
+        // YellowDashed uses the '- Long' mesh: vanilla has no normal-length yellow dashed line.
+        // YellowSolidDashed is the US passing-zone center line (solid on one side, dashed on the
+        // other).
         YellowSolid       = 10,
         YellowDashed      = 11,
         YellowDoubleSolid = 12,
@@ -50,12 +42,9 @@ namespace TownRoadLane
     public static class MarkingStyleExtensions
     {
         /// <summary>
-        /// How many overlapping draw passes a style needs to look correct. Vanilla decals (Solid,
-        /// Dashed) use a single pass — they're opaque enough on their own. G87 decals are
-        /// semi-transparent and need 2 overlapping passes to match the brightness vanilla
-        /// parking markings achieve (their SecondaryLane hosts on both left+right lanes, which
-        /// implicitly causes vanilla to draw the same prefab twice along the boundary). Without
-        /// this, G87 styles look ~30% dimmer than their parking counterparts.
+        /// Number of overlapping copies drawn for a style. G87 decals are semi-transparent; in
+        /// parking markings vanilla draws them once from each neighbouring lane, so a single
+        /// copy of ours looks noticeably dimmer. Vanilla decals are opaque and need one.
         /// </summary>
         public static int DrawPasses(this MarkingStyle style) => style switch
         {

@@ -1,9 +1,7 @@
 import { bindValue, useValue, trigger } from "cs2/api";
 
-// Pinned "favourite" style ids for the style dropdowns (panel + popovers).
-// Mirrors PinnedStylesVM published by C# TownRoadLaneUISystem; persisted in the
-// mod settings as CSV so pins survive game restarts. Pinned options float to
-// the top of every style dropdown, in the order they were pinned.
+// Pinned style ids, published by the C# UI system and stored in the mod settings. Pinned
+// options go to the top of every style dropdown, in pin order.
 
 export interface PinnedStylesVM {
   lineStyles: number[];

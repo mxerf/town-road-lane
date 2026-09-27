@@ -1,7 +1,5 @@
 import { IconBase, IconProps } from "./Icon";
 
-// Toolbar icon: stylized intersection / road with dashed centerline. Used on
-// the GameTopLeft toggle button to replace the textual "TRL" label.
 export const Road = (props: IconProps) => (
   <IconBase {...props}>
     <path d="M3 2 L 5 14" />

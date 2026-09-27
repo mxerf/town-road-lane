@@ -11,45 +11,37 @@ namespace TownRoadLane
     /// <summary>
     /// Marks parallel street-parking zones, which vanilla leaves as bare asphalt.
     ///
-    /// Vanilla only marks <i>perpendicular/angled</i> bays ('EU/NA Parking Cross Line' + 'Car Bay Line').
-    /// Parallel street parking uses the 'Parking Lane 2' lane prefab, which no vanilla marking references.
-    /// We create two pairs of marking prefabs (one per region theme), each cloned from the closest vanilla
-    /// marking so all the rendering details (material, LODs, SubMesh, archetype) come along for free, then
-    /// swap in the mesh chosen in the mod settings (vanilla or, optionally, a G87 Road Markings decal):
+    /// Vanilla only marks perpendicular and angled bays ('Parking Cross Line', 'Car Bay Line').
+    /// Parallel parking uses the 'Parking Lane 2' lane prefab, which no vanilla marking references.
+    /// Two prefabs per region theme are cloned from the closest vanilla marking, so material, LODs,
+    /// submeshes and archetype come along, and then get the mesh chosen in the settings (vanilla or
+    /// a G87 Road Markings decal):
     ///
-    ///  * "Parallel Parking Line"  — cloned from 'Car Bay Line'; SecondaryLane hosts 'Parking Lane 2' on the
-    ///    parking side ⇒ a line down the whole zone.
-    ///  * "Parallel Parking End"   — cloned from 'Parking Cross Line' (fit-to-parking, crossing-based);
-    ///    SecondaryLane.m_CrossingLanes hosts 'Parking Lane 2'. Since 'Parking Lane 2' has SlotInterval == 0
-    ///    (slotCount == 1), the crossing path draws exactly one perpendicular tick at m=0 (block start) and
-    ///    one at m=slotCount=1 (block end). RequireContinue=false ⇒ those ends are NOT skipped.
+    ///  * "Parallel Parking Line", cloned from 'Car Bay Line' and hosted on 'Parking Lane 2' on the
+    ///    parking side: a line along the whole zone.
+    ///  * "Parallel Parking End", cloned from 'Parking Cross Line', with 'Parking Lane 2' in
+    ///    m_CrossingLanes. That lane has SlotInterval 0 (a single slot), so the crossing path draws
+    ///    exactly one tick at the block start and one at the block end; RequireContinue=false keeps
+    ///    both ends.
     ///
-    /// Direct port of v1.1 ParkingMarkingPatchSystem (commit 342afa4) — the working stable implementation.
-    /// Renamed to clarify it CLONES vanilla prefabs (it never edits them in place). See IMPLEMENTATION_PLAN.md
-    /// risks K1 (no Entity caching), K2 (UpdatePrefab is async-queued), K3 (DuplicatePrefab also AddPrefabs),
-    /// K4 (re-runs on every game load via fresh OnCreate), K6 (SwapMesh always paired with UpdatePrefab),
-    /// K7 (G87 fallback chain), K8 (style=None strips hosting).
-    ///
-    /// <see cref="ApplyOrUpdate"/> is idempotent: it creates our prefabs on first call and refreshes their
-    /// mesh / SecondaryLane on later calls. CustomSecondaryLaneSystem handles position / cuts /
-    /// intersections by itself.
+    /// Vanilla prefabs are never edited. CustomSecondaryLaneSystem places and cuts the lines.
     /// </summary>
     public partial class ParkingLineCloneSystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;
 
-        // Carriageway-side host lanes for the longitudinal line (kept from the original 'Car Bay Line' left list).
+        // Carriageway-side host lanes for the longitudinal line (from the 'Car Bay Line' left list).
         private static readonly string[] kCarriagewayLaneNames =
         {
             "Car Drive Lane 3", "Car Drive Lane 3 - Tram", "Public Transport Lane 3", "Public Transport Lane 3 - Tram",
         };
 
-        // The parallel-parking lane prefab. ONLY 'Parking Lane 2': it is present in a road section exactly
-        // when a parallel parking zone is active. ('Boarding Lane 0' is always present — even with a wide
-        // sidewalk / no parking — so hosting on it would draw the line everywhere and stomp the curb edge line.)
+        // 'Parking Lane 2' is present in a road section exactly when it has a parallel parking zone.
+        // 'Boarding Lane 0' is always present, even with a wide sidewalk and no parking, so hosting on
+        // it would draw the line everywhere and cover the curb edge line.
         private const string kParkingLaneName = "Parking Lane 2";
 
-        // Fallback meshes if the chosen style can't be resolved (e.g. a "G87" option but G87 isn't installed).
+        // Used when the chosen mesh cannot be resolved (e.g. a G87 option without G87 installed).
         private const string kFallbackLineMesh = "White Dashed Line Mesh - Dense";
         private const string kFallbackEndMesh  = "White Solid Line Mesh";
 
@@ -66,7 +58,7 @@ namespace TownRoadLane
         private EntityQuery m_LanePrefabQuery;
         private bool m_Done;
 
-        /// <summary>Names of the marking prefabs this system creates/updates — exposed for diagnostics.</summary>
+        /// <summary>Names of the marking prefabs this system creates, for diagnostics.</summary>
         public static IEnumerable<string> CreatedPrefabNames { get { foreach (var r in kRecipes) yield return r.clone; } }
 
         protected override void OnCreate()
@@ -77,25 +69,23 @@ namespace TownRoadLane
             RequireForUpdate(m_LanePrefabQuery);
         }
 
-        // NOTE: no mid-session re-run entry point on purpose — see the note in
-        // EdgeLineCloneSystem.OnUpdate. Runs exactly once per save load.
+        // Runs once per save load, with no mid-session re-run on purpose (see EdgeLineCloneSystem).
 
         protected override void OnUpdate()
         {
             if (m_Done) return;
             m_Done = true;
             Enabled = false;
-            // NOTE: runs even when ParkingMarkingsEnabled is false. The clones MUST exist in
-            // every session — saved games reference their spawned sublanes by prefab name
-            // ("Unknown prefab ID" spam + stale entities otherwise). The setting only controls
-            // hosting; ApplyOrUpdate applies that distinction itself.
+            // Runs even when ParkingMarkingsEnabled is off: saved games reference the spawned
+            // sublanes' prefabs by name, and missing clones mean "Unknown prefab ID" errors and
+            // stale entities. The setting only controls hosting, which ApplyOrUpdate handles.
             try { ApplyOrUpdate(); }
             catch (Exception e) { log.Error(e, "ParkingLineCloneSystem failed"); }
         }
 
         /// <summary>
-        /// Creates the parking-marking prefabs (first call) or refreshes their mesh/SecondaryLane to match
-        /// the current settings (later calls).
+        /// Creates the parking-marking prefabs, or refreshes their mesh and hosting to match the current
+        /// settings. Idempotent.
         /// </summary>
         public void ApplyOrUpdate()
         {
@@ -128,10 +118,7 @@ namespace TownRoadLane
             int touched = 0;
             foreach (var (srcName, cloneName, role) in kRecipes)
             {
-                // Every clone is created unconditionally — saved games reference them by name.
-                // The feature toggle / style=None only decide whether hosting gets attached below.
-
-                // Get-or-clone our prefab.
+                // Created unconditionally; the settings only decide whether hosting is attached.
                 if (!laneByName.TryGetValue(cloneName, out var cloneBase) || cloneBase == null)
                 {
                     if (!laneByName.TryGetValue(srcName, out var src) || !(src is NetLaneGeometryPrefab) || !src.TryGet<SecondaryLane>(out _))

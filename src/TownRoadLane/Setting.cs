@@ -10,13 +10,11 @@ using System.Collections.Generic;
 namespace TownRoadLane
 {
     /// <summary>
-    /// v2 phase 1 settings. Per-feature on/off + per-feature mesh style (vanilla or G87).
-    /// Each feature's style is read by the corresponding clone system in PrefabUpdate phase
-    /// and resolved against the loaded mesh prefab set; "G87 …" options gracefully fall back
-    /// to vanilla if the G87 Road Markings mod isn't installed (see K7 in IMPLEMENTATION_PLAN.md).
-    ///
-    /// All changes take effect on the next save load (see the note above the keybind group on
-    /// why there is no runtime reapply).
+    /// Mod settings: an on/off switch and a mesh style (vanilla or G87) per automatic feature,
+    /// segment-splitting thresholds for the marking editor, and keybinds. Each clone system reads
+    /// its style when it builds prefabs; G87 options fall back to vanilla when the G87 Road
+    /// Markings mod isn't loaded. Style changes need a game restart (see the note above the
+    /// keybind group).
     /// </summary>
     [FileLocation(nameof(TownRoadLane))]
     [SettingsUIGroupOrder(kEdgeGroup, kParkingGroup, kSegmentGroup, kSegmentDevGroup, kKeybindGroup)]
@@ -25,11 +23,11 @@ namespace TownRoadLane
     [SettingsUIKeyboardAction(CycleMarkingStyle, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(EnterAreaMode, Usages.kToolUsage)]
     [SettingsUIKeyboardAction(CycleAreaStyle, Usages.kToolUsage)]
-    // The class name MUST be globally unique among installed mods: Setting.ApplyAndSave() saves via
+    // The class name must be unique among all installed mods: ApplyAndSave() calls
     // AssetDatabase.SaveSpecificSetting(GetType().Name), which matches settings by bare type name
-    // across ALL mods and takes the first hit. With the template name "Setting" and another
-    // template-derived mod installed, every checkbox change saved the OTHER mod's file and ours
-    // never persisted (forum report: parking toggle back on after every game restart).
+    // across every mod and takes the first hit. With the template name "Setting" and another
+    // template-based mod installed, changes are written to the other mod's file and ours never
+    // persist.
     public class TownRoadLaneSetting : ModSetting
     {
         public const string kSection = "Main";
@@ -39,33 +37,28 @@ namespace TownRoadLane
         public const string kSegmentDevGroup = "SegmentSplitDev";
         public const string kKeybindGroup = "Keybinds";
 
-        // Action name used by MarkingToolHotkeySystem to resolve the ProxyAction. Must match the
-        // attribute name on this class and the binding property below.
+        // Action names. Each must match its SettingsUIKeyboardAction attribute on this class and
+        // its binding property below.
         public const string ToggleMarkingTool = "ToggleMarkingTool";
 
-        // Stage 5c: cycle MarkingStyle (Solid → Dashed → Solid → ...) inside the marking tool.
-        // Single key (default Y), kept under Usages.kToolUsage so the binding only listens while
-        // the tool is the active tool — won't interfere with vanilla shortcuts otherwise.
+        // Cycles the line style for the next drawn line. This and the two actions below use
+        // Usages.kToolUsage, so their keys only listen while the marking tool is active and don't
+        // clash with vanilla shortcuts.
         public const string CycleMarkingStyle = "CycleMarkingStyle";
 
-        // Phase 6b: enter polygon-area selection mode from NodeSelected. Default A. Tool-scoped
-        // so the key doesn't conflict outside the marking tool.
+        // Starts polygon-area selection from a selected node.
         public const string EnterAreaMode = "EnterAreaMode";
 
-        // Phase 6d: cycle the style of the NEXT area the user closes. Mirrors CycleMarkingStyle
-        // for line drawing. Default U (close to Y but different finger so the two cycles don't
-        // get tangled during AreaSelecting).
+        // Cycles the fill style for the next closed area.
         public const string CycleAreaStyle = "CycleAreaStyle";
 
         public TownRoadLaneSetting(IMod mod) : base(mod) { }
 
-        // ── Coalesced backup save (2.4.2) ──
-        // Vanilla ApplyAndSave() is `async void`: every checkbox click / pin toggle starts an
-        // independent read-modify-write of the settings file, and two quick changes race — the
-        // slower task can clobber the faster one's write (forum report 2026-07-25: one of two
-        // toggles "came back" after reload). ApplyAndSave isn't virtual, so the races can't be
-        // prevented; instead Apply() marks the state dirty and one extra save always lands the
-        // FINAL in-memory state once the UI has been quiet for a couple of seconds.
+        // Vanilla ApplyAndSave() is async void: every checkbox click or pin toggle starts its own
+        // read-modify-write of the settings file, and two quick changes race, so the slower task
+        // can overwrite the faster one's write. ApplyAndSave isn't virtual, so instead Apply()
+        // marks the state dirty and one extra save writes the final in-memory state once the UI
+        // has been quiet for a couple of seconds.
         private const int kQuietFramesBeforeSave = 120; // ~2 s at 60 fps
 
         private bool _saveDirty;
@@ -82,8 +75,8 @@ namespace TownRoadLane
             MainThreadDispatcher.RegisterUpdater(SaveWhenQuiet);
         }
 
-        // Permanent per-frame updater (two int checks when idle) — stays registered so every
-        // later Apply() reuses it.
+        // Never unregisters (returns false), so later Apply() calls reuse it. Idle cost is one
+        // bool check per frame.
         private bool SaveWhenQuiet()
         {
             if (!_saveDirty) return false;
@@ -106,7 +99,7 @@ namespace TownRoadLane
             }
         }
 
-        // --- Edge line (curb-side line on city 3 m roads) ---
+        // Edge line: curb-side line on city roads with 3 m lanes.
 
         [SettingsUISection(kSection, kEdgeGroup)]
         public bool EdgeLineEnabled { get; set; } = true;
@@ -115,34 +108,32 @@ namespace TownRoadLane
         [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsEdgeDisabled))]
         public EdgeLineStyleEnum EdgeLineStyle { get; set; } = EdgeLineStyleEnum.WhiteSolid;
 
-        // US convention (2.4.2, forum request): NA-theme cities get a yellow line on the
-        // left/median edge of one-way and divided carriageways; the white edge line stays
-        // curb-side only. Theme gating is free — the yellow clone sources the NA prefab and
-        // inherits its ThemeObject, so EU cities never spawn it.
+        // US convention: NA-theme cities get a yellow line on the left (median) edge of one-way
+        // and divided carriageways, while the white edge line stays curb-side. No explicit theme
+        // check is needed: the yellow clone is based on the NA prefab and inherits its
+        // ThemeObject, so EU-theme cities never spawn it.
         [SettingsUISection(kSection, kEdgeGroup)]
         [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsEdgeDisabled))]
         public bool YellowLeftLineEnabled { get; set; } = true;
 
-        // --- Parallel street-parking markings ---
+        // Parallel street-parking markings.
 
         [SettingsUISection(kSection, kParkingGroup)]
         public bool ParkingMarkingsEnabled { get; set; } = true;
 
         [SettingsUISection(kSection, kParkingGroup)]
         [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsParkingDisabled))]
-        // Default is the G87 dashed decal (best-looking option; G87 ships as a hard dependency
-        // anyway). PickMesh in ParkingLineCloneSystem falls back to the vanilla dense dashed
-        // mesh when G87 isn't loaded, so the default is safe without it.
+        // G87 is a dependency of the mod, so the G87 dashed decal is the default. Without G87,
+        // ParkingLineCloneSystem.PickMesh falls back to the vanilla dense dashed mesh.
         public ParkingLineStyleEnum ParkingLineStyle { get; set; } = ParkingLineStyleEnum.WhiteDashed_G87;
 
         [SettingsUISection(kSection, kParkingGroup)]
         [SettingsUIDisableByCondition(typeof(TownRoadLaneSetting), nameof(IsParkingDisabled))]
         public ParkingEndStyleEnum ParkingEndStyle { get; set; } = ParkingEndStyleEnum.WhiteSolid;
 
-        // ── Segment splitting thresholds (marking editor) ──
-        // Feed MarkingTopologySystem's split filters. Unlike the style prefabs above, this is
-        // pure runtime data — no game restart needed: a junction re-segments the next time its
-        // lines change, and every junction re-segments on save load (topology hash isn't saved).
+        // Segment-splitting thresholds for MarkingTopologySystem. Unlike the styles above, these
+        // need no restart: a junction re-segments the next time its lines change, and every
+        // junction re-segments on save load because the topology hash isn't saved.
         [SettingsUISlider(min = 0.2f, max = 3f, step = 0.1f, unit = Unit.kFloatSingleFraction)]
         [SettingsUISection(kSection, kSegmentGroup)]
         public float SegmentMinLengthM { get; set; } = MarkingTopologySystem.kDefaultMinSegmentLengthM;
@@ -159,15 +150,14 @@ namespace TownRoadLane
         [SettingsUISection(kSection, kSegmentDevGroup)]
         public float SegmentHitClusterM { get; set; } = MarkingTopologySystem.kDefaultHitClusterM;
 
-        // NOTE: there is deliberately NO runtime "reapply" button. Refreshing the clone prefabs
-        // (UpdatePrefab) while a world is live leaves existing sublanes with stale PrefabRefs;
-        // the next SecondaryLane rebuild (road edit, even a bulldozer hover creating Temp roads)
-        // then dies natively in a Burst job — three crashes on 2026-07-17 before the feature was
-        // cut. Settings changes apply after a game restart (observed: a save reload within the
-        // same game process is not enough — the clone prefabs persist per process), where
-        // ApplyOrUpdate runs in a world with no live references yet. Safe, exercised every boot.
+        // There is deliberately no runtime "reapply" button. Refreshing the clone prefabs
+        // (UpdatePrefab) while a world is live leaves existing sublanes with stale PrefabRefs, and
+        // the next SecondaryLane rebuild (any road edit, even a bulldozer hover creating Temp
+        // roads) crashes natively in a Burst job. Style changes therefore apply after a game
+        // restart, when ApplyOrUpdate runs before anything references the clones. Reloading a
+        // save is not enough: the clone prefabs live for the whole game process.
 
-        // --- Phase 4 tool: settings button (always works) + keybind (may conflict with other mods) ---
+        // Marking tool: the settings button always works, the keybind may be taken by another mod.
 
         [SettingsUIButton]
         [SettingsUISection(kSection, kKeybindGroup)]
@@ -199,10 +189,9 @@ namespace TownRoadLane
         public bool IsEdgeDisabled() => !EdgeLineEnabled;
         public bool IsParkingDisabled() => !ParkingMarkingsEnabled;
 
-        // Pinned "favourite" styles for the in-game dropdowns (panel + popovers): CSV of the
-        // numeric style ids, e.g. "2,6". Managed by the pin buttons in the UI (see
-        // TownRoadLaneUISystem TogglePin* triggers), hidden from the options screen — these
-        // live here only so they persist like every other setting.
+        // Pinned styles for the in-game style dropdowns: CSV of numeric style ids, e.g. "2,6".
+        // Set by the pin buttons (TogglePin* triggers in TownRoadLaneUISystem) and hidden from
+        // the options screen; they live here only to be persisted with the other settings.
         [SettingsUIHidden]
         public string PinnedLineStylesCsv { get; set; } = "";
 
@@ -210,10 +199,10 @@ namespace TownRoadLane
         public string PinnedAreaStylesCsv { get; set; } = "";
 
 #if DEBUG
-        // Developer-only prefab surveys at boot (RoadPrefabDumpSystem, AreasPrototypeSystem):
-        // tens of thousands of log lines per start, which got the mod flagged by Skyve for
-        // "extreme logging" (2026-08). Debug builds only; hidden from the options screen — to
-        // enable, set "DiagnosticDumps": true in TownRoadLane.coc and restart the game.
+        // Developer prefab dumps at boot (RoadPrefabDumpSystem, AreasPrototypeSystem): tens of
+        // thousands of log lines per start, enough for Skyve to flag the mod for extreme logging.
+        // Debug builds only and hidden from the options screen; to enable, set
+        // "DiagnosticDumps": true in TownRoadLane.coc and restart the game.
         [SettingsUIHidden]
         public bool DiagnosticDumps { get; set; } = false;
 #endif
@@ -237,7 +226,7 @@ namespace TownRoadLane
 #endif
         }
 
-        // G87 RenderPrefab name prefixes — full names are very long; build them once.
+        // Common prefixes of G87 RenderPrefab names.
         private const string kG87 = "G87 UK Road Markings RoadMarking G87 ";
         private const string kG87Dec = "G87 UK Road Markings RoadMarkings G87 ";
 
@@ -271,7 +260,7 @@ namespace TownRoadLane
             _ => "White Dashed Line Mesh - Dense",
         };
 
-        /// <summary>Resolves the chosen end-tick style to a render-prefab name (vanilla or G87). Null => no end ticks.</summary>
+        /// <summary>Resolves the chosen end-tick style to a render-prefab name (vanilla or G87); null means no end ticks.</summary>
         public string ParkingEndMeshName() => ParkingEndStyle switch
         {
             ParkingEndStyleEnum.None                => null,

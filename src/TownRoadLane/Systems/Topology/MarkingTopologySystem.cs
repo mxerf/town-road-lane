@@ -12,28 +12,15 @@ using Unity.Mathematics;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Stage 5b owner of the (MarkingLine → MarkingSegment) relationship. When any
-    /// <see cref="MarkingLine"/> buffer changes on a node, recomputes the
-    /// <see cref="MarkingSegment"/> buffer:
+    /// Splits each node's <see cref="MarkingLine"/>s into <see cref="MarkingSegment"/>s at
+    /// their mutual crossings. When a node's lines change, it builds every line's Bezier,
+    /// intersects all pairs, filters out false crossings, and rewrites the segment buffer. A new
+    /// segment takes visibility and style from the old segment that contained its midpoint, so
+    /// adding a line does not undo the user's per-segment edits. The node is then tagged
+    /// Updated for <see cref="MarkingSegmentEmissionSystem"/>.
     ///
-    ///   1. Build the full Bezier of every line on the node (via MarkingCurveBuilder).
-    ///   2. For each pair (i &lt; j), find all intersection parameters (tI, tJ) using
-    ///      BezierIntersection — adds tI as a boundary on line i, tJ on line j.
-    ///   3. Sort + dedupe boundaries per line. Sandwich endpoints {0, 1} on the outside.
-    ///   4. Build N-1 new segments per line from N sorted boundaries. Each new segment
-    ///      inherits visibility from the OLD segment that contained its midpoint, if any —
-    ///      otherwise defaults to visible=true. This keeps user edits stable across
-    ///      recomputes (adding a new line doesn't un-hide segments the user explicitly hid).
-    ///   5. Rewrite the MarkingSegment buffer with the new flat list (lineIndex + tRange).
-    ///
-    /// Trigger: marks the node Updated when it rewrites the buffer so MarkingPairEmissionSystem
-    /// (or its successor MarkingSegmentEmissionSystem) picks up the change.
-    ///
-    /// Detection of "needs recompute" uses a content-hash of the MarkingLine buffer stored on
-    /// a separate component <see cref="MarkingTopologyState"/>. Comparing the hash on every tick
-    /// is much cheaper than re-running the intersection math when nothing changed. The hash
-    /// includes the gap-based endpoint identity of every line; it does NOT include style
-    /// (style change can't move a line, so doesn't affect topology).
+    /// Change detection compares a hash of the line geometry (endpoints and curvature, not
+    /// style) against <see cref="MarkingTopologyState"/>.
     /// </summary>
     [UpdateAfter(typeof(MarkingPairMigrationSystem))]
     [UpdateBefore(typeof(MarkingSegmentEmissionSystem))]
@@ -43,39 +30,32 @@ namespace TownRoadLane
 
         private EntityQuery _nodesWithLines;
 
-        // The four split-filter thresholds are user-tunable since 2.3.4 (Settings → segment
-        // splitting; the values below are the defaults, referenced by TownRoadLaneSetting).
-        // They are read per node-recompute, so a change applies to a junction the next time
-        // its lines are edited — and to everything on save load (the topology hash isn't
-        // serialized, so loading recomputes every node).
+        // Defaults of the four split-filter thresholds, which are user settings. They are read on
+        // every node rebuild, so a change reaches a junction when its lines are next edited, and
+        // every junction after a load (MarkingTopologyState is not saved).
 
-        // Intersections within this world-space radius of any line endpoint are dropped.
-        // 2.0m = typical 3m drive lane width / 1.5 — covers the "two lines from one dot" overlap
-        // without eating real splits between independent lines. Stable across line length.
+        // Crossings within this distance of any line endpoint are ignored. Two lines leaving the
+        // same dot overlap for the first metres and report a string of false hits there. 2 m is
+        // about two thirds of a 3 m lane, small enough to keep real crossings.
         public const float kDefaultEndpointMarginM = 2.0f;
 
-        // Filter D: minimum crossing angle for a hit to count as a segment split. Below 8°
-        // the contact is a near-tangent graze (merge-lane geometry), and splitting it only
-        // produces micro-segments. Anchor extraction for the AREA tool
-        // (MarkingIntersectionExtractor) deliberately does NOT share this filter — island tips
-        // ARE shallow crossings and must stay clickable.
+        // Minimum crossing angle for a split. Shallower contacts are near-tangent grazes (merge
+        // lanes) that only produce slivers. MarkingIntersectionExtractor deliberately does not
+        // apply this filter: island tips are shallow crossings and must stay clickable as area
+        // anchors.
         public const int kDefaultMinCrossingAngleDeg = 8;
-        // Filter E: world-space radius within which multiple reported hits of one line pair
-        // collapse to the first — near-tangent contact yields hit clusters.
+        // Hits of one line pair closer than this collapse to the first; a graze reports a cluster.
         public const float kDefaultHitClusterM = 1.5f;
 
-        // Segments shorter than this are merged with their neighbour by removing the internal
-        // boundary. Catches tangential grazes that survive the endpoint filter — typical case is
-        // two slightly-different curves that touch in the middle for ~50cm.
+        // Shorter segments are merged into a neighbour, catching grazes that pass the other
+        // filters (two similar curves touching over half a metre, for example).
         public const float kDefaultMinSegmentLengthM = 1.0f;
 
         protected override void OnCreate()
         {
             base.OnCreate();
-            // Temp = road-tool preview clones of real nodes (buffers included). Rewriting their
-            // MarkingSegment buffer / tagging them Updated mid-apply feeds the vanilla
-            // Modification pipeline an entity state it doesn't expect — native crash at
-            // tool-apply time. Deleted nodes likewise must not be recomputed.
+            // Temp nodes are the road tool's preview copies, buffers included. Writing to them or
+            // tagging them Updated while the tool applies crashes the game in native code.
             _nodesWithLines = GetEntityQuery(
                 ComponentType.ReadOnly<MarkingLine>(),
                 ComponentType.ReadOnly<Node>(),
@@ -100,7 +80,6 @@ namespace TownRoadLane
             if (!EntityManager.HasBuffer<MarkingLine>(node)) return false;
             var lines = EntityManager.GetBuffer<MarkingLine>(node, isReadOnly: true);
 
-            // Quick exit: empty MarkingLine + no MarkingSegment buffer → nothing to do.
             if (lines.Length == 0 && !EntityManager.HasBuffer<MarkingSegment>(node))
                 return false;
 
@@ -111,14 +90,13 @@ namespace TownRoadLane
             if (newHash == oldHash && EntityManager.HasBuffer<MarkingSegment>(node))
                 return false;
 
-            // Snapshot lines before any structural change — buffer becomes invalid the moment
-            // we call AddBuffer/RemoveComponent below.
+            // Copy the lines first: structural changes below (AddBuffer, AddComponent) invalidate
+            // the buffer handle.
             int lineCount = lines.Length;
             var linesSnapshot = new NativeArray<MarkingLine>(lineCount, Allocator.Temp);
             for (int i = 0; i < lineCount; i++) linesSnapshot[i] = lines[i];
 
-            // Capture old segments so we can inherit visibility for unchanged boundaries.
-            // List<(lineIndex, tStart, tEnd, visible)> per line.
+            // Old segments per line, for inheriting visibility and style.
             var oldSegmentsByLine = new List<List<MarkingSegment>>(lineCount);
             for (int i = 0; i < lineCount; i++) oldSegmentsByLine.Add(new List<MarkingSegment>());
             if (EntityManager.HasBuffer<MarkingSegment>(node))
@@ -132,8 +110,6 @@ namespace TownRoadLane
                 }
             }
 
-            // Build per-line Bezier curves once. nullable-equivalent: use a parallel bool array
-            // since Bezier4x3 is a struct.
             var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
             var beziers = new NativeArray<Bezier4x3>(lineCount, Allocator.Temp);
             var bezierValid = new NativeArray<bool>(lineCount, Allocator.Temp);
@@ -146,13 +122,12 @@ namespace TownRoadLane
                 }
             }
 
-            // Save/load guard: on the first tick after loading a save, Composition and
-            // EdgeGeometry are still zeroed (IEmptySerializable; refilled at Modification3/4,
-            // AFTER this Modification1 system runs). Endpoint extraction then yields nothing,
-            // every TryBuild fails, and rewriting the buffer would collapse each line to a
-            // single [0,1] segment — destroying the per-segment style/visibility the user saved.
-            // If any failed line still references a live-but-unready edge, defer the whole node:
-            // no writes, no hash update, retry next tick.
+            // On the first tick after a load, Composition and EdgeGeometry are still zeroed (they
+            // are IEmptySerializable and get refilled in Modification3/4, after this
+            // Modification1 system). Every TryBuild then fails, and rewriting now would collapse
+            // each line to one [0, 1] segment and lose the saved per-segment style and
+            // visibility. If a failed line references an edge that exists but isn't ready, skip
+            // the node without writing anything and retry next tick.
             for (int i = 0; i < lineCount; i++)
             {
                 if (bezierValid[i]) continue;
@@ -166,7 +141,7 @@ namespace TownRoadLane
                 }
             }
 
-            // Boundaries[i] = sorted unique t-values on line i where it splits.
+            // Split parameters per line, starting with the ends 0 and 1.
             var boundaries = new List<List<float>>(lineCount);
             for (int i = 0; i < lineCount; i++)
             {
@@ -174,22 +149,14 @@ namespace TownRoadLane
                 b.Add(0f); b.Add(1f);
                 boundaries.Add(b);
             }
-            // Split-filter thresholds — user-tunable, defaults above. Settings is null only
-            // during early startup, before any node can have lines.
+            // Settings is null only during early startup, before any node can have lines.
             var st = Mod.Settings;
             float endpointMarginM = st?.SegmentAnchorDeadZoneM ?? kDefaultEndpointMarginM;
             float minCrossingSin = math.sin(math.radians((float)(st?.SegmentMinCrossingAngleDeg ?? kDefaultMinCrossingAngleDeg)));
             float hitClusterM = st?.SegmentHitClusterM ?? kDefaultHitClusterM;
             float minSegmentLengthM = st?.SegmentMinLengthM ?? kDefaultMinSegmentLengthM;
 
-            // Pairwise intersection. n is tiny in practice (≤ 20).
-            //
-            // Filter B (endpoint margin): two lines that share a dot inevitably "overlap" for the
-            // first few metres as they leave the dot together (their tangents and start points
-            // match). BezierIntersection sees dozens of micro-hits along that overlap and reports
-            // each as a separate intersection. Drop any hit whose world-space position is within
-            // kEndpointMarginM of either curve's endpoint — that's not a logical split, it's the
-            // endpoint cluster the user clicked through.
+            // All pairs; a node rarely has more than about 20 lines.
             for (int i = 0; i < lineCount; i++)
             {
                 if (!bezierValid[i]) continue;
@@ -198,11 +165,8 @@ namespace TownRoadLane
                     if (!bezierValid[j]) continue;
                     var hits = BezierIntersection.Intersect(beziers[i], beziers[j]);
 
-                    // Filter D (crossing angle): two lines meeting near-tangentially — the
-                    // "hyperbola" contact of merge geometry — are not a crossing worth a split;
-                    // the micro-segments it produces collapse downstream anyway (7c feedback).
-                    // Filter E (cluster): a graze that DOES pass the angle test still reports
-                    // several near-identical hits — keep the first of each world-space cluster.
+                    // Drop hits near an endpoint and shallow grazes, then keep only the first hit
+                    // of each cluster along line i.
                     var kept = new List<BezierIntersection.Hit>(hits.Count);
                     for (int h = 0; h < hits.Count; h++)
                     {
@@ -231,35 +195,25 @@ namespace TownRoadLane
                 }
             }
 
-            // Sort + dedupe each boundary list (in case multiple lines cross at the same t).
+            // Several lines can cross one line at the same t.
             for (int i = 0; i < lineCount; i++)
             {
                 boundaries[i].Sort();
                 DedupeSortedInPlace(boundaries[i], epsilon: 0.005f);
             }
 
-            // Filter C (minimum segment length): even after endpoint filtering, two lines that
-            // graze each other along an arc can leave sub-metre slivers. Walk the boundary list
-            // and drop any internal boundary that would create a segment shorter than
-            // kMinSegmentLengthM in world space. Always keep the outer 0 and 1.
             for (int i = 0; i < lineCount; i++)
             {
                 if (!bezierValid[i]) continue;
                 EnforceMinSegmentLength(boundaries[i], beziers[i], minSegmentLengthM);
             }
 
-            // Build the new flat segments list. Each new segment inherits visibility AND style
-            // from the OLD segment whose [tStart, tEnd] contains the new midpoint — that way
-            // a per-segment override survives a re-split when a fresh intersecting line is added.
-            // When no old segment matches (first build for this line) fall back to the parent
-            // MarkingLine's style.
             var newSegments = new List<MarkingSegment>(lineCount * 2);
             for (int i = 0; i < lineCount; i++)
             {
-                // Line permanently unresolvable (edge demolished, or gapIndex gone after a road
-                // upgrade changed the lane layout). Its curve can't be built so nothing renders,
-                // but carry its old segments over verbatim instead of collapsing them — if the
-                // situation is somehow restored later, the user's per-segment edits are intact.
+                // The line can't be resolved (edge demolished, or its gap gone after a road
+                // upgrade), so nothing renders. Keep its old segments as they are, so the user's
+                // edits survive if the line becomes valid again.
                 if (!bezierValid[i])
                 {
                     var carried = oldSegmentsByLine[i];
@@ -287,7 +241,6 @@ namespace TownRoadLane
                 }
             }
 
-            // Write back. AddBuffer overwrites if present.
             var segBuf = EntityManager.HasBuffer<MarkingSegment>(node)
                 ? EntityManager.GetBuffer<MarkingSegment>(node)
                 : EntityManager.AddBuffer<MarkingSegment>(node);
@@ -310,9 +263,8 @@ namespace TownRoadLane
             return true;
         }
 
-        /// <summary>Find the old segment whose [tStart, tEnd] contains <paramref name="t"/>;
-        /// return its visibility. Falls back to <paramref name="defaultVisible"/> when no
-        /// match (= a newly created segment).</summary>
+        /// <summary>Visibility of the old segment containing <paramref name="t"/>, or
+        /// <paramref name="defaultVisible"/> if none does.</summary>
         private static bool LookupInheritedVisibility(List<MarkingSegment> oldSegs, float t, bool defaultVisible)
         {
             for (int i = 0; i < oldSegs.Count; i++)
@@ -322,9 +274,8 @@ namespace TownRoadLane
             return defaultVisible;
         }
 
-        /// <summary>Same pattern as <see cref="LookupInheritedVisibility"/> for the per-segment
-        /// style override. New segments inherit from whichever old segment contained their
-        /// midpoint; truly-new segments take the parent line's default style.</summary>
+        /// <summary>Style of the old segment containing <paramref name="t"/>, or
+        /// <paramref name="defaultStyle"/> (the line's style) if none does.</summary>
         private static int LookupInheritedStyle(List<MarkingSegment> oldSegs, float t, int defaultStyle)
         {
             for (int i = 0; i < oldSegs.Count; i++)
@@ -342,14 +293,13 @@ namespace TownRoadLane
             }
         }
 
-        /// <summary>Surgical bookkeeping after removing a line from a node's MarkingLine buffer
-        /// (call AFTER RemoveAt). Drops the removed line's segments and SHIFTS the lineIndex of
-        /// the rest — per-segment visibility/style overrides survive the delete instead of
-        /// being wiped (the old approach reset every user tweak on every line). Also reindexes
-        /// intersection-anchored area vertices, which reference (lineA, lineB) pairs by index,
-        /// and busts both topology hashes so the next tick rebuilds against the shifted list.
-        /// Vertices referencing the DELETED line are left alone — they fail to resolve and the
-        /// area's cached pieces get carried, which beats snapping onto the wrong crossing.</summary>
+        /// <summary>Call after removing entry <paramref name="lineIndex"/> from a node's
+        /// MarkingLine buffer. Drops that line's segments and shifts the lineIndex of the rest,
+        /// so the other lines keep their per-segment edits. Also reindexes area vertices anchored
+        /// on line crossings (they store line indices) and resets both topology hashes so the
+        /// next tick rebuilds. Vertices on the removed line are left as they are: they stop
+        /// resolving and the area keeps its cached pieces, which is better than snapping to the
+        /// wrong crossing.</summary>
         public static void OnLineRemoved(EntityManager em, Entity node, int lineIndex)
         {
             if (em.HasBuffer<MarkingSegment>(node))
@@ -389,9 +339,8 @@ namespace TownRoadLane
                 em.SetComponentData(node, new MarkingTopologyState { linesHash = 0 });
         }
 
-        /// <summary>True if the world-space point sits within <paramref name="marginM"/> of
-        /// either endpoint of either curve. Distance compared in XZ — Y is irrelevant for road
-        /// markings (everything is on-or-near the road surface). Squared compare for speed.</summary>
+        /// <summary>True if <paramref name="p"/> is within <paramref name="marginM"/> (in XZ) of
+        /// an endpoint of either curve.</summary>
         private static bool IsNearAnyEndpoint(float3 p, Bezier4x3 a, Bezier4x3 b, float marginM)
         {
             float rSq = marginM * marginM;
@@ -406,14 +355,10 @@ namespace TownRoadLane
             return dx * dx + dz * dz;
         }
 
-        /// <summary>Remove internal boundaries that would create segments shorter than
-        /// <paramref name="minLengthM"/> in world space. Walks left-to-right; when a too-short
-        /// segment is found, the LATER boundary is dropped (which extends the next segment
-        /// instead of the previous one — arbitrary but consistent). Outer 0 and 1 are kept.
-        ///
-        /// Curve length used is the chord between sampled positions, not arc length — close
-        /// enough for the scales we hit (sub-metre slivers on ~5-20m curves) and avoids per-
-        /// merge calls to MathUtils.Length.</summary>
+        /// <summary>Removes inner boundaries that would leave a segment shorter than
+        /// <paramref name="minLengthM"/>. Walking from the start, the later boundary of a short
+        /// segment is dropped; the outer 0 and 1 always stay. Length is the chord between the
+        /// boundary points, which is close enough to arc length at this scale.</summary>
         private static void EnforceMinSegmentLength(List<float> boundaries, Bezier4x3 curve, float minLengthM)
         {
             if (boundaries.Count <= 2) return;
@@ -426,12 +371,12 @@ namespace TownRoadLane
                 if (DistSqXZ(pPrev, pCur) < minSq)
                 {
                     boundaries.RemoveAt(i);
-                    // Don't advance — the new boundary at index i needs re-check against pPrev.
+                    // Recheck the boundary that moved into slot i.
                     continue;
                 }
                 i++;
             }
-            // Final segment: if last internal boundary leaves a sub-min tail, drop it too.
+            // If the last segment is too short, drop the last inner boundary.
             if (boundaries.Count >= 3)
             {
                 int lastIdx = boundaries.Count - 1;
@@ -443,9 +388,8 @@ namespace TownRoadLane
 
         private static int HashLines(DynamicBuffer<MarkingLine> lines)
         {
-            // FNV-1a 32-bit on (sourceEdge.Index, sourceGap, targetEdge.Index, targetGap) per line.
-            // Order matters: swapping two lines changes lineIndex assignments and thus segment
-            // lineIndex references, so we want a recompute in that case.
+            // FNV-1a over each line's endpoints and curvature. Order-sensitive on purpose:
+            // reordering lines changes the lineIndex that segments refer to.
             const uint kPrime = 16777619u;
             uint h = 2166136261u;
             for (int i = 0; i < lines.Length; i++)
@@ -455,19 +399,15 @@ namespace TownRoadLane
                 h = (h ^ (uint)l.sourceGapIndex) * kPrime;
                 h = (h ^ (uint)l.targetEdge.Index) * kPrime;
                 h = (h ^ (uint)l.targetGapIndex) * kPrime;
-                // Curvature changes the Bezier, which moves every intersection t — must
-                // re-split when the user adjusts it.
                 h = (h ^ math.asuint(l.curvature)) * kPrime;
             }
             return (int)h;
         }
     }
 
-    /// <summary>Per-node companion of <see cref="MarkingLine"/>: caches the hash of the line
-    /// buffer at last successful topology recompute. Lets <see cref="MarkingTopologySystem"/>
-    /// skip the O(n²) Bezier intersection work when the buffer hasn't changed since last tick.
-    /// Not serialised — recomputed on first OnUpdate after load (hash = 0 → mismatch → recompute,
-    /// which is exactly what we want).</summary>
+    /// <summary>Hash of the node's MarkingLine buffer at the last segment rebuild, so
+    /// <see cref="MarkingTopologySystem"/> can skip the intersection work when nothing changed.
+    /// Deliberately not saved: every node rebuilds once after a load.</summary>
     public struct MarkingTopologyState : IComponentData
     {
         public int linesHash;

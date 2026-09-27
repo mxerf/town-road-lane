@@ -9,48 +9,26 @@ using Unity.Entities;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Gives ordinary city roads (3 m car lanes) the curb-side edge marking line that highway roads
-    /// already have, AND clones extra marking prefabs (one per <see cref="MarkingStyle"/>) so the
-    /// per-line UI tool can pick a style at draw time.
+    /// Clones vanilla marking prefabs for two purposes.
     ///
-    /// v1.1 (commit 342afa4) patched the vanilla 'EU/NA Highway Edge Line' in place — appending city
-    /// drive lanes to its m_LeftLanes. v2 instead CLONES that prefab so we can swap its mesh
-    /// independently of vanilla (G87 custom mesh support); the vanilla highway edge line stays
-    /// untouched. The clones reference vanilla 'Car Drive Lane 3' lanes in m_LeftLanes, so
-    /// NetInitializeSystem reverse-indexes our entries onto the vanilla lane prefab's SecondaryNetLane
-    /// buffer — and any road (including Road Builder roads) that uses 'Car Drive Lane 3' picks up our
-    /// markings automatically. See RESEARCH_road_builder.md §5.
+    /// Auto edge line: ordinary city roads (3 m car lanes) get the curb-side edge line that
+    /// highways already have. A clone of 'EU/NA Highway Edge Line' lists the city lanes in
+    /// m_LeftLanes, and NetInitializeSystem indexes those entries onto the lane prefabs'
+    /// SecondaryNetLane buffers, so every road using these lanes (Road Builder roads included)
+    /// gets the line. Cloning instead of editing the vanilla prefab lets the mesh be swapped while
+    /// the vanilla highway line stays untouched.
     ///
-    /// Stage 5c extension: for each style added to <see cref="MarkingStyle"/>, register a
-    /// (sourcePrefab, clonedPrefabName) recipe in <see cref="kStyleRecipes"/>. Source prefab must
-    /// be a vanilla NetLaneGeometryPrefab with SecondaryLane (else clone is skipped with a warn).
-    /// Each style gets its own EU + NA clone. Lookup at emission time goes via
-    /// <see cref="GetCloneEntity(MarkingStyle, bool)"/>.
-    ///
-    /// Per city lane we add TWO SecondaryLaneInfo entries, exact replica of what vanilla uses for
-    /// 'Highway Drive Lane 3' on its own edge line:
-    ///   { RequireSafe = true } — straight-segment edge line
-    ///   { RequireMerge = true, RequireSafeMaster = true } — continues line through merges (onramps,
-    ///   width transitions). See RESEARCH_v1_1.md §1 for rationale.
-    ///
-    /// Lives in m_LeftLanes only; canFlipSides=true makes vanilla mirror to the right curb.
-    ///
-    /// Risks covered (IMPLEMENTATION_PLAN.md): K1 (no Entity caching, lookup via PrefabBase),
-    /// K2 (PrefabUpdate phase, NetInitializeSystem fires same frame),
-    /// K3 (DuplicatePrefab calls AddPrefab internally),
-    /// K4 (re-runs on every game load via fresh OnCreate),
-    /// K6 (SwapMesh always paired with UpdatePrefab),
-    /// K7 (G87 fallback chain),
-    /// K8 (style=Off strips m_LeftLanes hosting so the clone stops drawing).
+    /// Tool styles: one EU and one NA clone per <see cref="MarkingStyle"/>, used as the prefab for
+    /// the sublanes that the marking tool spawns; see <see cref="GetCloneEntity(MarkingStyle, bool)"/>.
+    /// Each source must be a vanilla NetLaneGeometryPrefab with SecondaryLane.
     /// </summary>
     public partial class EdgeLineCloneSystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;
 
-        // City drive-lane prefabs that should now get the edge line. Mirrors v1.1 EdgeMarkingPatchSystem.
-        // 'Car Drive Lane 3' uses the same 'Car Lane 3 Mesh' as 'Highway Drive Lane 3', so the edge-line
-        // geometry already fits without offset tweaks. Tram / Public Transport variants share the same
-        // 3 m width on roads that carry trams or buses.
+        // City lanes that get the edge line. 'Car Drive Lane 3' uses the same 'Car Lane 3 Mesh' as
+        // 'Highway Drive Lane 3', so the edge line fits without offsets; the tram and public transport
+        // variants have the same 3 m width.
         private static readonly string[] kCityLaneNames =
         {
             "Car Drive Lane 3",
@@ -59,15 +37,7 @@ namespace TownRoadLane
             "Public Transport Lane 3 - Tram",
         };
 
-        // Per-style clone recipe. Source prefab name on the left; clone name (= what shows up in
-        // PrefabSystem) on the right. Fallback-mesh name is the asset we revert to if the
-        // user-picked / G87 mesh isn't loaded. Same arrangement for every style — solid uses
-        // White Solid Line Mesh, dashed uses White Dashed Line Mesh.
-        //
-        // To add a style:
-        //   1. Append entry to MarkingStyle enum.
-        //   2. Append rows here for EU + NA.
-        //   3. (Optional) add a per-style settings dropdown if the user should pick the mesh.
+        // To add a style: append it to MarkingStyle and add an EU and an NA row to kStyleRecipes.
         private struct StyleRecipe
         {
             public MarkingStyle style;
@@ -75,78 +45,60 @@ namespace TownRoadLane
             public string       sourcePrefabName;
             public string       cloneName;
             public string       fallbackMesh;
-            // True = host on city Car Drive Lane 3 (the v1.1 "edge line on city roads" feature).
-            // Hosted clones also take their mesh from the "Edge line style" setting and are NOT
-            // registered as tool styles (see kStyleRecipes note on the 2.4.2 split).
-            // False = clone exists ONLY as a spawn-archetype source for the Phase-4 emission system;
-            // it must NOT inherit vanilla hosting from the source prefab or it gets auto-drawn on
-            // every city road as part of the vanilla SecondaryLane pass.
-            //
-            // Why this matters: Dashed clones source from "EU Car Lane Line", which is a vanilla
-            // lane-divider prefab. If we leave its hosting intact OR add city-lane hosting, every
-            // city road grows a dashed line in addition to its normal markings — observed as
-            // "странные неконсистентные полосы" after Stage 5c rolled out.
+            // True for the auto edge line: hosted on the city lanes, mesh from the "Edge line style"
+            // setting, not registered as a tool style. False for tool styles: the clone is only a
+            // prefab for spawned sublanes and must host nothing, otherwise the vanilla secondary
+            // lane pass draws it on every city road (the dashed styles are cloned from the vanilla
+            // lane divider 'Car Lane Line').
             public bool         hostOnCityLanes;
-            // True = the US-convention yellow left-edge clone: hosts on city lanes in
-            // m_RightLanes ONLY (= line on the lane's LEFT edge, see the side-semantics note
-            // in ApplyOrUpdate) with canFlipSides=false, active only while both EdgeLineEnabled
-            // and YellowLeftLineEnabled are on. Mutually exclusive with hostOnCityLanes.
+            // True for the US-style yellow left edge line: hosted on the city lanes in m_RightLanes
+            // only (the lane's left edge, see the side note in ApplyOrUpdate) with
+            // canFlipSides=false, while both EdgeLineEnabled and YellowLeftLineEnabled are on.
+            // Mutually exclusive with hostOnCityLanes.
             public bool         hostYellowLeft;
         }
 
-        // G87 mesh names — prefixes from Setting.cs (kept here as full strings to avoid a
-        // cross-class dependency for a value that's bytes long). If G87 isn't installed, the
-        // ResolveMeshes pass returns no match and PickMesh falls back to the vanilla mesh
-        // matching this recipe's fallbackMesh field (so G87 styles silently degrade to vanilla
-        // — no crash, just less variety).
+        // G87 mesh names (the same prefix appears in Setting.cs). Without G87 they do not resolve
+        // and the clone keeps the source prefab's vanilla mesh.
         private const string kG87Prefix = "G87 UK Road Markings RoadMarking G87 ";
         private const string kG87SolidMesh        = kG87Prefix + "UK Carriageway Line White NetLaneDecal_RenderPrefab";
         private const string kG87DashedMesh       = kG87Prefix + "UK Carriageway Line White Dashed NetLaneDecal_RenderPrefab";
         private const string kG87YellowMesh       = kG87Prefix + "UK Carriageway Line Yellow NetLaneDecal_RenderPrefab";
         private const string kG87YellowDashedMesh = kG87Prefix + "UK Carriageway Line Yellow Dashed NetLaneDecal_RenderPrefab";
-        // From the "[G87] Vanilla Curb" pack — a hard PDX dependency since 2.4.0. Missing
-        // pack (local/manual installs) → PickMesh keeps the source prefab's own mesh.
+        // From the "[G87] Vanilla Curb" pack, a dependency on Paradox Mods. Manual installs may lack
+        // it; the clone then keeps the source prefab's mesh.
         private const string kCurbMesh = "G87 Vanilla Curb Misc G87 Vanilla Curb NetLane_RenderPrefab";
 
         private static readonly StyleRecipe[] kStyleRecipes =
         {
-            // Auto edge line — the ONLY clones that host on city lanes. Their mesh follows the
-            // "Edge line style" setting (may be yellow / G87). Split from the tool's Solid
-            // archetype in 2.4.2: one clone used to serve both roles, so picking a yellow edge
-            // style silently turned the tool's Solid lines yellow too (forum report 2026-07-20).
-            // Hosted clones are NOT registered in m_ClonesByStyle — they aren't tool styles.
+            // Auto edge line, the only clones hosted on city lanes. Their mesh follows the "Edge
+            // line style" setting, so they are kept apart from the tool's Solid clones: a shared
+            // clone would turn the tool's Solid lines yellow along with a yellow edge style.
             new() { style = MarkingStyle.Solid,     isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU Auto Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
             new() { style = MarkingStyle.Solid,     isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA Auto Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = true  },
-            // US-convention yellow left-edge line (2.4.2, forum request): NA source only — the
-            // clone inherits the NA ThemeObject, so vanilla's theme requirements keep it out of
-            // EU cities at spawn time. Renders on the lane's left/median edge (hosted in
-            // m_RightLanes, canFlipSides=false); the white NA clone above stops mirroring
-            // while YellowLeftLineEnabled is on.
+            // US-style yellow left edge line. NA source only: the clone inherits the NA
+            // ThemeObject, so theme requirements keep it out of EU cities. Renders on the lane's
+            // left (median) edge; the white NA clone above stops mirroring while
+            // YellowLeftLineEnabled is on.
             new() { style = MarkingStyle.YellowSolid, isNA = true, sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA Auto Yellow Left Line", fallbackMesh = "Yellow Solid Line Mesh", hostYellowLeft = true },
-            // Tool's Solid style — always white, regardless of the edge-line settings. Keeps the
-            // pre-2.4.2 clone name: saved games reference manual solid segments by it.
+            // Tool styles. Clone names are saved with the spawned sublanes, so they must never
+            // change. Solid is always white, whatever the edge line settings.
             new() { style = MarkingStyle.Solid,     isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU City Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = false },
             new() { style = MarkingStyle.Solid,     isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA City Edge Line",       fallbackMesh = "White Solid Line Mesh",  hostOnCityLanes = false },
             new() { style = MarkingStyle.Dashed,    isNA = false, sourcePrefabName = "EU Car Lane Line",     cloneName = "TownRoadLane EU City Dashed Line",     fallbackMesh = "White Dashed Line Mesh", hostOnCityLanes = false },
             new() { style = MarkingStyle.Dashed,    isNA = true,  sourcePrefabName = "NA Car Lane Line",     cloneName = "TownRoadLane NA City Dashed Line",     fallbackMesh = "White Dashed Line Mesh", hostOnCityLanes = false },
-            // G87 styles: use 'Car Bay Line' as the source prefab. Same prefab the parking-line
-            // clone uses, and parking renders G87 decals brightly while edge-line-source G87s look
-            // washed out. Suspected cause: Car Bay Line's NetLaneMeshInfo has the LOD chain /
-            // width / material flags G87 was designed against; Highway Edge Line and Car Lane Line
-            // have different layouts that scale the G87 decal opacity weirdly.
+            // G87 styles are cloned from 'Car Bay Line': G87 decals render at full brightness on
+            // it but look washed out on Highway Edge Line or Car Lane Line, probably because of
+            // their different mesh info and material setup.
             new() { style = MarkingStyle.G87Solid,  isNA = false, sourcePrefabName = "EU Car Bay Line", cloneName = "TownRoadLane EU City G87 Solid Line",  fallbackMesh = kG87SolidMesh,  hostOnCityLanes = false },
             new() { style = MarkingStyle.G87Solid,  isNA = true,  sourcePrefabName = "NA Car Bay Line", cloneName = "TownRoadLane NA City G87 Solid Line",  fallbackMesh = kG87SolidMesh,  hostOnCityLanes = false },
             new() { style = MarkingStyle.G87Dashed, isNA = false, sourcePrefabName = "EU Car Bay Line", cloneName = "TownRoadLane EU City G87 Dashed Line", fallbackMesh = kG87DashedMesh, hostOnCityLanes = false },
             new() { style = MarkingStyle.G87Dashed, isNA = true,  sourcePrefabName = "NA Car Bay Line", cloneName = "TownRoadLane NA City G87 Dashed Line", fallbackMesh = kG87DashedMesh, hostOnCityLanes = false },
-            // Double Solid — single vanilla mesh "White Double Solid Line Mesh" cloned onto the
-            // standard Car Bay Line archetype. Two parallel lines come from the mesh itself, not
-            // from spawning two entities, so the emission pipeline stays simple.
+            // Double lines come from a single vanilla mesh, not from two sublanes.
             new() { style = MarkingStyle.DoubleSolid, isNA = false, sourcePrefabName = "EU Car Bay Line", cloneName = "TownRoadLane EU City Double Solid Line", fallbackMesh = "White Double Solid Line Mesh", hostOnCityLanes = false },
             new() { style = MarkingStyle.DoubleSolid, isNA = true,  sourcePrefabName = "NA Car Bay Line", cloneName = "TownRoadLane NA City Double Solid Line", fallbackMesh = "White Double Solid Line Mesh", hostOnCityLanes = false },
-            // UI polish pass (2.3.0). Short dashes — the vanilla '- Dense' mesh variant
-            // (confirmed in the 2026-05-11 prefab dump); if the name drifted in a patch,
-            // PickMesh keeps the source's regular dashed mesh, so worst case it degrades
-            // to the plain Dashed look. Yellow pair mirrors the White G87 recipes.
+            // '- Dense' and '- Long' are vanilla dashed mesh variants. If a game patch renames one,
+            // the clone keeps the source's regular dashed mesh.
             new() { style = MarkingStyle.DashedDense,     isNA = false, sourcePrefabName = "EU Car Lane Line", cloneName = "TownRoadLane EU City Dashed Dense Line",     fallbackMesh = "White Dashed Line Mesh - Dense", hostOnCityLanes = false },
             new() { style = MarkingStyle.DashedDense,     isNA = true,  sourcePrefabName = "NA Car Lane Line", cloneName = "TownRoadLane NA City Dashed Dense Line",     fallbackMesh = "White Dashed Line Mesh - Dense", hostOnCityLanes = false },
             new() { style = MarkingStyle.G87Yellow,       isNA = false, sourcePrefabName = "EU Car Bay Line",  cloneName = "TownRoadLane EU City G87 Yellow Line",        fallbackMesh = kG87YellowMesh,       hostOnCityLanes = false },
@@ -155,14 +107,10 @@ namespace TownRoadLane
             new() { style = MarkingStyle.G87YellowDashed, isNA = true,  sourcePrefabName = "NA Car Bay Line",  cloneName = "TownRoadLane NA City G87 Yellow Dashed Line", fallbackMesh = kG87YellowDashedMesh, hostOnCityLanes = false },
             new() { style = MarkingStyle.DashedLong,      isNA = false, sourcePrefabName = "EU Car Lane Line", cloneName = "TownRoadLane EU City Dashed Long Line",       fallbackMesh = "White Dashed Line Mesh - Long", hostOnCityLanes = false },
             new() { style = MarkingStyle.DashedLong,      isNA = true,  sourcePrefabName = "NA Car Lane Line", cloneName = "TownRoadLane NA City Dashed Long Line",       fallbackMesh = "White Dashed Line Mesh - Long", hostOnCityLanes = false },
-            // Curb (2026-07-19): vanilla curb texture, "[G87] Vanilla Curb" optional mod.
-            // Visual curb line for island/median edges — the flat stand-in for a real 3D curb
-            // (no curb mesh exists in vanilla — see the netlane-geom survey in the log).
+            // Flat curb texture for island and median edges; vanilla has no curb lane mesh.
             new() { style = MarkingStyle.Curb,            isNA = false, sourcePrefabName = "EU Car Bay Line",  cloneName = "TownRoadLane EU City Curb Line",              fallbackMesh = kCurbMesh, hostOnCityLanes = false },
             new() { style = MarkingStyle.Curb,            isNA = true,  sourcePrefabName = "NA Car Bay Line",  cloneName = "TownRoadLane NA City Curb Line",              fallbackMesh = kCurbMesh, hostOnCityLanes = false },
-            // Vanilla yellow family (2.4.2): same source archetypes as the white counterparts
-            // (solid → Highway Edge Line, dashed → Car Lane Line, the rest → Car Bay Line).
-            // All meshes are vanilla — no pack dependency.
+            // Vanilla yellow styles: same source prefabs as their white counterparts.
             new() { style = MarkingStyle.YellowSolid,       isNA = false, sourcePrefabName = "EU Highway Edge Line", cloneName = "TownRoadLane EU City Yellow Solid Line",        fallbackMesh = "Yellow Solid Line Mesh",               hostOnCityLanes = false },
             new() { style = MarkingStyle.YellowSolid,       isNA = true,  sourcePrefabName = "NA Highway Edge Line", cloneName = "TownRoadLane NA City Yellow Solid Line",        fallbackMesh = "Yellow Solid Line Mesh",               hostOnCityLanes = false },
             new() { style = MarkingStyle.YellowDashed,      isNA = false, sourcePrefabName = "EU Car Lane Line",     cloneName = "TownRoadLane EU City Yellow Dashed Line",       fallbackMesh = "Yellow Dashed Line Mesh - Long",       hostOnCityLanes = false },
@@ -177,15 +125,13 @@ namespace TownRoadLane
         private EntityQuery m_LanePrefabQuery;
         private bool m_Done;
 
-        // Cached managed PrefabBase refs per (style, theme). Stable across UpdatePrefab —
-        // only the ECS entity behind them gets re-created, see IMPLEMENTATION_PLAN.md K1.
-        // Resolve to a live ECS entity via GetCloneEntity(...).
+        // Tool-style clones per (style, isNA). The PrefabBase survives UpdatePrefab but the entity
+        // behind it is recreated, so entities are always resolved through GetCloneEntity.
         private readonly Dictionary<(MarkingStyle, bool), NetLanePrefab> m_ClonesByStyle = new();
 
-        /// <summary>Fresh ECS entity for the clone matching the given style + theme. Returns
-        /// Entity.Null if that combo isn't loaded yet (caller should fall back to Solid).
-        /// K1-safe: re-resolves through PrefabSystem on every call so post-UpdatePrefab entity
-        /// re-creations don't leave us with stale handles.</summary>
+        /// <summary>Current entity of the clone for this style and theme, or Entity.Null while it
+        /// is not loaded (callers fall back to Solid). Resolved through PrefabSystem on every call
+        /// because UpdatePrefab recreates the entity.</summary>
         public Entity GetCloneEntity(MarkingStyle style, bool isNA)
         {
             if (m_PrefabSystem == null) return Entity.Null;
@@ -194,21 +140,16 @@ namespace TownRoadLane
                 : Entity.Null;
         }
 
-        /// <summary>Back-compat alias for callers that pre-date the style API. Solid + EU theme —
-        /// matches the original CloneEntityEU getter. Kept so this commit doesn't ripple into
-        /// MarkingPairEmissionSystem (which is dead-code-but-still-compiled) or anything that
-        /// still references the old name.</summary>
+        /// <summary>Entities of the Solid tool-style clones for the EU and NA themes.</summary>
         public Entity CloneEntityEU => GetCloneEntity(MarkingStyle.Solid, isNA: false);
         public Entity CloneEntityNA => GetCloneEntity(MarkingStyle.Solid, isNA: true);
 
-        /// <summary>Managed NetLanePrefab refs for the solid EU/NA clones — kept for callers that
-        /// need to acquire Material via NetLaneMeshInfo.m_Mesh.ObtainMaterial(). Stable across
-        /// UpdatePrefab. New style-aware code should prefer working via Entity through
-        /// <see cref="GetCloneEntity"/>.</summary>
+        /// <summary>The Solid EU and NA clone prefabs, e.g. for getting the material through
+        /// NetLaneMeshInfo.m_Mesh.ObtainMaterial(). Stable across UpdatePrefab.</summary>
         public NetLanePrefab ClonePrefabEU => m_ClonesByStyle.TryGetValue((MarkingStyle.Solid, false), out var p) ? p : null;
         public NetLanePrefab ClonePrefabNA => m_ClonesByStyle.TryGetValue((MarkingStyle.Solid, true),  out var p) ? p : null;
 
-        /// <summary>Names of the marking prefabs this system creates/updates — exposed for diagnostics.</summary>
+        /// <summary>Names of the marking prefabs this system creates, for diagnostics.</summary>
         public static IEnumerable<string> CreatedPrefabNames { get { foreach (var r in kStyleRecipes) yield return r.cloneName; } }
 
         protected override void OnCreate()
@@ -219,38 +160,32 @@ namespace TownRoadLane
             RequireForUpdate(m_LanePrefabQuery);
         }
 
-        // NOTE: no mid-session re-run entry point on purpose. UpdatePrefab in a LIVE world —
-        // regardless of phase — leaves existing sublanes with stale PrefabRefs, and the next
-        // SecondaryLane rebuild (any road edit, even bulldozer hover) crashes natively in a
-        // Burst job. The system runs exactly once per save load, before the world spawns lanes.
+        // There is deliberately no way to re-run this mid-session. UpdatePrefab in a live world,
+        // in any phase, leaves existing sublanes with stale PrefabRefs, and the next secondary lane
+        // rebuild (any road edit, even a bulldozer hover) crashes natively in a Burst job. The
+        // system runs once per save load, before lanes are spawned.
 
         protected override void OnUpdate()
         {
             if (m_Done) return;
             m_Done = true;
             Enabled = false;
-            // NOTE: runs even when EdgeLineEnabled is false. The clones MUST exist in every
-            // session — saved games reference them by name (manual segment sublanes spawn from
-            // these prefabs as style archetypes), and MarkingSegmentEmissionSystem resolves the
-            // Solid clone every tick. The setting only controls AUTO hosting on city lanes;
-            // ApplyOrUpdate applies that distinction itself. Skipping creation here left saves
-            // with "Unknown prefab ID", a headless manual editor, and ultimately a native crash
-            // in the emission ECB (2026-07-17).
+            // Runs even when EdgeLineEnabled is off: saved games reference the clones by name (the
+            // tool's sublanes are spawned from them) and MarkingSegmentEmissionSystem needs the
+            // Solid clone every tick. Without them a save loads with "Unknown prefab ID" errors
+            // and the emission ECB crashes natively. The setting only controls hosting on city
+            // lanes, which ApplyOrUpdate handles.
             try { ApplyOrUpdate(); }
             catch (Exception e) { log.Error(e, "EdgeLineCloneSystem failed"); }
         }
 
         /// <summary>
-        /// Creates (or refreshes) every style clone defined in <see cref="kStyleRecipes"/>.
-        /// Idempotent.
-        /// When EdgeLineEnabled is false (set externally then reapply triggered), call
-        /// <see cref="StripHostingIfDisabled"/> instead to clear hosting without recreating prefabs.
+        /// Creates or refreshes every clone in <see cref="kStyleRecipes"/>. Idempotent.
         /// </summary>
         public void ApplyOrUpdate()
         {
-            // User-pickable mesh from settings governs ONLY the hosted auto-edge clones; every
-            // tool style (Solid included) always uses its recipe fallback. See kStyleRecipes note
-            // on the 2.4.2 split.
+            // The mesh setting applies only to the hosted auto edge clones; tool styles always use
+            // their recipe mesh.
             string edgeMeshName = Mod.Settings?.EdgeLineMeshName() ?? "White Solid Line Mesh";
             bool autoEdgeOn = Mod.Settings == null || Mod.Settings.EdgeLineEnabled;
             bool yellowLeftOn = autoEdgeOn && (Mod.Settings == null || Mod.Settings.YellowLeftLineEnabled);
@@ -270,20 +205,18 @@ namespace TownRoadLane
             var cityLanes = ResolveList(laneByName, kCityLaneNames, "city host lane");
             if (cityLanes.Count == 0) { log.Warn("no city host lanes found — aborting"); return; }
 
-            // Phase 2 of the US yellow-left option: real highways. Vanilla 'NA Highway Edge
-            // Line' hosts highway drive lanes in m_LeftLanes with canFlipSides=true → white on
-            // both edges. While the option is on we stop the mirroring (white keeps the curb
-            // side) and mirror its exact host entries onto the yellow clone's m_RightLanes, so
-            // highways get the yellow median edge with the same lanes and flags vanilla uses.
-            // EU prefab is untouched, so EU highways keep both white edges.
+            // Yellow left line on highways. Vanilla 'NA Highway Edge Line' hosts the highway lanes
+            // in m_LeftLanes with canFlipSides=true, so it draws white on both edges. While the
+            // option is on, its mirroring is switched off (white stays on the curb side) and its
+            // host entries are copied to the yellow clone's m_RightLanes, so highways get the
+            // yellow median edge with the lanes and flags vanilla uses. The EU prefab is untouched.
             //
-            // MUST NOT go through UpdatePrefab on the vanilla prefab: re-initializing an
-            // already-initialized prefab makes NetInitializeSystem re-Add its m_LeftLanes
-            // entries to the host-lane SecondaryNetLane buffers (vanilla dedupes Right only) —
-            // duplicate sublanes with identical PathNode keys, native crash in the 4B barrier
-            // playback (observed 2026-07-26). Instead, strip the CanFlipSides bit from the
-            // already-built host-buffer entries in place; the managed flag is updated too so a
-            // not-yet-initialized prefab converges to the same state.
+            // The vanilla prefab must not go through UpdatePrefab: re-initializing it makes
+            // NetInitializeSystem add its m_LeftLanes entries to the host lanes' SecondaryNetLane
+            // buffers again (vanilla dedupes only the right side), and the duplicate sublanes with
+            // identical PathNode keys crash natively in the Modification4B barrier playback.
+            // Instead the CanFlipSides bit is cleared in the already-built host buffer entries. The
+            // managed flag is cleared too, so a prefab that is not initialized yet ends up the same.
             SecondaryLaneInfo[] highwayYellowInfos = Array.Empty<SecondaryLaneInfo>();
             if (yellowLeftOn
                 && laneByName.TryGetValue("NA Highway Edge Line", out var naVanillaEdge) && naVanillaEdge != null
@@ -312,7 +245,7 @@ namespace TownRoadLane
                 log.Info($"yellow-left: unmirrored vanilla 'NA Highway Edge Line' — CanFlipSides stripped from {stripped} host entries, {highwayYellowInfos.Length} entries mirrored to the yellow clone");
             }
 
-            // Collect every distinct mesh name we might need so we resolve all of them in one query pass.
+            // Resolve every mesh that might be needed in one query pass.
             var meshNames = new HashSet<string> { edgeMeshName };
             foreach (var r in kStyleRecipes) meshNames.Add(r.fallbackMesh);
             var meshByName = ResolveMeshes(meshNames);
@@ -332,9 +265,8 @@ namespace TownRoadLane
                 }
                 if (cloneBase == null || !cloneBase.TryGet<SecondaryLane>(out var sec)) { log.Warn($"'{recipe.cloneName}' has no SecondaryLane — skipping"); continue; }
 
-                // Always clear ALL host arrays first — DuplicatePrefab carries the source's hosting,
-                // and a vanilla divider prefab cloned for our archetype-source use would otherwise
-                // re-host itself on whatever the vanilla source originally targeted.
+                // Clear all hosting first: DuplicatePrefab copies the source's hosting, so a cloned
+                // vanilla divider would otherwise be drawn wherever the original is.
                 sec.m_LeftLanes = Array.Empty<SecondaryLaneInfo>();
                 sec.m_RightLanes = Array.Empty<SecondaryLaneInfo>();
                 sec.m_CrossingLanes = Array.Empty<SecondaryLaneInfo2>();
@@ -343,18 +275,14 @@ namespace TownRoadLane
                 int hostCount = 0;
                 if (recipe.hostOnCityLanes && autoEdgeOn)
                 {
-                    // Edge-line recipe (v1.1 behaviour): host on Car Drive Lane 3 + variants, both
-                    // RequireSafe entry and RequireMerge+RequireSafeMaster entry per lane.
-                    // With EdgeLineEnabled off the clone still exists (manual lines + saved games
-                    // depend on it) but hosts nothing, so the auto edge line stops drawing.
-                    // Side semantics (verified in game 2026-07-26): m_LeftLanes lists the host
-                    // lanes lying to the LEFT of the line, i.e. the line renders on the lane's
-                    // RIGHT edge — and vice versa. (Vanilla Car Bay Line: drive lane in LEFT,
-                    // bay lane in RIGHT, line between them.)
+                    // Sides: m_LeftLanes lists the host lanes lying to the left of the line, so the
+                    // line renders on the lane's right edge, and vice versa. (Vanilla Car Bay Line
+                    // has the drive lane in left and the bay lane in right, the line between them.)
+                    // With EdgeLineEnabled off the clone still exists but hosts nothing.
                     if (yellowLeftOn && recipe.isNA)
                     {
-                        // US split: the NA white line keeps only the curb (right) side; the
-                        // median (left) side belongs to the yellow-left clone below.
+                        // The NA white line keeps only the curb (right) side; the median (left)
+                        // side belongs to the yellow left clone.
                         sec.m_LeftLanes = MakeCityLaneInfos(cityLanes);
                         sec.m_CanFlipSides = false;
                     }
@@ -367,9 +295,8 @@ namespace TownRoadLane
                 }
                 else if (recipe.hostYellowLeft && yellowLeftOn)
                 {
-                    // Host in m_RightLanes: lanes to the RIGHT of the line → the yellow line
-                    // renders on the lane's LEFT (median) edge. City lanes + the highway
-                    // entries mirrored from the vanilla NA edge line (phase 2, see above).
+                    // Hosted in m_RightLanes, so the line renders on the lane's left (median) edge.
+                    // City lanes plus the highway entries copied from the vanilla NA edge line.
                     var yellowInfos = MakeCityLaneInfos(cityLanes);
                     if (highwayYellowInfos.Length > 0)
                     {
@@ -382,14 +309,13 @@ namespace TownRoadLane
                     sec.m_CanFlipSides = false;
                     hostCount = yellowInfos.Length;
                 }
-                // else: clone exists only as a spawn-archetype source for Phase-4 emission;
-                // intentionally hosted on nothing so vanilla SecondaryLaneSystem won't draw it.
+                // Tool-style clones host nothing, so the vanilla secondary lane pass never draws them.
 
                 int swapped = SwapMesh(cloneBase, mesh);
                 m_PrefabSystem.UpdatePrefab(cloneBase);
 
-                // Hosted auto clones aren't tool styles — registering them would collide with
-                // the tool's entry under the same (style, isNA) key.
+                // Hosted clones are not tool styles and would collide with the tool's entry under
+                // the same (style, isNA) key.
                 if (!recipe.hostOnCityLanes && !recipe.hostYellowLeft) m_ClonesByStyle[(recipe.style, recipe.isNA)] = cloneBase;
                 touched++;
                 log.Info($"applied '{recipe.cloneName}' [{recipe.style}/{(recipe.isNA ? "NA" : "EU")}]: hostedEntries={hostCount} mesh='{(mesh != null ? mesh.name : "<source>")}' swapped={swapped}");
@@ -443,7 +369,7 @@ namespace TownRoadLane
         /// Two SecondaryLaneInfo entries per city lane, matching what vanilla uses for 'Highway Drive Lane 3':
         ///   - { RequireSafe } draws the edge line on straight segments.
         ///   - { RequireMerge, RequireSafeMaster } continues the line through merges (onramps, width
-        ///     transitions) — the master side of a merge that continues the safe edge.
+        ///     transitions) on the master side of the merge.
         /// Without the second entry the line would stop at every merge point.
         /// </summary>
         private static SecondaryLaneInfo[] MakeCityLaneInfos(IReadOnlyList<NetLanePrefab> lanes)

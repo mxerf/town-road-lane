@@ -6,32 +6,24 @@ const { CSSPresencePlugin } = require("./tools/css-presence");
 const TerserPlugin = require("terser-webpack-plugin");
 const gray = (text) => `\x1b[90m${text}\x1b[0m`;
 
-// Output to a local dist/ folder inside the UI project. The C# csproj's BuildFrontend target
-// (mirrors the TTE pattern: TLEFrontend → TrafficToolEssentials build pipeline) picks up
-// dist/*.mjs + dist/*.css + mod.json and copies them into its own OutDir, which Mod.targets
-// then mirrors into $(LocalModsPath)\TownRoadLane\.
-//
-// Earlier this script emitted straight into Mods/TownRoadLane/, but the C# Mod.targets does
-// <RemoveDir $(DeployDir)> on every build and wiped the .mjs that we'd just placed there —
-// the UI went silently missing after every C# rebuild.
+// The csproj's BuildFrontend target copies dist/ into the C# OutDir, and Mod.targets deploys
+// it from there (build pipeline modelled on TrafficToolEssentials). Don't emit straight into the mod folder: Mod.targets deletes the deploy
+// directory on every C# build, so the bundle would silently disappear.
 const OUTPUT_DIR = "./dist/";
-// Single version source: ModVersion in the C# project's PublishConfiguration.xml — the number
-// PDX shows. The csproj stamps the assembly version from the same field.
+// The version comes from ModVersion in PublishConfiguration.xml, the same field the csproj
+// uses for the assembly version.
 const PUBLISH_CONFIG_PATH = path.resolve(__dirname, "../TownRoadLane/Properties/PublishConfiguration.xml");
 const modVersionMatch = /<ModVersion Value="([^"]+)"/.exec(fs.readFileSync(PUBLISH_CONFIG_PATH, "utf8"));
 if (!modVersionMatch) throw new Error(`ModVersion not found in ${PUBLISH_CONFIG_PATH}`);
 const MOD_VERSION = modVersionMatch[1];
-// The banner is the manifest: the game's UIModuleAsset.PostCreate parses this
-// comment block out of the .mjs itself (NOT mod.json). The Dependencies line
-// is REQUIRED even when empty — PostCreate calls AddTags(m_UIModuleDependencies)
-// unconditionally, and that field stays null (→ NullReferenceException in the
-// game log on every startup) unless a "Dependencies:" line was parsed.
+// The banner is the manifest: UIModuleAsset.PostCreate parses it from the .mjs, not from
+// mod.json. The Dependencies line is required even when empty. Without it
+// m_UIModuleDependencies stays null and PostCreate logs a NullReferenceException on every
+// startup.
 const banner = `\n * Cities: Skylines II UI Module\n * Id: ${MOD.id}\n * Author: ${MOD.author}\n * Version: ${MOD_VERSION}\n * Dependencies: ${(MOD.dependencies || []).join(", ")}\n`;
 
 module.exports = {
-  // cohtml's JS runtime doesn't expose readable stack traces — every error
-  // points at "JS :15:23" regardless of mode, so dev mode buys us nothing.
-  // Keep production for the size + speed.
+  // Development mode gains nothing: cohtml reports every error at "JS :15:23" either way.
   mode: "production",
   stats: "none",
   entry: { [MOD.id]: "./src/index.tsx" },

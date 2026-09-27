@@ -3,15 +3,11 @@ using Unity.Entities;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Tag attached to every sublane that <see cref="MarkingPairEmissionSystem"/> created on a node
-    /// for a specific <see cref="MarkingPair"/> entry. Lets the emission system diff "what should
-    /// exist" (entries in the MarkingPair buffer) against "what does exist" (sublanes carrying this
-    /// component for the node) without re-creating anything that's already correct.
-    ///
-    /// Identity is (node, pairIndex). pairIndex is the buffer slot in node.MarkingPair — uniquely
-    /// stable per (node,tick), never collides. pairKey is the geometry hash from ComputeKey, kept
-    /// for human-readable diagnostics but NOT used for dedup (earlier rev used pairKey and lost
-    /// ~20% of pairs to silent hash collisions — see commit history + log [emission-collision]).
+    /// Legacy tag on sublanes spawned for <see cref="MarkingPair"/> entries, keyed by
+    /// (node, pairIndex). Nothing creates it any more: <see cref="MarkingSegmentEmissionSystem"/>
+    /// deletes such sublanes, and <see cref="CustomSecondaryLaneSystem"/> leaves them out of its
+    /// old-lane cleanup. pairKey is an endpoint hash kept for diagnostics only: hashes can
+    /// collide, so it is never used as the identity.
     /// </summary>
     public struct TRLPairLink : IComponentData
     {
@@ -21,17 +17,14 @@ namespace TownRoadLane
 
         public static int ComputeKey(MarkingPair p)
         {
-            // Pack each endpoint as a single 64-bit number (edge.Index in hi, gapIndex in lo),
-            // sort the pair, then combine. Previous XOR-of-two-component-hashes collapsed when
-            // sourceGap == targetGap (gap ^ gap = 0), so e.g. (A.gap0↔B.gap0) and (A.gap1↔B.gap1)
-            // got the same key and dedup deleted one of them. User report: "symmetric points on
-            // different roads don't connect" — exactly that pattern.
+            // Pack each endpoint into 64 bits (edge index high, gap index low) and combine them
+            // order-independently. XOR-ing per-endpoint hashes would cancel out whenever both
+            // ends share a gap index.
             long a = ((long)p.sourceEdge.Index << 32) | (uint)p.sourceGapIndex;
             long b = ((long)p.targetEdge.Index << 32) | (uint)p.targetGapIndex;
-            // Order-insensitive: always combine smaller first.
             long lo = a < b ? a : b;
             long hi = a < b ? b : a;
-            // Splittable-ish mix for 64→32 reduction; collision-resistance is fine for our N≪1000.
+            // 64 to 32 bit mix, good enough for the handful of pairs on one node.
             ulong m = (ulong)lo;
             m = (m ^ (ulong)hi) * 0x9E3779B97F4A7C15UL;
             m ^= m >> 32;

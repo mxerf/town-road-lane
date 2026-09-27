@@ -1,6 +1,3 @@
-// Barrel export — single import surface for all icons used in the UI.
-// Add new icons by creating a sibling file and re-exporting from here.
-
 export { IconBase } from "./Icon";
 export type { IconProps } from "./Icon";
 export { ChevronRight } from "./Chevron";

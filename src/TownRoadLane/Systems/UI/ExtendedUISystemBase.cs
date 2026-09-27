@@ -1,9 +1,9 @@
 // Adapted from RoadBuilder by JadHajjar (MIT License):
-// https://github.com/JadHajjar/RoadBuilder-CSII — Systems/UI/ExtendedUISystemBase.cs
-// Changes vs upstream: TownRoadLane binding group, Attribute.IsDefined instead of the
-// Colossal.Reflection extension, Enum.ToObject in the reader (upstream returned a boxed
-// int, which throws on SetValue into enum fields), fixed an inverted IsAssignableFrom
-// check in ReadGeneric's IJsonReadable branch.
+// https://github.com/JadHajjar/RoadBuilder-CSII (Systems/UI/ExtendedUISystemBase.cs)
+// Changes from upstream: TownRoadLane binding group, Attribute.IsDefined instead of the
+// Colossal.Reflection extension, Enum.ToObject in the reader (a boxed int throws on SetValue
+// into enum fields), and the IsAssignableFrom check in ReadGeneric's IJsonReadable branch
+// no longer inverted.
 #nullable enable
 using Colossal.UI.Binding;
 
@@ -21,27 +21,25 @@ using UnityEngine;
 namespace TownRoadLane
 {
     /// <summary>
-    /// UISystemBase with typed-binding conveniences (Stage 5e UI rework, pattern from RoadBuilder):
+    /// UISystemBase with typed-binding helpers:
     ///
-    ///   - <see cref="CreateBinding{T}(string, T)"/> → <see cref="ValueBindingHelper{T}"/> —
-    ///     a push binding with a dirty buffer: assignments to <c>Value</c> accumulate and a single
-    ///     <c>Binding.Update</c> fires per frame from <see cref="OnUpdate"/>. Cheap to write from
-    ///     anywhere (commands, tool callbacks) without spamming cohtml with per-assignment updates.
-    ///   - <see cref="CreateBinding{T}(string, string, T, Action{T})"/> — same, plus a companion
-    ///     TriggerBinding so JS can write the value back (two-way field).
-    ///   - <see cref="CreateBinding{T}(string, Func{T})"/> → GetterValueBinding re-evaluated every
-    ///     UI tick (for values that live elsewhere and are cheap to poll).
-    ///   - <see cref="CreateTrigger"/> overloads (0–4 args) — JS → C# commands.
+    ///   - <see cref="CreateBinding{T}(string, T)"/> returns a <see cref="ValueBindingHelper{T}"/>:
+    ///     writes to <c>Value</c> are buffered and pushed with one <c>Binding.Update</c> per frame
+    ///     from <see cref="OnUpdate"/>, so commands and tool callbacks can assign freely without
+    ///     flooding cohtml with updates.
+    ///   - <see cref="CreateBinding{T}(string, string, T, Action{T})"/>: the same, plus a
+    ///     TriggerBinding so JS can write the value back.
+    ///   - <see cref="CreateBinding{T}(string, Func{T})"/>: a GetterValueBinding polled every UI
+    ///     tick, for cheap values that live elsewhere.
+    ///   - <see cref="CreateTrigger"/> overloads (0 to 4 arguments): commands from JS.
     ///
-    /// All CreateBinding/CreateTrigger calls serialize through <see cref="GenericUIWriter{T}"/> /
-    /// <see cref="GenericUIReader{T}"/> — reflection-based JSON mapping of plain DTOs (public
-    /// props + fields), so binding payload types don't need hand-written IJsonWritable. Types that
-    /// DO implement IJsonWritable/IJsonReadable keep full control (checked first).
+    /// Payloads go through <see cref="GenericUIWriter{T}"/> and <see cref="GenericUIReader{T}"/>,
+    /// which map plain DTOs (public properties and fields) by reflection. Types implementing
+    /// IJsonWritable or IJsonReadable are handled by their own code.
     /// </summary>
     public abstract partial class ExtendedUISystemBase : UISystemBase
     {
-        /// <summary>Binding group every key lives under — mirrors the literal used by the
-        /// pre-existing bindings in <see cref="TownRoadLaneUISystem"/>.</summary>
+        /// <summary>Binding group for every key; the JS side uses the same name.</summary>
         public const string BindingGroup = nameof(TownRoadLane);
 
         private readonly List<Action> _updateCallbacks = new();
@@ -135,9 +133,9 @@ namespace TownRoadLane
         }
     }
 
-    /// <summary>Dirty-buffered wrapper over a <see cref="ValueBinding{T}"/>. Writes to
-    /// <see cref="Value"/> are deferred; <see cref="ForceUpdate"/> (called once per frame by
-    /// <see cref="ExtendedUISystemBase.OnUpdate"/>) pushes the last written value to the UI.</summary>
+    /// <summary>Buffered wrapper over a <see cref="ValueBinding{T}"/>. Writes to
+    /// <see cref="Value"/> are deferred; <see cref="ForceUpdate"/>, called once per frame by
+    /// <see cref="ExtendedUISystemBase.OnUpdate"/>, pushes the last written value to the UI.</summary>
     public class ValueBindingHelper<T>
     {
         private readonly Action<T>? _updateCallBack;
@@ -185,9 +183,9 @@ namespace TownRoadLane
         }
     }
 
-    /// <summary>Reflection-based JSON writer for arbitrary DTOs: primitives, enums (as int),
-    /// Entity, Color, arrays, IEnumerable, and plain objects (public props + fields, skipping
-    /// [WriterIgnore]). Types implementing IJsonWritable are delegated to their own Write.</summary>
+    /// <summary>Reflection-based JSON writer for DTOs: primitives, enums (as int), Entity, Color,
+    /// arrays, IEnumerable, and plain objects (public properties and fields without
+    /// [WriterIgnore]). Types implementing IJsonWritable write themselves.</summary>
     public class GenericUIWriter<T> : IWriter<T>
     {
         public void Write(IJsonWriter writer, T value)
@@ -348,9 +346,9 @@ namespace TownRoadLane
         }
     }
 
-    /// <summary>Reflection-based JSON reader — the counterpart to <see cref="GenericUIWriter{T}"/>.
-    /// Vanilla ValueReaders are reused when the game already ships one for the type (looked up
-    /// via the private ValueReaders.s_Readers table, same trick RoadBuilder uses).</summary>
+    /// <summary>Reflection-based JSON reader, the counterpart to <see cref="GenericUIWriter{T}"/>.
+    /// When the game already has a reader for the type, it is reused from the private
+    /// ValueReaders.s_Readers table.</summary>
     public class GenericUIReader<T> : IReader<T>
     {
         private static readonly Dictionary<Type, object> _readers = (Dictionary<Type, object>)typeof(ValueReaders)
@@ -386,9 +384,8 @@ namespace TownRoadLane
 
         private static object ReadGeneric(IJsonReader reader, Type type)
         {
-            // Upstream had the check inverted (type.IsAssignableFrom(typeof(IJsonReadable))),
-            // which never matches a concrete DTO — harmless there because Create() routes
-            // IJsonReadable types to ValueReader<> first, but wrong for nested members.
+            // Create() already routes top-level IJsonReadable types to ValueReader<>; this branch
+            // covers nested members.
             if (typeof(IJsonReadable).IsAssignableFrom(type))
             {
                 var value = (IJsonReadable)Activator.CreateInstance(type);
@@ -444,8 +441,8 @@ namespace TownRoadLane
             {
                 reader.Read(out int val);
 
-                // Box as the actual enum type — a boxed int would blow up on the
-                // reflection SetValue path in ReadObject (and on unbox casts).
+                // Box as the enum type: a boxed int throws on SetValue in ReadObject and on
+                // unboxing casts.
                 return Enum.ToObject(type, val);
             }
 

@@ -6,18 +6,18 @@ using Unity.Mathematics;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Phase 7a (IMT-style fills, step 1): one clickable line×line crossing the area tool can
-    /// anchor a polygon vertex to. Identity is the (lineA, lineB, hitIndex) triple packed into
-    /// a single int (see <see cref="MarkingIntersectionExtractor.Pack"/>) — stable across adding
-    /// NEW lines (unlike "n-th segment boundary of line i", which shifts), and re-resolving
-    /// after a curvature edit simply moves the position along with the crossing.
+    /// A crossing of two marking lines that the area tool can anchor a fill vertex to. Its
+    /// identity is the (lineA, lineB, hitIndex) triple packed into one int (see
+    /// <see cref="MarkingIntersectionExtractor.Pack"/>). Unlike "n-th segment boundary of line i",
+    /// it stays stable when new lines are added, and after a curvature edit it simply follows
+    /// the crossing.
     /// </summary>
     public struct MarkingIntersectionAnchor
     {
         public int lineA;      // lower lineIndex of the pair
         public int lineB;      // higher lineIndex of the pair
         public int hitIndex;   // k-th surviving hit of this pair, ordered by tA
-        public float tA;       // parameter on lineA's Bezier (kept for future curved-edge sampling)
+        public float tA;       // parameter on lineA's Bezier
         public float tB;       // parameter on lineB's Bezier
         public float3 position;
 
@@ -26,26 +26,26 @@ namespace TownRoadLane
 
     /// <summary>
     /// Computes the intersection anchors of a node's marking lines, and resolves a packed
-    /// (lineA, lineB, hitIndex) reference back to a world position. Single source of truth for
-    /// the anchor list — the tool (hit-test), the overlay (candidate dots), the area topology
-    /// (ring resolve) and the UI system (popover centroid) must all agree, or a saved
+    /// (lineA, lineB, hitIndex) reference back to a world position. The tool (hit-test), the
+    /// overlay (candidate dots), the area topology (ring resolve) and the UI system (popover
+    /// centroid) all use this, so they agree on the anchor list; otherwise a saved
     /// MarkingAreaVertex would resolve to a different point than the one the user clicked.
     /// </summary>
     public static class MarkingIntersectionExtractor
     {
-        /// <summary>Same endpoint margin as MarkingTopologySystem's Filter B: hits within this
-        /// XZ distance of either curve's endpoint are the overlap cluster two lines produce
-        /// when they leave a shared dot together, not a real crossing.</summary>
+        /// <summary>Hits within this XZ distance of either curve's endpoint are the overlap
+        /// cluster two lines produce when they leave a shared dot together, not a real crossing.
+        /// Matches the default endpoint margin of MarkingTopologySystem.</summary>
         public const float kEndpointMarginM = 2.0f;
 
-        // Hits whose tA/tB sit outside this window are ON an endpoint parameter-wise — mirror
-        // of the t-window MarkingTopologySystem applies to its segment boundaries.
+        // Hits with tA/tB outside this window sit on an endpoint. Same window as the one
+        // MarkingTopologySystem applies to its segment boundaries.
         private const float kTMin = 0.01f;
         private const float kTMax = 0.99f;
 
-        // packedRef layout: [lineA:11 bit][lineB:12 bit][hitIndex:8 bit] — capacities far
-        // beyond the practical per-node line count (≤ ~20) and hits per pair (1-2), while
-        // keeping the packed value positive (AreaCandidate treats refIndex < 0 as "none").
+        // packedRef layout: [lineA:11 bit][lineB:12 bit][hitIndex:8 bit]. Far more than a node's
+        // lines (~20) and hits per pair (1-2) need, and the value stays positive (AreaCandidate
+        // treats refIndex < 0 as "none").
         public static int Pack(int lineA, int lineB, int hitIndex)
             => ((lineA & 0x7FF) << 20) | ((lineB & 0xFFF) << 8) | (hitIndex & 0xFF);
 
@@ -66,7 +66,7 @@ namespace TownRoadLane
             if (lines.Length < 2) return result;
             var endpoints = MarkingEndpointExtractor.Extract(em, node);
 
-            // Build every line's Bezier once, then pairwise-intersect (n is tiny, ≤ ~20).
+            // Build every line's Bezier once, then intersect pairwise (a node has ~20 lines at most).
             var beziers = new Bezier4x3[lines.Length];
             var valid = new bool[lines.Length];
             for (int i = 0; i < lines.Length; i++)
@@ -84,8 +84,8 @@ namespace TownRoadLane
             return result;
         }
 
-        /// <summary>Resolve a packed intersection reference against the node's CURRENT lines.
-        /// False when either line is gone or the pair no longer crosses that many times — the
+        /// <summary>Resolves a packed intersection reference against the node's current lines.
+        /// False when either line is gone or the pair no longer crosses that many times; the
         /// caller treats it like any other unresolvable vertex (the area gets cleaned up).</summary>
         public static bool TryResolve(IReadOnlyList<MarkingEndpoint> endpoints, IReadOnlyList<MarkingLine> lines,
                                       int packedRef, out float3 pos)
@@ -99,8 +99,8 @@ namespace TownRoadLane
             return false;
         }
 
-        /// <summary>Like <see cref="TryResolve"/> but returns the full anchor — the t parameters
-        /// on both lines are what curved-edge sampling needs (phase 7b).</summary>
+        /// <summary>Like <see cref="TryResolve"/> but returns the full anchor, including the t
+        /// parameters on both lines that curved-edge sampling needs.</summary>
         public static bool TryResolveAnchor(IReadOnlyList<MarkingEndpoint> endpoints, IReadOnlyList<MarkingLine> lines,
                                             int packedRef, out MarkingIntersectionAnchor anchor)
         {
@@ -117,8 +117,8 @@ namespace TownRoadLane
         }
 
         /// <summary>Filtered, tA-ordered hits of one line pair, appended to <paramref name="into"/>.
-        /// The filter + order here IS the hitIndex identity — never change one without the other,
-        /// or saved area vertices will resolve to a different crossing than the one clicked.</summary>
+        /// The filter and the ordering define hitIndex: changing either makes saved area vertices
+        /// resolve to a different crossing than the one clicked.</summary>
         private static void CollectPair(int lineA, int lineB, Bezier4x3 bezA, Bezier4x3 bezB,
                                         List<MarkingIntersectionAnchor> into)
         {

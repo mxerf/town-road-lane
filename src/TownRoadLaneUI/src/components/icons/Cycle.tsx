@@ -1,7 +1,5 @@
 import { IconBase, IconProps } from "./Icon";
 
-// Cycle-through-options icon — used on the segment popover style button.
-// Visualizes "switch to next variant" — circular arrow loop.
 export const Cycle = (props: IconProps) => (
   <IconBase {...props}>
     <path d="M3 8 a 5 5 0 0 1 8.5 -3.5" />

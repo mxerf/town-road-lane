@@ -5,43 +5,34 @@ using Unity.Mathematics;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Compute self-intersection parameter pairs (tA, tB) between two cubic Bezier curves.
+    /// Finds the parameter pairs (tA, tB) where two cubic Bezier curves cross in the XZ plane
+    /// (markings are flat, so Y is ignored). Uses recursive subdivision: a curve lies inside
+    /// the convex hull of its control points, so curves whose control-point bounding boxes do
+    /// not overlap cannot intersect. Once both pieces are smaller than the tolerance, the
+    /// midpoints of their parameter ranges are reported as a hit.
     ///
-    /// Algorithm: recursive AABB subdivision in the XZ plane (markings are flat — Y is ignored
-    /// for hit-test). Two curves' control-polygon AABBs that don't overlap CAN'T contain an
-    /// intersection (convex hull property of Bezier). When both curves are small enough that
-    /// their AABB diagonals are below the tolerance, the algorithm returns the midpoint
-    /// parameter as the intersection point.
-    ///
-    /// Dedupe is geometric: results within <see cref="kDedupeDistance"/> world units of each
-    /// other are merged. Multiple recursion branches can converge on the same intersection from
-    /// slightly different (tA, tB) corners.
-    ///
-    /// Complexity: O(log(1/ε)) subdivisions per real intersection. For typical road-marking
-    /// scales (curve length ~10m, ε=0.05m) that's ~8 levels of recursion = up to 256 leaf
-    /// AABB tests per intersection. Cheap enough for per-tick recompute at the scales we hit
-    /// (≤ 20 lines/node → ≤ 190 pairs to check).
+    /// Neighbouring recursion branches often find the same crossing, so hits closer than
+    /// <see cref="kDedupeDistance"/> are merged. A 10 m curve needs about 8 levels to reach
+    /// 5 cm, which is cheap enough to recompute every line pair of a node (up to ~20 lines).
     /// </summary>
     public static class BezierIntersection
     {
-        // Stop subdividing once a curve's AABB diagonal drops below this many world units (XZ).
-        // 0.05m = 5cm — well under the visible width of a marking line.
+        // Stop subdividing once a piece's bounding-box diagonal (XZ) is below this. 5 cm is well
+        // under the visible width of a marking line.
         private const float kSubdivideTolerance = 0.05f;
 
-        // Two intersection hits within this distance of each other are treated as the same hit.
-        // Catches the "same crossing found via two adjacent recursion branches" case.
+        // Hits closer than this are one crossing found by two adjacent recursion branches.
         private const float kDedupeDistance = 0.15f;
 
-        // Hard cap on recursion to defend against pathological near-coincident curves that
-        // would otherwise subdivide forever. 16 levels = up to 65k leaf tests; way past anything
-        // realistic, so hitting this signals a degenerate input rather than a normal case.
+        // Near-coincident curves would otherwise subdivide forever. Real crossings converge long
+        // before this depth, so reaching it means degenerate input.
         private const int kMaxDepth = 16;
 
         public readonly struct Hit
         {
             public readonly float  tA;     // parameter on curve A, [0, 1]
             public readonly float  tB;     // parameter on curve B, [0, 1]
-            public readonly float3 point;  // world-space point (Y interpolated for completeness)
+            public readonly float3 point;  // world-space point, Y averaged between the two curves
 
             public Hit(float tA, float tB, float3 point) { this.tA = tA; this.tB = tB; this.point = point; }
         }
@@ -59,7 +50,6 @@ namespace TownRoadLane
             float aLo, float aHi, float bLo, float bHi,
             int depth, List<Hit> hits)
         {
-            // AABB overlap test in XZ. Cheap and correct (Bezier ⊂ convex hull of control points).
             if (!AabbOverlapXZ(a, b)) return;
 
             float aDiag = AabbDiagonalXZ(a);
@@ -69,8 +59,6 @@ namespace TownRoadLane
 
             if ((aSmall && bSmall) || depth >= kMaxDepth)
             {
-                // Report midpoint of each parameter range as the intersection. Y comes from
-                // averaging the two midpoint heights so the hit sits between the two curves.
                 float tA = (aLo + aHi) * 0.5f;
                 float tB = (bLo + bHi) * 0.5f;
                 float3 pA = MathUtils.Position(a, 0.5f);
@@ -79,8 +67,7 @@ namespace TownRoadLane
                 return;
             }
 
-            // Subdivide the larger curve (faster convergence than always splitting both). Falls
-            // back to splitting both when sizes are roughly equal.
+            // Split only the larger piece: converges faster than always splitting both.
             if (aDiag >= bDiag)
             {
                 float aMid = (aLo + aHi) * 0.5f;
@@ -127,7 +114,7 @@ namespace TownRoadLane
         {
             if (hits.Count < 2) return;
             float dSq = kDedupeDistance * kDedupeDistance;
-            // O(n²) but n is tiny (typically 0-4 hits per pair of lines).
+            // Quadratic, but a line pair yields only a handful of hits.
             for (int i = hits.Count - 1; i >= 1; i--)
             {
                 for (int j = 0; j < i; j++)

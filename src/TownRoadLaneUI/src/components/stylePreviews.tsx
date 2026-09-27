@@ -1,36 +1,28 @@
-// Miniature top-down previews of marking styles — shown in dropdown options
-// and accordion row headers instead of (or next to) text-only labels, so a
-// style reads at a glance without parsing words.
+// Small top-down previews of marking styles for dropdown options and row headers.
 //
-// cohtml SVG rules honoured here:
-//   - explicit fill/stroke attribute values only (currentColor resolves to
-//     black regardless of CSS color, var() does not resolve in presentation
-//     attributes) — every colour below is a literal;
-//   - no stroke-dasharray (unverified in this cohtml build) — dashes are
-//     drawn as individual rects;
-//   - content outside the viewBox is clipped by the svg viewport, which the
-//     diagonal hatch lines rely on.
+// cohtml SVG constraints:
+//   - Only literal fill/stroke values: currentColor resolves to black whatever the CSS
+//     color, and var() does not resolve in presentation attributes.
+//   - No stroke-dasharray (untested in cohtml); dashes are separate rects.
+//   - The svg viewport clips content outside the viewBox, which the hatch lines rely on.
 
-// Marking paint on dark panel surfaces — same near-white as the game's text.
+// Same near-white as the game's text.
 const PAINT = "rgba(240, 251, 255, 0.92)";
 
-// Area fill palette. Literals matching what the fills look like on the road
-// (concrete slab, G87 yellow waffle, white/yellow hatching, bike/bus lanes).
+// Area fill colours, close to how the fills look on the road.
 const CONCRETE = "#97a0a8";
 const YELLOW = "#f2c94c";
 const BIKE_GREEN = "#4aa054";
 const BUS_RED = "#b04a38";
 
-// MarkingStyle enum on the C# side: 0 Solid, 1 Dashed, 2 G87 Solid,
-// 3 G87 Dashed, 4 Double Solid, 5 Dashed short, 6 G87 Yellow, 7 G87 Yellow
-// Dashed, 8 Dashed long, 9 Curb, 10-13 vanilla yellow family (solid, dashed,
-// double, solid+dashed). G87 variants share the vanilla geometry — callers
-// that need to telegraph "G87" add a text mark next to the preview.
+// MarkingStyle values: 0 Solid, 1 Dashed, 2 G87 Solid, 3 G87 Dashed, 4 Double Solid,
+// 5 Dashed short, 6 G87 Yellow, 7 G87 Yellow Dashed, 8 Dashed long, 9 Curb, 10-13 vanilla
+// yellow (solid, dashed, double, solid+dashed). G87 variants draw the same preview as the
+// vanilla ones; callers add a "G87" text mark next to it.
 export const isG87LineStyle = (style: number): boolean =>
   style === 2 || style === 3 || style === 6 || style === 7;
 
-// Yellow marking paint — matches the area-preview YELLOW but slightly brighter
-// so a 2px line still reads as yellow on the dark panel.
+// Slightly brighter than YELLOW, so a 2px line still reads as yellow on the dark panel.
 const PAINT_YELLOW = "#f5d05e";
 
 export const LineStylePreview = ({
@@ -101,8 +93,8 @@ export const LineStylePreview = ({
   );
 };
 
-// Diagonal hatch: long ↗ lines marching across the square; the svg viewport
-// clips the overhang. step controls density (sparse vs dense stripes).
+// Diagonal hatch lines across the square; the svg viewport clips the overhang. step sets
+// the stripe density.
 const hatch = (color: string, step: number, strokeWidth = 1.6) => {
   const lines = [];
   for (let x = -14 + step; x < 28; x += step) {
@@ -113,10 +105,9 @@ const hatch = (color: string, step: number, strokeWidth = 1.6) => {
   return lines;
 };
 
-// Index matches kStyleSurfaceNames / areaStyle.* i18n keys:
-// 0 Concrete, 1 Junction box (G87), 2 White stripes, 3 White stripes sparse,
-// 4 Yellow stripes, 5 Green bike lane, 6 Red bus lane, 7-13 reserved (dead
-// vanilla-surface experiment), 14 Asphalt (G87 VA).
+// Keyed by styleId (kStyleSurfaceNames and the areaStyle.* i18n keys): 0 Concrete,
+// 1 Junction box (G87), 2 White stripes, 3 White stripes sparse, 4 Yellow stripes, 5 Green
+// bike lane, 6 Red bus lane, 7-13 unused, 14 Asphalt (G87 VA), 15+ vanilla surfaces.
 const SOLID_FILLS: Record<number, string> = {
   0: CONCRETE,
   5: BIKE_GREEN,

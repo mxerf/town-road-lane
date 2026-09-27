@@ -102,6 +102,7 @@ dotnet build src/TownRoadLane/TownRoadLane.csproj
 ## Благодарности
 
 - **G87** — паки префабов разметки, на которых построены стили мода.
+- **TrafficToolEssentials** (ZessonsDE) — по его образцу сделаны сборка UI и ряд приёмов для cohtml.
 - Автор: **mxerf**
 
 ## Лицензия

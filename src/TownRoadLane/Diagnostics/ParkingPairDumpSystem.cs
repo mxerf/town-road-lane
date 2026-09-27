@@ -16,14 +16,12 @@ using CarLane = Game.Net.CarLane;
 namespace TownRoadLane.Diagnostics
 {
     /// <summary>
-    /// Diagnoses why <c>CustomSecondaryLaneSystem</c>'s parking-line pair search isn't finding the
-    /// adjacent drive lane. For the first few road edges that carry a Parking Lane 2 sublane, dumps
-    /// every Parking Lane 2 + every Car Drive Lane 3 on the edge with their curve endpoints, and
-    /// for each parking lane the distance / tangent similarity to every drive lane on the edge.
+    /// One-shot dump for the parking-line pairing in <c>CustomSecondaryLaneSystem</c>. For up to
+    /// 20 road edges with parking lanes, logs every parking and car edge lane with its prefab
+    /// name and flags, to show which lane prefabs a road type actually uses.
     ///
-    /// Output mirrors what the Burst job sees, just sourced from the edge's SubLane buffer (we
-    /// can't read LaneCorner here — those are computed inside UpdateLanesJob — but Curve.a/d cover
-    /// the same endpoints up to a small offset).
+    /// Endpoints come from the lane curves: the LaneCorner data the job uses only exists inside
+    /// UpdateLanesJob, and the curve ends match it up to a small offset.
     /// </summary>
     public partial class ParkingPairDumpSystem : GameSystemBase
     {
@@ -65,7 +63,6 @@ namespace TownRoadLane.Diagnostics
 
                     var sub = EntityManager.GetBuffer<SubLane>(e, isReadOnly: true);
 
-                    // Gather parking + drive lanes with their endpoint positions and tangents.
                     var parkings = new System.Collections.Generic.List<LaneInfo>();
                     var drives = new System.Collections.Generic.List<LaneInfo>();
                     for (int j = 0; j < sub.Length; j++)
@@ -75,10 +72,8 @@ namespace TownRoadLane.Diagnostics
                         var lp = EntityManager.GetComponentData<PrefabRef>(le).m_Prefab;
                         if (!m_PrefabSystem.TryGetPrefab<PrefabBase>(lp, out var lpf) || lpf == null) continue;
 
-                        // Dump EVERY EdgeLane sublane — we explicitly do NOT filter by name. Earlier
-                        // filters ("Car *", "Parking Lane *") hid lane variants used by specific road
-                        // types (e.g. wider lanes on Asymmetric Avenue, oneway variants), and that's
-                        // exactly what we need to surface now to know what to add to m_LeftLanes.
+                        // No filter by prefab name: some road types (asymmetric avenues, oneway
+                        // variants) use lane prefabs that a name pattern would miss.
                         if (!EntityManager.HasComponent<EdgeLane>(le)) continue;
                         if (!EntityManager.HasComponent<Curve>(le)) continue;
                         bool isPark = EntityManager.HasComponent<ParkingLane>(le);
@@ -93,8 +88,7 @@ namespace TownRoadLane.Diagnostics
                             startPos = curve.m_Bezier.a,
                             endPos = curve.m_Bezier.d,
                         };
-                        // Approximate "tangent into the curve" from the first and last control segments.
-                        // Burst job reads LaneCorner.m_Tangents which encodes the same info post-normalize.
+                        // Approximates LaneCorner.m_Tangents from the first and last control segments.
                         info.startTan = math.normalizesafe((curve.m_Bezier.b - curve.m_Bezier.a).xz);
                         info.endTan = math.normalizesafe((curve.m_Bezier.d - curve.m_Bezier.c).xz);
 

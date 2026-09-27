@@ -4,32 +4,24 @@ using Unity.Entities;
 namespace TownRoadLane
 {
     /// <summary>
-    /// User-defined marking connection at a road node. Per-node DynamicBuffer; one entry per
-    /// connection the user drew with the Phase-4 tool.
+    /// Legacy per-node buffer of user-drawn lines, one entry per whole line. Kept only so old
+    /// saves load: <see cref="MarkingPairMigrationSystem"/> rewrites it as
+    /// <see cref="MarkingLine"/> + <see cref="MarkingSegment"/>.
     ///
-    /// Semantics: **a node with a non-empty MarkingPair buffer fully overrides vanilla markings
-    /// on that node**. All vanilla CreateSecondaryLane calls for that owner are skipped; only
-    /// the pairs in this buffer become marking sublanes. Remove the override → vanilla returns.
-    ///
-    /// Endpoint identity: a gap-based scheme matches how
-    /// <see cref="MarkingEndpointExtractor"/> exposes attach points to the user. Each edge with
-    /// N car lanes meeting at the node yields N+1 endpoints — one per lane-to-lane stitch +
-    /// the two outer kerbs. <c>gapIndex</c> selects which stitch.
+    /// Endpoints use the gap-based identity of <see cref="MarkingEndpointExtractor"/>: an edge
+    /// with N car lanes at the node has N+1 endpoints (each lane-to-lane seam plus the two outer
+    /// kerbs), and <c>gapIndex</c> selects one.
     /// </summary>
     [InternalBufferCapacity(0)]
     public struct MarkingPair : IBufferElementData, ISerializable
     {
-        // Source endpoint
         public Entity sourceEdge;
         public int    sourceGapIndex;
 
-        // Target endpoint
         public Entity targetEdge;
         public int    targetGapIndex;
 
-        // Schema version. Bump + gate fields in Deserialize when adding new ones. v2 added the
-        // gap-based scheme; v1 used a different layout (lane + isRight) that never shipped, so
-        // we simply don't support v1 reads — anyone with v1 data has never been in production.
+        // Version 1 had a different layout that never shipped, so only version 2 is read.
         private const int kVersion = 2;
 
         public void Serialize<TWriter>(TWriter writer) where TWriter : IWriter
@@ -43,7 +35,7 @@ namespace TownRoadLane
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
         {
-            reader.Read(out int _);  // version; only v2 today
+            reader.Read(out int _);  // version
             reader.Read(out sourceEdge);
             reader.Read(out sourceGapIndex);
             reader.Read(out targetEdge);

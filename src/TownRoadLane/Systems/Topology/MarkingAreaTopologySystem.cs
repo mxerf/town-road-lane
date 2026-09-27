@@ -12,25 +12,15 @@ using Unity.Mathematics;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Phase 6e: owns the (<see cref="MarkingArea"/> + <see cref="MarkingLine"/>) →
-    /// <see cref="MarkingAreaPiece"/> relationship. Mirrors <see cref="MarkingTopologySystem"/>
-    /// which does the same job for lines (splitting them at intersections with other lines).
+    /// Resolves each <see cref="MarkingArea"/> into a world-space <see cref="MarkingAreaPiece"/>
+    /// whenever a node's areas or lines change (tracked by a hash of both). The ring is the
+    /// contour exactly as drawn: straight chords plus sampled line curves, see
+    /// <see cref="ResolveOuterRing"/>. Thin shapes are fine because
+    /// <see cref="MarkingAreaTriangulationSystem"/> triangulates the fills itself. Lines drawn
+    /// across an area are only an overlay and do not cut it.
     ///
-    /// On every change to either MarkingArea or MarkingLine on a node, rebuilds each area's
-    /// outer ring as the TRUE drawn contour (straight chords + sampled line curves — see
-    /// <see cref="ResolveOuterRing"/>) and stores it as ONE piece per area; arbitrary thin
-    /// shapes are fine because <see cref="MarkingAreaTriangulationSystem"/> (phase 8) owns
-    /// the triangulation of our fills.
-    /// Auto-splitting areas along crossing lines is gone (phase 7e) — a line over an area is
-    /// purely cosmetic. Visibility per piece is inherited from whichever old piece contained
-    /// the new piece's centroid — keeps user edits stable across topology changes.
-    ///
-    /// Trigger: combined hash of MarkingArea + MarkingLine buffer. Skips work when both
-    /// unchanged.
-    ///
-    /// Ordering: runs after <see cref="MarkingTopologySystem"/> so it sees the latest line
-    /// buffer, and before <see cref="MarkingAreaEmissionSystem"/> so the piece buffer is fresh
-    /// when emission diffs against spawned entities.
+    /// Runs after <see cref="MarkingTopologySystem"/> for the current line buffer and before
+    /// <see cref="MarkingAreaEmissionSystem"/>, which spawns fills from the pieces.
     /// </summary>
     [UpdateAfter(typeof(MarkingTopologySystem))]
     [UpdateBefore(typeof(MarkingAreaEmissionSystem))]
@@ -41,15 +31,15 @@ namespace TownRoadLane
         private EntityQuery _nodesWithAreas;
         private EntityQuery _spawnedAreas;
 
-        // Nodes stuck behind the save/load defer guard, and how long — see RecomputeIfChanged.
+        // Ticks each node has been waiting for its edges to become ready (see RecomputeIfChanged).
         private readonly Dictionary<Entity, int> _deferredTicks = new Dictionary<Entity, int>();
         private const int kDeferredWarnTicks = 600;
 
         protected override void OnCreate()
         {
             base.OnCreate();
-            // Same Temp/Deleted exclusion as MarkingTopologySystem: road-tool preview clones
-            // carry our buffers, and touching them mid-apply is a native-crash route.
+            // Temp nodes are the road tool's preview copies, buffers included; writing to them
+            // while the tool applies crashes the game (same as in MarkingTopologySystem).
             _nodesWithAreas = GetEntityQuery(
                 ComponentType.ReadOnly<MarkingArea>(),
                 ComponentType.ReadOnly<Node>(),
@@ -64,8 +54,8 @@ namespace TownRoadLane
         protected override void OnGameLoaded(Colossal.Serialization.Entities.Context serializationContext)
         {
             base.OnGameLoaded(serializationContext);
-            // Entity indices are reused across saves — stale defer counters from the previous
-            // save would fire the warning early (or never) for an unrelated node.
+            // Entity indices are reused between saves, so counters left from the previous save
+            // would belong to unrelated nodes.
             _deferredTicks.Clear();
         }
 
@@ -100,11 +90,10 @@ namespace TownRoadLane
             if (newHash == oldHash && EntityManager.HasBuffer<MarkingAreaPiece>(node))
                 return false;
 
-            // Save/load guard: right after loading a save, Composition/EdgeGeometry on the
-            // connected edges are still zeroed (refilled at Modification3/4, after us), so
-            // endpoint/corner extraction returns nothing and every ring would fail to resolve —
-            // wiping the saved pieces and their per-piece visibility. Defer the whole node while
-            // any connected edge is alive but not yet extraction-ready; retry next tick.
+            // Right after a load, Composition and EdgeGeometry of the connected edges are still
+            // zeroed (refilled in Modification3/4, after this system), so anchor extraction finds
+            // nothing and every ring would fail, replacing the saved pieces. Wait while any
+            // connected edge exists but isn't ready.
             if (EntityManager.HasBuffer<ConnectedEdge>(node))
             {
                 var connected = EntityManager.GetBuffer<ConnectedEdge>(node, isReadOnly: true);
@@ -112,9 +101,8 @@ namespace TownRoadLane
                 {
                     if (MarkingEndpointExtractor.IsEdgeAliveButUnready(EntityManager, connected[i].m_Edge))
                     {
-                        // An edge that never becomes ready (some Road Builder / custom nets)
-                        // defers this node forever — pieces are never built and the area shows
-                        // no fill, with zero log output before 2.4.2.
+                        // Some edges never become ready (certain Road Builder or custom nets).
+                        // The area then never gets a fill, so warn once instead of staying silent.
                         _deferredTicks.TryGetValue(node, out var ticks);
                         _deferredTicks[node] = ticks + 1;
                         if (ticks + 1 == kDeferredWarnTicks)
@@ -125,8 +113,7 @@ namespace TownRoadLane
             }
             _deferredTicks.Remove(node);
 
-            // Snapshot before any structural change — buffers become invalid the moment we
-            // touch AddBuffer/RemoveComponent below.
+            // Copy the buffers first: structural changes below invalidate the handles.
             int areaCount = areas.Length;
             var areasSnap = new NativeArray<MarkingArea>(areaCount, Allocator.Temp);
             for (int i = 0; i < areaCount; i++) areasSnap[i] = areas[i];
@@ -134,17 +121,14 @@ namespace TownRoadLane
             var areaVertsSnap = new NativeArray<MarkingAreaVertex>(areaVertCount, Allocator.Temp);
             for (int i = 0; i < areaVertCount; i++) areaVertsSnap[i] = areaVerts[i];
 
-            // Resolve current lane endpoints / corner anchors for vertex position lookup. Same
-            // call MarkingAreaEmissionSystem makes — cheap (only on hash mismatch).
             var endpoints = MarkingEndpointExtractor.Extract(EntityManager, node);
             var corners = MarkingEndpointExtractor.ExtractCornerAnchors(EntityManager, node);
 
-            // Snapshot the lines for intersection-vertex resolve (kind 2) — same rationale as
-            // the area/vertex snapshots above: buffer handles die at the structural changes below.
+            // Lines are needed to resolve crossing vertices (kind 2).
             var linesSnap = new MarkingLine[hasLines ? lines.Length : 0];
             for (int i = 0; i < linesSnap.Length; i++) linesSnap[i] = lines[i];
 
-            // Capture old pieces so visibility can be inherited.
+            // Old pieces: visibility to inherit, and fallback geometry.
             var oldPiecesByArea = new List<List<(MarkingAreaPiece header, List<float3> ring)>>(areaCount);
             for (int i = 0; i < areaCount; i++) oldPiecesByArea.Add(new List<(MarkingAreaPiece, List<float3>)>());
             if (EntityManager.HasBuffer<MarkingAreaPiece>(node) && EntityManager.HasBuffer<MarkingAreaPieceVertex>(node))
@@ -165,14 +149,12 @@ namespace TownRoadLane
                 }
             }
 
-            // v1→v2 vertex migration (phase 8b): legacy vertices identify kind-0/1 anchors by
-            // raw list index, but extraction order is NOT deterministic across save loads (the
-            // game rebuilds lanes) — the index may point at a different dot today. The saved
-            // piece rings ARE trustworthy world-space geometry, so: resolve legacy vertices by
-            // index, accept only when the result lies ON a saved ring of that area, and stamp
-            // the stable v2 identity (edge/gap keys). Areas with any unconfirmed vertex keep
-            // their carried pieces this pass — correct visuals from the save, retried on the
-            // next recompute.
+            // Migrate version 1 area vertices. They name kind 0/1 anchors by raw list index, and
+            // that order changes between loads, so the index may now point at a different dot.
+            // The saved piece ring is reliable world-space geometry: resolve each legacy vertex
+            // by index, accept it only if it lands on the area's saved ring, and then store the
+            // stable edge/gap identity. An area with any unconfirmed vertex keeps its saved
+            // pieces for now and is retried on the next rebuild.
             var unconfirmedAreas = new HashSet<int>();
             {
                 var vertsRW = EntityManager.GetBuffer<MarkingAreaVertex>(node);
@@ -193,15 +175,14 @@ namespace TownRoadLane
                         }
                     }
                     if (!hasLegacy) continue;
-                    if (oldPiecesByArea[a].Count == 0) continue; // no saved ring — legacy resolve as before
-                    var oldRing = oldPiecesByArea[a][0].ring;    // one piece per area since 7e
+                    if (oldPiecesByArea[a].Count == 0) continue; // no saved ring: resolve by index
+                    var oldRing = oldPiecesByArea[a][0].ring;    // one piece per area
                     if (oldRing.Count < 3) continue;
 
-                    // Phase 1: resolve every vertex of the area, mapping each onto the saved
-                    // ring. Legacy vertices must land ON the ring (anchors are always emitted
-                    // as ring points); the whole sequence must then walk the ring in cyclic
-                    // order — a legacy index that grabbed ANOTHER anchor of the same area also
-                    // lies on the ring, but breaks the order (bowtie), so order is the guard.
+                    // Map every vertex of the area onto the saved ring. Legacy vertices must lie
+                    // on it (anchors are always ring points), and the sequence must walk the ring
+                    // in cyclic order: an index that picked up another anchor of the same area
+                    // also lies on the ring but breaks the order (a bowtie).
                     pending.Clear();
                     ringIdxSeq.Clear();
                     bool confirmed = true;
@@ -239,7 +220,7 @@ namespace TownRoadLane
                             ringIdxSeq.Add(rIdx);
                         }
                     }
-                    // Phase 2: cyclic-order check, then stamp all-or-nothing.
+                    // Check the cyclic order, then write all of the area's vertices or none.
                     if (confirmed && ringIdxSeq.Count >= 3)
                     {
                         int L = oldRing.Count;
@@ -267,30 +248,22 @@ namespace TownRoadLane
                 }
             }
 
-            // Build the new flat piece list — ONE piece per area. Auto-cutting areas by
-            // crossing lines is gone (phase 7e): the split rings went through an index-paired
-            // tip fattener that mangled them into fold-over spikes (invisible fills), the
-            // recomputes made existing areas "jump" whenever a line was drawn, and the user
-            // explicitly prefers areas to be immutable once drawn — a line through an area is
-            // now simply cosmetic overlap. The piece layer itself stays (saves compatibility,
-            // per-piece visibility maps 1:1 onto the area).
+            // One piece per area. Areas are not cut by lines that cross them: an area keeps the
+            // shape it was drawn with. The piece layer stays for save compatibility.
             var newPieces = new List<MarkingAreaPiece>(areaCount);
             var newVerts = new List<MarkingAreaPieceVertex>(areaCount * 8);
 
             for (int a = 0; a < areaCount; a++)
             {
                 var ad = areasSnap[a];
-                // Note: hidden areas (ad.visible == false) still get their pieces computed —
-                // emission filters on area visibility, and keeping the pieces means per-piece
-                // visibility survives an area hide→show cycle instead of resetting to default.
+                // Hidden areas still get pieces: emission filters on area visibility, and the
+                // per-piece visibility then survives hiding and showing the area.
                 if (ad.vertexCount < 3) continue;
 
-                // The ring builder must never take the whole system down: an exception escaping
-                // OnUpdate would re-fire every tick (log flood, all nodes after this one frozen).
-                // Treat a throwing ring like an unresolvable one — the carried-pieces path below
-                // keeps the cached geometry and the hash write stops the retry loop.
-                // Unconfirmed legacy areas (v1 vertices whose index resolve contradicts the
-                // saved ring) take the same path deliberately.
+                // An exception escaping OnUpdate would repeat every tick, flooding the log and
+                // skipping every node after this one. A throwing ring is treated as unresolvable:
+                // the cached pieces are kept and the hash write stops the retries. Unconfirmed
+                // legacy areas take the same path.
                 List<float3> outerRing = null;
                 if (!unconfirmedAreas.Contains(a))
                 {
@@ -305,10 +278,9 @@ namespace TownRoadLane
                 }
                 if (outerRing == null || outerRing.Count < 3)
                 {
-                    // Ring permanently unresolvable (a referenced anchor disappeared after a
-                    // road change — the transient load case is deferred above). Carry the old
-                    // pieces over verbatim instead of dropping them: cached geometry is the best
-                    // truth we have and the user's per-piece visibility must survive.
+                    // An anchor is gone for good (road changed; the post-load case waits above).
+                    // Keep the old pieces as they are: the cached geometry is the best available,
+                    // and the per-piece visibility survives.
                     var carried = oldPiecesByArea[a];
                     if (carried.Count == 0)
                         log.Warn($"area-topology node#{node.Index} area#{a}: outer ring unresolvable and no cached pieces — this area will have no fill");
@@ -348,7 +320,6 @@ namespace TownRoadLane
                 });
             }
 
-            // Write back. AddBuffer overwrites if present.
             var pieceBuf = EntityManager.HasBuffer<MarkingAreaPiece>(node)
                 ? EntityManager.GetBuffer<MarkingAreaPiece>(node)
                 : EntityManager.AddBuffer<MarkingAreaPiece>(node);
@@ -369,11 +340,10 @@ namespace TownRoadLane
             if (!EntityManager.HasComponent<Updated>(node))
                 EntityManager.AddComponent<Updated>(node);
 
-            // Invalidate every spawned fill of this node. The emission diff matches purely by
-            // (node, areaIndex, pieceIndex) + prefab — a surviving key match keeps its STALE
-            // geometry (7e bug: deleting area #1 left its dead fill alive as the new "area #1"
-            // and the LAST area's fill vanished instead). Pieces just changed, so mark them all
-            // Deleted here; emission respawns everything wanted next tick.
+            // Delete every fill spawned for this node; emission respawns them next tick. Its diff
+            // matches only by key and prefab, so a fill whose key still matches would keep stale
+            // geometry: deleting area #1 would leave its old fill standing in as the new #1 and
+            // remove the last area's fill instead.
             using (var spawned = _spawnedAreas.ToEntityArray(Allocator.Temp))
             {
                 for (int i = 0; i < spawned.Length; i++)
@@ -390,22 +360,15 @@ namespace TownRoadLane
             return true;
         }
 
-        /// <summary>Build the outer ring of one area: the TRUE contour, exactly as drawn.
+        /// <summary>Builds the outer ring of one area exactly as drawn. Each edge is either a
+        /// straight chord between its anchors or the sampled part of the marking line both
+        /// anchors lie on, using the same sampling as the tool's preview
+        /// (<see cref="SampleCurvedEdge"/>), so the fill matches the preview point for point.
+        /// No minimum width is enforced: <see cref="MarkingAreaTriangulationSystem"/> handles
+        /// knife-edge corners and sub-metre islands that vanilla triangulation would drop.
         ///
-        /// Each edge is either a straight chord between its two anchors or the sampled
-        /// sub-Bezier of the marking line both anchors lie on — the same sampling the tool's
-        /// draft preview uses (<see cref="SampleCurvedEdge"/>), so the committed fill matches
-        /// the preview point for point.
-        ///
-        /// History (phase 7d → 8): this used to be a min-width ENVELOPE builder — corner
-        /// strips, flat caps, tiny-edge merging — because vanilla triangulation folded any
-        /// ring thinner than ~0.3 m and silently cleared its triangles. Since phase 8,
-        /// <see cref="MarkingAreaTriangulationSystem"/> re-triangulates our fills after the
-        /// vanilla pass (no shrink, no attempt budget), so knife-tip corners and sub-metre
-        /// islands triangulate fine and the envelope machinery is gone.
-        ///
-        /// Returns null when a vertex fails to resolve (line removed, road demolished — the
-        /// area gets cleaned up via the carried-pieces path).</summary>
+        /// Returns null when a vertex can't be resolved (line removed, road demolished); the
+        /// caller then keeps the cached pieces.</summary>
         private static List<float3> ResolveOuterRing(MarkingArea ad, NativeArray<MarkingAreaVertex> verts,
                                                      List<MarkingEndpoint> endpoints, List<MarkingCornerAnchor> corners,
                                                      MarkingLine[] lines)
@@ -413,7 +376,6 @@ namespace TownRoadLane
             int n = ad.vertexCount;
             if (n < 3) return null;
 
-            // 1. Anchor positions.
             var anchors = new float3[n];
             var avs = new MarkingAreaVertex[n];
             for (int v = 0; v < n; v++)
@@ -424,8 +386,7 @@ namespace TownRoadLane
                 if (!ResolveVertexPos(avs[v], endpoints, corners, lines, out anchors[v])) return null;
             }
 
-            // 2. Emit anchor, then the edge's interior curve points (DP-simplified — straight
-            // stretches contribute nothing).
+            // Each anchor, followed by the simplified interior points of a curved edge.
             var ring = new List<float3>(n * 4);
             for (int v = 0; v < n; v++)
             {
@@ -437,7 +398,7 @@ namespace TownRoadLane
                 }
             }
 
-            // Collapse near-duplicate consecutive points (coincident anchors, sub-5cm edges).
+            // Merge consecutive points closer than 5 cm (coincident anchors, tiny edges).
             for (int i = ring.Count - 1; i > 0; i--)
                 if (DistSqXZ(ring[i], ring[i - 1]) < 0.0025f) ring.RemoveAt(i);
             if (ring.Count > 1 && DistSqXZ(ring[0], ring[ring.Count - 1]) < 0.0025f)
@@ -457,7 +418,7 @@ namespace TownRoadLane
             {
                 if (!TryAnchorParamOnLine(from, i, lines, endpoints, out tFrom)) continue;
                 if (!TryAnchorParamOnLine(to, i, lines, endpoints, out tTo)) continue;
-                if (math.abs(tTo - tFrom) < 1e-4f) continue; // degenerate span
+                if (math.abs(tTo - tFrom) < 1e-4f) continue; // zero-length span
                 if (!MarkingCurveBuilder.TryBuild(endpoints, lines[i], out bez)) continue;
                 lineIndex = i;
                 return true;
@@ -465,9 +426,8 @@ namespace TownRoadLane
             return false;
         }
 
-        /// <summary>Index of the ring point closest to <paramref name="pos"/> (XZ); returns the
-        /// squared distance. Used by the v1→v2 migration to anchor its on-ring and
-        /// cyclic-order validation.</summary>
+        /// <summary>Index of the ring point closest to <paramref name="pos"/> in XZ; returns the
+        /// squared distance.</summary>
         private static float NearestRingIndex(List<float3> ring, float3 pos, out int index)
         {
             index = 0;
@@ -487,7 +447,7 @@ namespace TownRoadLane
             return dx * dx + dz * dz;
         }
 
-        // Pieces smaller than this are dropped outright (see the cut loop).
+        // Rings with a smaller area are dropped.
         private const float kMinPieceAreaM2 = 0.5f;
 
         private static float SignedAreaXZ(List<float3> ring)
@@ -520,22 +480,21 @@ namespace TownRoadLane
                 pos = corners[idx].position;
                 return true;
             }
-            if (av.kind == 2) // line crossing — refIndex is the packed (lineA, lineB, hit)
+            if (av.kind == 2) // line crossing: refIndex is the packed (lineA, lineB, hit)
                 return MarkingIntersectionExtractor.TryResolve(endpoints, lines, av.refIndex, out pos);
             return false;
         }
 
-        // Free-zone / preview sampling: fine-sample the curve, then Douglas-Peucker so a node
-        // exists only where the geometry actually bends — a node on a straight stretch is pure
-        // liability for the vanilla triangulation (see ResolveOuterRing).
+        // Curved edges are sampled finely, then simplified with Douglas-Peucker so points remain
+        // only where the curve actually bends. Extra points on straight stretches only add
+        // near-degenerate triangles.
         private const float kFineSampleSpacingM = 0.75f;
         private const int kFineSampleMax = 48;
         private const float kSimplifyTolM = 0.06f;
 
-        /// <summary>Interior polyline points of a curved edge (t=tFrom → t=tTo along the
-        /// Bezier; the endpoints themselves are NOT appended). Shared by the tool's draft
-        /// preview and the committed ring (<see cref="ResolveOuterRing"/>) — what the preview
-        /// shows is exactly what gets filled.</summary>
+        /// <summary>Appends the interior points of a curved edge from tFrom to tTo, without the
+        /// endpoints. Shared by the tool's preview and <see cref="ResolveOuterRing"/>, so the
+        /// preview shows exactly what gets filled.</summary>
         public static void SampleCurvedEdge(Bezier4x3 bez, float tFrom, float tTo, List<float3> into)
         {
             var pFrom = MathUtils.Position(bez, tFrom);
@@ -555,8 +514,8 @@ namespace TownRoadLane
                 if (keep[i]) into.Add(pts[i]);
         }
 
-        /// <summary>Douglas-Peucker over pts[first..last] in XZ: mark interior points deviating
-        /// from the chord by more than tol as kept. Endpoints are the callers' anchors.</summary>
+        /// <summary>Douglas-Peucker over pts[first..last] in XZ: marks interior points that
+        /// deviate from the chord by more than tol. The endpoints are the caller's.</summary>
         private static void SimplifyDP(List<float3> pts, int first, int last, float tol, bool[] keep)
         {
             if (last - first < 2) return;
@@ -604,9 +563,8 @@ namespace TownRoadLane
             return false;
         }
 
-        /// <summary>Inheritance: new piece is "the same as" old piece P if P contains the new
-        /// piece's centroid. Returns the visibility of the first such P, or default if none
-        /// match (= truly new piece, e.g. after a new line was added).</summary>
+        /// <summary>Visibility of the first old piece that contains the new piece's centroid, or
+        /// <paramref name="defaultVisible"/> if none does.</summary>
         private static bool LookupInheritedVisibility(List<(MarkingAreaPiece header, List<float3> ring)> oldPieces,
                                                      float3 newCentroid, bool defaultVisible)
         {
@@ -620,13 +578,9 @@ namespace TownRoadLane
 
         private static int HashAreaAndLines(DynamicBuffer<MarkingArea> areas, DynamicBuffer<MarkingAreaVertex> verts, DynamicBuffer<MarkingLine>? lines)
         {
-            // FNV-1a 32-bit over: area styleId/visible/vertex-slice for every area, then each
-            // vertex's (kind, refIndex, edgeToNext), then each line's geometry identity. Same
-            // shape as MarkingTopologySystem.HashLines.
-            //
-            // kAlgoVersion folds the ring-building algorithm into the hash: bump it whenever
-            // the SHAPE produced from identical inputs changes (7b: curved-edge sampling), so
-            // areas loaded from older saves rebuild once instead of keeping stale chord pieces.
+            // FNV-1a over the areas, their vertices and the line geometry, like
+            // MarkingTopologySystem.HashLines. Bump kAlgoVersion whenever the ring built from the
+            // same input changes, so existing areas are rebuilt.
             const uint kAlgoVersion = 11;
             const uint kPrime = 16777619u;
             uint h = 2166136261u ^ kAlgoVersion;
@@ -655,7 +609,6 @@ namespace TownRoadLane
                     h = (h ^ (uint)l.sourceGapIndex) * kPrime;
                     h = (h ^ (uint)l.targetEdge.Index) * kPrime;
                     h = (h ^ (uint)l.targetGapIndex) * kPrime;
-                    // Curvature moves the cut polyline — pieces must be recomputed.
                     h = (h ^ math.asuint(l.curvature)) * kPrime;
                 }
             }

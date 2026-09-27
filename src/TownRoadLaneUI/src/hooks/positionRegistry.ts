@@ -1,26 +1,22 @@
 import { bindValue } from "cs2/api";
 
-// World→screen popover positioning, decoupled from React (pattern from
-// TrafficToolEssentials' positionRegistry). C# publishes `GetScreenPoints`
-// every tick the camera actually moved — that's every frame during a pan, so
-// routing it through React state would re-render the whole panel per frame.
-// Instead, popover components register their root DOM node here by anchor
-// key, and a single module-level subscription writes style.left/top/transform
-// directly. React only re-renders when the panel STRUCTURE changes
-// (GetPanelState).
+// World-to-screen popover positioning outside React (same approach as TrafficToolEssentials'
+// positionRegistry). C# publishes `GetScreenPoints` on every tick the camera moves, which is
+// every frame during a pan; routing that through React state would re-render the whole panel
+// each frame. Popovers register their root DOM node here by anchor key instead, and one
+// module-level subscription writes style.left/top/transform directly. React re-renders only
+// when GetPanelState changes.
 
 export interface SegmentPointVM {
   lineIndex: number;
   segmentIndex: number;
-  // >= 0 → this point is an AREA centroid anchor (lineIndex/segmentIndex are
-  // -1 then). Segments and areas share one binding so a camera push stays a
-  // single serialized array.
+  // >= 0 when the point is an area centroid (lineIndex/segmentIndex are -1 then). Segments
+  // and areas share one binding so a camera push stays a single serialized array.
   areaIndex: number;
   x: number; // CSS px, origin top-left (Y already flipped on the C# side)
   y: number;
-  // Camera-distance popover scale, ~[0.65, 1]: full size while the camera is
-  // near the intersection, gently shrinking as it pulls away so a zoomed-out
-  // view isn't wallpapered with full-size chrome.
+  // Popover scale by camera distance, about [0.65, 1]: full size near the intersection,
+  // smaller as the camera pulls away so a zoomed-out view isn't covered in popovers.
   scale: number;
 }
 
@@ -36,20 +32,18 @@ const POINTS_BINDING = bindValue<SegmentPointVM[]>("TownRoadLane", "GetScreenPoi
 
 const anchors = new Map<string, HTMLElement>();
 
-// Anchors whose popover is hover-expanded right now. Expanded popovers snap
-// their scale back up to ≥1 — a shrunken far-away marker is fine, shrunken
-// BUTTONS the user is about to click are not.
+// Anchors whose popover is hover-expanded. Expanded popovers scale back up to at least 1:
+// a small distant marker is fine, small buttons the user is about to click are not.
 const expandedKeys = new Set<string>();
 
-// Latest points snapshot, kept so an anchor registering AFTER the last push
-// (e.g. the user expands a line while the camera is static — no new push
-// coming) is positioned immediately from cached data.
+// Latest points, so an anchor that registers after the last push (a line expanded while
+// the camera is still, with no new push coming) is positioned right away.
 let lastPoints = new Map<string, SegmentPointVM>();
 
 const position = (key: string, el: HTMLElement, point: SegmentPointVM | undefined): void => {
   if (!point) {
-    // No point this sync = anchor off-screen / behind camera → hide. Restoring
-    // display to "" falls back to the stylesheet value when the point returns.
+    // No point means the anchor is off-screen or behind the camera. Setting display back
+    // to "" later restores the stylesheet value.
     el.style.display = "none";
     return;
   }
@@ -58,8 +52,8 @@ const position = (key: string, el: HTMLElement, point: SegmentPointVM | undefine
   el.style.display = "";
   el.style.left = `${point.x}px`;
   el.style.top = `${point.y}px`;
-  // Inline transform overrides the stylesheet's — must restate the anchoring
-  // translate. Scale composes after it, growing/shrinking around the box.
+  // The inline transform replaces the stylesheet's, so it has to repeat the anchoring
+  // translate.
   el.style.transform = `translate(-50%, -120%) scale(${scale})`;
 };
 
@@ -73,9 +67,9 @@ POINTS_BINDING.subscribe((points) => {
   }
 });
 
-/** Ref callback target: register a popover root under its anchor key. Pass
- * null (React unmount) to unregister. Applies the cached position synchronously
- * so freshly mounted popovers don't flash at 0,0. */
+/** Ref callback target: registers a popover root under its anchor key, or unregisters it
+ * when `el` is null. Applies the cached position immediately so a new popover doesn't flash
+ * at 0,0. */
 export const registerSegmentAnchor = (key: string, el: HTMLElement | null): void => {
   if (el) {
     anchors.set(key, el);
@@ -86,9 +80,8 @@ export const registerSegmentAnchor = (key: string, el: HTMLElement | null): void
   }
 };
 
-/** Mark an anchor's popover as hover-expanded (or collapsed again) and
- * reapply its cached position immediately — a static camera pushes nothing,
- * so the scale snap must not wait for the next binding sync. */
+/** Marks an anchor's popover as hover-expanded or collapsed and reapplies its position at
+ * once: a still camera pushes nothing, so the scale change can't wait for the next sync. */
 export const setAnchorExpanded = (key: string, expanded: boolean): void => {
   if (expanded) expandedKeys.add(key);
   else expandedKeys.delete(key);

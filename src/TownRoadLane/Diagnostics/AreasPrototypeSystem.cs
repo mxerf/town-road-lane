@@ -7,22 +7,16 @@ using UnityEngine;
 
 namespace TownRoadLane.Diagnostics
 {
-    // Phase 6 prototype probes. Runs ONCE at game-load time, dumps verdicts to the log, then
-    // disables itself. Two questions:
-    //   T1. Does Shader.Find("Shader Graphs/AreaDecalShader") return non-null from mod context?
-    //       If not, we fall back to DuplicatePrefab(vanillaConcrete) + material swap.
-    //   T2. Is there a clonable vanilla SurfacePrefab? What's its name + which RenderedArea
-    //       fields are populated? This unblocks 6c (Solid fill MVP).
-    // Test T3 (Owner cascade-delete on Area) is left for in-game manual verification once 6c
-    // is wired — too invasive to spawn-and-delete a real Area entity from a one-shot probe.
+    // One-shot survey for area fills. The first update logs area shader availability, the
+    // vanilla SurfacePrefabs with their RenderedArea settings and the DecalLayers values. About
+    // ten seconds later it logs mod-loaded surfaces (G87 and others) and NetLane meshes, then
+    // disables itself.
     public partial class AreasPrototypeSystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;
 
         private PrefabSystem _prefabSystem;
         private bool _done;
-        // Second-stage probe: dump G87 prefabs once the world has been ticking long enough that
-        // any deferred prefab loading should have settled.
         private int _ticksSinceFirstProbe;
         private bool _g87Probed;
 
@@ -42,10 +36,10 @@ namespace TownRoadLane.Diagnostics
                 ProbeVanillaSurfacePrefabs();
                 ProbeRoadMarkingPriority();
                 log.Info("[AreasPrototype] === probes done (initial pass) ===");
-                return; // keep system alive for the second pass
+                return;
             }
 
-            // Wait ~10 sec at 60 fps so any deferred mod-asset loading (Skyve / EAI / G87) is done.
+            // ~10 s at 60 fps, so deferred mod asset loading (ExtraAssetsImporter, G87) has finished.
             _ticksSinceFirstProbe++;
             if (_g87Probed || _ticksSinceFirstProbe < 600) return;
             _g87Probed = true;
@@ -60,8 +54,7 @@ namespace TownRoadLane.Diagnostics
 
         private void ProbeAllPrefabsByNameSubstring(string substr)
         {
-            // Use the broadest possible query — every entity that has a PrefabData. Then filter
-            // by the name on the corresponding managed prefab. Heavy but one-shot.
+            // Scans every prefab entity; expensive, but it runs once.
             var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>());
             using var ents = query.ToEntityArray(Allocator.Temp);
             int hits = 0;
@@ -70,7 +63,7 @@ namespace TownRoadLane.Diagnostics
                 if (!_prefabSystem.TryGetPrefab<PrefabBase>(ents[i], out var pb) || pb == null) continue;
                 if (!pb.name.Contains(substr)) continue;
                 hits++;
-                if (hits <= 60)  // cap log spam
+                if (hits <= 60)
                     log.Info($"[AreasPrototype]   G87? [{i}] type={pb.GetType().Name} name={pb.name}");
             }
             log.Info($"[AreasPrototype] substring '{substr}': {hits} matching prefab(s) found");
@@ -78,10 +71,8 @@ namespace TownRoadLane.Diagnostics
 
         private void ProbeSurfacePrefabCountAgain()
         {
-            // First pass found only the 29 vanilla surfaces. Second pass count went to 70 → 41
-            // extra surfaces are loaded by mods (likely EAI / G87 / similar asset pipelines).
-            // Dump them all now, listing the prefab type and surface name. This is the inventory
-            // we use to build the style picker in 6d-3.
+            // At startup only vanilla surfaces exist; mod-loaded surfaces appear later, so the
+            // full list is logged again here.
             var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<SurfaceData>());
             using var ents = query.ToEntityArray(Allocator.Temp);
             log.Info($"[AreasPrototype] T5 SurfacePrefab count (second pass) = {ents.Length} — FULL LIST:");
@@ -98,12 +89,9 @@ namespace TownRoadLane.Diagnostics
 
         private void ProbeNetLaneGeometry()
         {
-            // Curb hunt: our line pipeline can spawn any NetLane prefab along a segment curve,
-            // and the vanilla sublane path renders 3D meshes along curves natively (fences,
-            // hedges). A per-segment "curb" style therefore only needs an existing NetLane
-            // prefab with a curb-like profile. Dump every NetLaneGeometryPrefab (the ones
-            // with real lane meshes, not decals) with its mesh names and bounds — the
-            // cross-section (x=width, y=height) tells us what's curb-shaped.
+            // Lists NetLaneGeometryPrefabs (lanes with real meshes, not decals) with mesh bounds.
+            // The line pipeline can place any NetLane prefab along a curve, so a curb-like
+            // cross-section (x = width, y = height) is enough for a curb style.
             var query = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
             using var ents = query.ToEntityArray(Allocator.Temp);
             int geomCount = 0;
@@ -144,9 +132,6 @@ namespace TownRoadLane.Diagnostics
 
         private void ProbeVanillaSurfacePrefabs()
         {
-            // Enumerate ALL loaded SurfacePrefabs (including G87 if user has them installed). For
-            // each: name + which RenderedArea fields look usable (material, decal layer mask,
-            // renderer priority). This tells us which one to clone for the Solid + Hatching styles.
             var query = GetEntityQuery(
                 ComponentType.ReadOnly<PrefabData>(),
                 ComponentType.ReadOnly<SurfaceData>());
@@ -167,17 +152,9 @@ namespace TownRoadLane.Diagnostics
 
         private void ProbeRoadMarkingPriority()
         {
-            // Road markings are RenderPrefab assets (mesh + material), not areas — they don't use
-            // RendererPriority. They're projected by the curved-decal shader at a fixed depth
-            // bias. So our area surfaces are sorted only against OTHER area surfaces by priority.
-            // To draw on top of road markings we'd need a different layer entirely — area decals
-            // typically render at the road surface level, road markings render slightly above.
-            //
-            // Conclusion: priority alone won't lift our areas above road markings. We need to
-            // try DecalLayerMask alternatives (Markings? Decals? — see DecalLayers enum) or
-            // accept that surfaces always sit under road decals.
-            //
-            // Just dump the DecalLayers enum values so we know what to try in 6d-2.
+            // Road markings are RenderPrefab meshes drawn by the curved-decal shader and ignore
+            // RendererPriority, which only orders area surfaces among themselves. Lifting a fill
+            // above road markings would take a different decal layer, hence this list.
             log.Info($"[AreasPrototype] T4 DecalLayers enum values:");
             foreach (var name in System.Enum.GetNames(typeof(Game.Rendering.DecalLayers)))
             {

@@ -8,12 +8,8 @@ using Unity.Entities;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Polls the Ctrl+M hotkey (configurable via the mod's keybinding settings) and toggles
-    /// <see cref="MarkingNodeToolSystem"/> as the active tool. Idle every frame except for
-    /// the cheap WasPerformedThisFrame check.
-    ///
-    /// Pattern mirrors Traffic's ModUISystem hotkey toggle (ModUISystem.cs:134-136):
-    /// read ProxyAction from Setting.GetAction(name) and flip m_ToolSystem.activeTool.
+    /// Polls the tool hotkey (Ctrl+M by default, rebindable in the mod settings) and the settings
+    /// button, and toggles <see cref="MarkingNodeToolSystem"/> as the active tool.
     /// </summary>
     public partial class MarkingToolHotkeySystem : GameSystemBase
     {
@@ -25,8 +21,9 @@ namespace TownRoadLane
         private ProxyAction _toggleAction;
         private bool _pendingButtonToggle;
 
-        /// <summary>Called from the settings "Activate marking tool" button. Toggles the tool on
-        /// the next system update (we can't switch activeTool from a setter — wrong thread/phase).</summary>
+        /// <summary>Called from the settings "Activate marking tool" button. The toggle is deferred
+        /// to the next update: a settings setter runs outside the frame phase where activeTool can
+        /// be switched.</summary>
         public static void RequestToggle()
         {
             var sys = World.DefaultGameObjectInjectionWorld?.GetExistingSystemManaged<MarkingToolHotkeySystem>();
@@ -40,8 +37,8 @@ namespace TownRoadLane
             _toolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
             _defaultTool = World.GetOrCreateSystemManaged<DefaultToolSystem>();
             _markingTool = World.GetOrCreateSystemManaged<MarkingNodeToolSystem>();
-            // Resolve the action once at OnCreate — the ProxyAction reference is stable across the
-            // session and reflects rebinds the user makes through the mod's settings UI.
+            // The ProxyAction reference is stable for the session and follows rebinds made in the
+            // settings UI, so resolving it once is enough.
             if (Mod.Settings != null)
             {
                 _toggleAction = Mod.Settings.GetAction(TownRoadLaneSetting.ToggleMarkingTool);

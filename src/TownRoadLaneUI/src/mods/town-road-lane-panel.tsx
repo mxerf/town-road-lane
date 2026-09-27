@@ -1,5 +1,5 @@
-// React's KeyboardEvent is aliased — the bare name must keep referring to the
-// DOM type (the document-level hotkey handler below is typed against it).
+// React's KeyboardEvent is aliased so the bare name stays the DOM type, which the
+// document-level hotkey handler below uses.
 import { ChangeEvent, Component, ErrorInfo, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -91,10 +91,9 @@ import {
   ConfirmRow,
 } from "./panel.styles";
 
-// Containment boundary — a JS exception inside the panel must not propagate to
-// the game's React root and tear the whole HUD down. Caught errors are logged
-// and the panel renders a tiny "broken" placeholder until the underlying state
-// changes (typically next C# tick).
+// An exception inside the panel must not reach the game's React root, where it would take
+// down the whole HUD. The error is logged and a small error panel with a retry button is
+// shown instead.
 class PanelErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }
@@ -120,15 +119,13 @@ const PanelErrorFallback = ({ error, onRetry }: { error: Error; onRetry: () => v
   );
 };
 
-// MarkingStyle enum on the C# side — numeric values must stay in sync.
+// MarkingStyle values from C#, in dropdown order.
 const STYLE_VALUES = [0, 1, 5, 8, 4, 10, 11, 13, 12, 2, 3, 6, 7, 9] as const;
 type StyleValue = typeof STYLE_VALUES[number];
 
-// Lookup table: enum value → i18n string key. Keeps style label rendering
-// alongside the enum mapping rather than scattered across components.
-// STYLE_VALUES order groups related looks together in the dropdown (vanilla
-// whites incl. double, vanilla yellows, G87 white + yellow, curb) — the
-// numeric enum order is append-only history, not a presentation order.
+// STYLE_VALUES groups related looks for the dropdown (vanilla white, vanilla yellow, G87,
+// curb). The enum values themselves only ever get appended, so their numeric order means
+// nothing for display.
 const STYLE_KEYS: Record<number, StringKey> = {
   0: "style.solid",
   1: "style.dashed",
@@ -149,13 +146,10 @@ const STYLE_KEYS: Record<number, StringKey> = {
 const styleLabel = (t: ReturnType<typeof useT>, style: number): string =>
   t(STYLE_KEYS[style] ?? "style.unknown");
 
-// Area fill styles — ids match kStyleSurfaceNames in MarkingAreaEmissionSystem.
-// Ids 7-13 are reserved dead slots (the vanilla grass/sand/tiles experiment —
-// those surfaces can't be made to render on intersections, see the emission
-// catalogue comment) and are hidden here. The numeric id order is append-only
-// serialization history, not a presentation order.
-// 15/17+ — vanilla surfaces revived via VanillaSurfaceLateClone (16 is a retired
-// reserved slot, like 7-13).
+// Area fill styles; ids match kStyleSurfaceNames in MarkingAreaEmissionSystem. Ids are
+// saved with each area, so they only get appended and their order means nothing for
+// display. 7-13 and 16 are unused slots and stay hidden; 15 and 17+ are the vanilla surfaces
+// built by VanillaSurfaceLateClone.
 const AREA_STYLE_VALUES = [0, 14, 1, 2, 3, 4, 5, 6, 15, 17, 18, 19, 20, 21, 22] as const;
 const AREA_STYLE_ID_SET: ReadonlySet<number> = new Set(AREA_STYLE_VALUES);
 
@@ -164,9 +158,8 @@ const areaStyleLabel = (t: ReturnType<typeof useT>, styleId: number): string => 
   return AREA_STYLE_ID_SET.has(styleId) ? t(key) : t("style.unknown");
 };
 
-// Shared option lists for every style picker (panel rows + in-world popovers).
-// `pinned` = the user's favourite ids (usePinnedStyles) — those options float to
-// the top in their catalogue order; the rest keep the curated order below.
+// Option lists for every style picker (panel rows and popovers). Pinned favourites
+// (usePinnedStyles) come first, both groups in catalogue order.
 const sortPinnedFirst = <V,>(opts: DropdownOption<V>[]): DropdownOption<V>[] =>
   [...opts.filter((o) => o.pinned), ...opts.filter((o) => !o.pinned)];
 
@@ -190,8 +183,7 @@ const makeAreaStyleOptions = (t: ReturnType<typeof useT>, pinned: number[]): Dro
     })),
   );
 
-// Exported wrapper — boundary first, then real panel. moduleRegistry mounts
-// this into GameTopRight, so the boundary protects the game UI from our bugs.
+// Mounted into GameTopRight by moduleRegistry.
 export const TownRoadLanePanel = () => (
   <PanelErrorBoundary>
     <TooltipProvider>
@@ -200,18 +192,13 @@ export const TownRoadLanePanel = () => (
   </PanelErrorBoundary>
 );
 
-// Floating in-world popover anchored at a segment's midpoint. Collapsed it's
-// a small state dot (white = visible, red = hidden); hovering expands it into
-// the button row — visibility toggle, style cycle, delete-line (C6, two-press
-// confirm). One dot per segment keeps a many-segment line from wallpapering
-// the world with button rows.
+// In-world popover at a segment's midpoint. Collapsed it is a small dot (white visible, red
+// hidden), so a line with many segments doesn't fill the view with buttons; hovering shows
+// the visibility toggle, style picker and a two-press delete.
 //
-// Positioning is IMPERATIVE (Stage 5e): the root registers itself with
-// positionRegistry, and the per-frame GetScreenPoints binding writes
-// style.left/top/transform directly — camera movement never re-renders React.
-// The registry also hides the popover (display:none) while its segment is
-// off-screen / behind the camera, and scales it down with camera distance
-// (snapping back to full size while hover-expanded).
+// Position is not React state: the root registers with positionRegistry, which writes
+// left/top/transform on each GetScreenPoints push, hides the popover while its segment is
+// off-screen and scales it with camera distance.
 const POPOVER_DELETE_CONFIRM_MS = 2500;
 
 const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
@@ -219,14 +206,11 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   const pinned = usePinnedStyles();
   const key = segKey(seg.lineIndex, seg.segmentIndex);
   const [expanded, setExpanded] = useState(false);
-  // The style dropdown's menu is portalled to document.body — while it's open
-  // the cursor legitimately lives outside PopoverRoot, so the popover must not
-  // collapse (that would unmount the dropdown mid-pick).
+  // The style menu is portalled to document.body, so while it is open the cursor is outside
+  // PopoverRoot. Collapsing then would unmount the dropdown mid-pick.
   const [styleOpen, setStyleOpen] = useState(false);
   const showButtons = expanded || styleOpen;
-  // Two-press delete state, local to each popover. First click flips on; second
-  // click within the window dispatches. Resets on timeout or when the segment
-  // changes (popovers re-render with new keys when the line is rebuilt).
+  // Two-press delete: the first click arms it, a second click within the timeout deletes.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   useEffect(() => {
     if (!confirmingDelete) return;
@@ -234,34 +218,27 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
     return () => window.clearTimeout(id);
   }, [confirmingDelete]);
 
-  // Mirror the hover-expansion into the registry so it can clamp the
-  // camera-distance scale to ≥1 while the buttons are up. The unregister path
-  // (ref callback with null) clears the flag on unmount.
+  // Lets the registry keep the popover at full size while the buttons are shown. The
+  // flag is cleared on unmount when the ref callback unregisters the anchor.
   useEffect(() => {
     setAnchorExpanded(key, showButtons);
   }, [key, showButtons]);
 
-  // Portal into document.body — our panel mounts inside GameTopRight which
-  // likely has CSS transform/will-change set up by CS2, creating a containing
-  // block that pins our `position: fixed` to the slot instead of the viewport.
-  // A body portal gives us the true viewport-relative coordinates the
-  // Camera.WorldToScreenPoint values were computed against.
+  // Portalled to document.body: inside GameTopRight, `position: fixed` would be relative to
+  // the slot rather than the viewport (the slot probably has a transform), while the screen
+  // points from Camera.WorldToScreenPoint are viewport coordinates.
   return createPortal(
     <PopoverRoot
       ref={(el: HTMLElement | null) => registerSegmentAnchor(key, el)}
       onMouseEnter={() => {
         setExpanded(true);
-        // Per-segment hover (C3): light up THIS segment specifically, not the
-        // whole line. The popover's anchored to one segment, so the UX should
-        // narrow attention to that segment alone.
+        // Highlight just this segment, not the whole line.
         cmdSetHoveredSegment(seg.lineIndex, seg.segmentIndex);
       }}
       onMouseLeave={() => {
-        // Cancel pending delete if the user moves away — avoids the confirm
-        // state lingering after the user gave up.
         setConfirmingDelete(false);
-        // Cursor heading into the portalled style menu also "leaves" the root —
-        // keep the row alive while the menu is open (it closes via onOpenChange).
+        // Moving into the portalled style menu also leaves the root. Keep the buttons
+        // while the menu is open; onOpenChange collapses them when it closes.
         if (styleOpen) return;
         setExpanded(false);
         cmdSetHoveredSegment(-1, -1);
@@ -275,8 +252,7 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
             content={seg.visible ? t("segment.hide.tooltip") : t("segment.show.tooltip")}
           >
             <PopoverBtn
-              // $active when the segment is hidden — telegraphs the toggle state at
-              // a glance without forcing the user to interpret the icon.
+              // Highlighted while the segment is hidden.
               $active={!seg.visible}
               onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
             >
@@ -291,9 +267,8 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
               onTogglePin={cmdTogglePinLineStyle}
               onOpenChange={(open) => {
                 setStyleOpen(open);
-                // Menu closed with the cursor possibly over the (portalled)
-                // menu, i.e. outside the root — collapse explicitly; hovering
-                // the popover again re-expands it.
+                // The cursor may be over the portalled menu, outside the root, so no
+                // mouseleave will come. Collapse here; hovering again re-expands.
                 if (!open) {
                   setExpanded(false);
                   cmdSetHoveredSegment(-1, -1);
@@ -307,8 +282,7 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
             }
           >
             <PopoverBtn
-              // $active = red-tinted confirm state. Same visual language as the
-              // panel's inline DeleteLineButton confirm row.
+              // Red while armed, like the panel's delete confirm row.
               $active={confirmingDelete}
               style={
                 confirmingDelete
@@ -338,17 +312,14 @@ const SegmentPopover = ({ seg }: { seg: SegmentVM }) => {
   );
 };
 
-// In-world popover for an area, anchored at its polygon centroid (C# sends it
-// on the same GetScreenPoints channel under an `area:` key). Same collapsed/
-// expanded scheme as SegmentPopover; the collapsed face is the area's fill
-// swatch, so the dot itself says which area it is.
+// In-world popover at an area's centroid (sent on GetScreenPoints under an `area:` key).
+// Works like SegmentPopover, but the collapsed face is the area's fill swatch.
 const AreaPopover = ({ area }: { area: AreaVM }) => {
   const t = useT();
   const pinned = usePinnedStyles();
   const key = areaKey(area.areaIndex);
   const [expanded, setExpanded] = useState(false);
-  // Same contract as SegmentPopover: keep the row mounted while the portalled
-  // style menu is open.
+  // As in SegmentPopover: keep the buttons while the portalled style menu is open.
   const [styleOpen, setStyleOpen] = useState(false);
   const showButtons = expanded || styleOpen;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -367,7 +338,6 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
       ref={(el: HTMLElement | null) => registerSegmentAnchor(key, el)}
       onMouseEnter={() => {
         setExpanded(true);
-        // Same hover-bridge as the panel row: outline this area in the world.
         cmdSetHoveredArea(area.areaIndex);
       }}
       onMouseLeave={() => {
@@ -439,10 +409,8 @@ const AreaPopover = ({ area }: { area: AreaVM }) => {
   );
 };
 
-// Keyboard reference, collapsed into a one-line foldout by default — a static
-// cheat-sheet must not compete with the working area for a third of the panel.
-// It opens expanded on the "select a node" card (the panel is otherwise empty
-// there, and that's the onboarding moment) and collapsed while editing.
+// Hotkey list, collapsed by default so it doesn't take a third of the panel. It starts
+// open on the "select a node" card, where the panel is otherwise empty.
 const HotkeysFoldout = ({ defaultOpen = false }: { defaultOpen?: boolean }) => {
   const t = useT();
   const [open, setOpen] = useState(defaultOpen);
@@ -468,8 +436,7 @@ const HotkeysFoldout = ({ defaultOpen = false }: { defaultOpen?: boolean }) => {
   );
 };
 
-// One instruction line tracking the tool's state machine — the panel's answer
-// to "what do I do now". Data comes straight from the existing VM fields.
+// The next step for the user in the current tool state.
 const toolStatus = (t: ReturnType<typeof useT>, state: { toolState: number; areaVertexCount: number }): string => {
   if (state.toolState === TOOL_STATE.AreaSelecting) {
     return t("status.area", { n: state.areaVertexCount });
@@ -484,27 +451,20 @@ const TownRoadLanePanelInner = () => {
   const state = useToolState();
   const t = useT();
   const pinned = usePinnedStyles();
-  // Index of the currently-expanded line row. -1 = all collapsed.
-  // Auto-snaps to a single-line selection so a fresh node opens immediately.
+  // Expanded line row, -1 for none.
   const [expandedLine, setExpandedLine] = useState<number>(-1);
-  // Index of the currently-expanded area row. Independent of expandedLine —
-  // lines and areas are separate lists and expanding one shouldn't collapse
-  // the other.
+  // Expanded area row, independent of expandedLine.
   const [expandedArea, setExpandedArea] = useState<number>(-1);
-  // Pending delete confirmation for the expanded line, driven by the Delete
-  // keyboard shortcut (B2). First press flips this on; second press inside the
-  // 3s window actually deletes. The DeleteLineButton mirrors this state so the
-  // UI matches what the keyboard is doing.
+  // Line armed for deletion by the Delete key; a second press within 3 s deletes it.
+  // DeleteLineButton shows its confirm row while this matches its line.
   const [pendingDelete, setPendingDelete] = useState<number>(-1);
-  // Fold state for the two list sections — on a busy junction the full lists
-  // turn the panel into a wall. Folded = header (with count) plus only the
-  // row that is currently expanded or hovered in game, so orientation
-  // survives without the noise. Sticky across node switches by design.
+  // Folded lists keep only the header (with count) and the row that is expanded or hovered
+  // in the world, so a busy junction doesn't turn the panel into a wall. Kept across node
+  // switches on purpose.
   const [linesFolded, setLinesFolded] = useState(false);
   const [areasFolded, setAreasFolded] = useState(false);
 
-  // When the node changes (or the line count drops to 1), default to expanding line 0
-  // so the user doesn't have to manually click to see anything useful.
+  // A node with a single line opens with that line expanded.
   useEffect(() => {
     if (state.lines.length === 0) {
       setExpandedLine(-1);
@@ -515,14 +475,13 @@ const TownRoadLanePanelInner = () => {
     }
   }, [state.selectedNodeIndex, state.lines.length]);
 
-  // Areas: clamp the expanded row when the list shrinks; collapse on node switch.
+  // Drop the expanded area row when the list shrinks below it.
   useEffect(() => {
     if (expandedArea >= state.areas.length) setExpandedArea(-1);
   }, [state.selectedNodeIndex, state.areas.length]);
 
-  // Reverse hover-bridge: user clicked on a line in the game world (not a dot, not on
-  // an existing accordion row). Auto-expand the matching line. Tick-based — same line
-  // clicked twice still fires the effect because the tick increments on every click.
+  // A click on a line in the world expands its row. Keyed on the tick, which changes on
+  // every click, so clicking the same line again still fires.
   useEffect(() => {
     if (state.lastClickedLine >= 0 && state.lastClickedLine < state.lines.length) {
       setExpandedLine(state.lastClickedLine);
@@ -531,10 +490,8 @@ const TownRoadLanePanelInner = () => {
     }
   }, [state.lastClickedTick]);
 
-  // Keyboard shortcuts (B2) — active only while the panel is mounted (i.e.
-  // tool active + node selected). The listener filters out inputs/selects so
-  // it doesn't intercept typing into a future text field. Also bails early on
-  // modified keys (Ctrl/Meta combos) — those belong to the game.
+  // Panel shortcuts while a node is selected. Keys typed into text fields and combos with
+  // Ctrl/Meta/Alt are left alone; those belong to the input or the game.
   useEffect(() => {
     if (!state.isActive || state.selectedNodeIndex < 0) return;
 
@@ -545,7 +502,7 @@ const TownRoadLanePanelInner = () => {
 
       const lineCount = state.lines.length;
 
-      // Tab / Shift+Tab — cycle expanded line. With nothing expanded, opens 0.
+      // Tab / Shift+Tab: cycle the expanded line.
       if (e.key === "Tab" && lineCount > 0) {
         e.preventDefault();
         const cur = expandedLine < 0 ? -1 : expandedLine;
@@ -556,7 +513,7 @@ const TownRoadLanePanelInner = () => {
         return;
       }
 
-      // Esc — collapse / clear pending-delete (cancel chain).
+      // Esc: cancel a pending delete first, then collapse.
       if (e.key === "Escape") {
         if (pendingDelete >= 0) {
           setPendingDelete(-1);
@@ -566,15 +523,13 @@ const TownRoadLanePanelInner = () => {
         return;
       }
 
-      // Enter — toggle expand of the first line if nothing expanded, else
-      // collapse the currently expanded one. Useful after Tab-navigation.
+      // Enter: expand the first line when nothing is expanded.
       if (e.key === "Enter") {
         if (expandedLine < 0 && lineCount > 0) setExpandedLine(0);
         return;
       }
 
-      // Delete — two-press confirm matching the button flow. First press arms
-      // pendingDelete; second confirms and dispatches the actual delete.
+      // Delete: the first press arms, the second deletes, as with the button.
       if (e.key === "Delete" && expandedLine >= 0) {
         if (pendingDelete === expandedLine) {
           cmdDeleteLine(expandedLine);
@@ -585,7 +540,7 @@ const TownRoadLanePanelInner = () => {
         return;
       }
 
-      // 1..5 — quick style pick for the expanded line.
+      // 1..5: pick one of the first five dropdown styles for the expanded line.
       if (expandedLine >= 0 && /^[1-5]$/.test(e.key)) {
         const idx = parseInt(e.key, 10) - 1;
         if (idx >= 0 && idx < STYLE_VALUES.length) {
@@ -599,8 +554,7 @@ const TownRoadLanePanelInner = () => {
     return () => document.removeEventListener("keydown", handler);
   }, [state.isActive, state.selectedNodeIndex, state.lines.length, expandedLine, pendingDelete]);
 
-  // Auto-clear pending-delete after the same 3s window the button uses, so a
-  // half-pressed Delete shortcut doesn't sit armed forever.
+  // Disarm the Delete key after the same 3 s the button uses.
   useEffect(() => {
     if (pendingDelete < 0) return;
     const id = window.setTimeout(() => setPendingDelete(-1), 3000);
@@ -611,10 +565,8 @@ const TownRoadLanePanelInner = () => {
 
   const inAreaMode = state.toolState === TOOL_STATE.AreaSelecting;
 
-  // Tool active, nothing selected yet: a compact "how to start" card. Without
-  // this the tool felt OFF after activation (no visual change anywhere until
-  // the first node click). Hotkeys open expanded here — it's the onboarding
-  // moment and the card is otherwise empty.
+  // No node selected yet: a short "how to start" card, so activating the tool gives
+  // visible feedback before the first node click.
   if (state.selectedNodeIndex < 0) {
     return (
       <Panel>
@@ -783,9 +735,8 @@ const TownRoadLanePanelInner = () => {
           </>
         )}
 
-        {/* Node block — per-intersection settings, deliberately at the bottom:
-            the vanilla override is a stateful toggle (not an action), and the
-            full reset is rare + destructive; neither earns header real estate. */}
+        {/* Node settings sit at the bottom: the vanilla toggle is a setting, not an action,
+            and the full reset is rare and destructive. */}
         <SectionTitle>{t("section.node")}</SectionTitle>
         <ToggleRow>
           <FieldLabel>{t("node.vanilla.label")}</FieldLabel>
@@ -874,9 +825,8 @@ const LineRow = ({
   );
 };
 
-// Area accordion row — mirrors LineRow's layout so the two lists read as one
-// visual system. Body controls: fill-style dropdown, visibility toggle, and a
-// two-stage delete (same confirm pattern as lines).
+// Same layout as LineRow. The body has the fill style, a visibility toggle and a two-step
+// delete.
 const AreaRow = ({
   area,
   isExpanded,
@@ -959,10 +909,8 @@ const AreaRow = ({
   );
 };
 
-// Full node reset — wipes every line, area and the vanilla-hide override on
-// the selected node, restoring stock markings. Destructive and node-wide, so
-// it gets the same two-stage confirm as deletes and hides at the very bottom
-// of the panel (rendered only when there is actually something to reset).
+// Removes every line and area on the node and the vanilla-hide override. Node-wide and
+// destructive, so it needs the same two-step confirm as deletes.
 const ResetNodeButton = () => {
   const t = useT();
   const [confirming, setConfirming] = useState(false);
@@ -995,14 +943,9 @@ const ResetNodeButton = () => {
   );
 };
 
-// Two-stage delete button (B1): first click flips to a confirm row, second
-// click on Delete actually deletes. Cancel aborts. Auto-resets to idle after
-// 3 seconds of inactivity so a half-pressed confirm doesn't sit forever.
-//
-// Why inline (not a modal): cohtml's overlay positioning is fragile, and a
-// modal blocks the rest of the panel for a destructive action that's already
-// rare. Inline keeps the user's context (they can still see the line they're
-// about to delete in the segment list above).
+// Two-step delete: the first click shows a confirm row, which resets after 3 seconds. Inline
+// rather than a modal, because overlay positioning in cohtml is fragile and the line stays
+// visible above while confirming.
 const DELETE_CONFIRM_TIMEOUT_MS = 3000;
 
 const DeleteLineButton = ({
@@ -1015,15 +958,11 @@ const DeleteLineButton = ({
   onKeyboardCancel: () => void;
 }) => {
   const t = useT();
-  // Local confirming state for mouse interactions; the keyboard-driven flow
-  // (B2) flips through the parent via keyboardConfirming. Either source puts
-  // the button into the confirm row.
+  // Armed either by a click here or by the Delete key through keyboardConfirming.
   const [mouseConfirming, setMouseConfirming] = useState(false);
   const confirming = mouseConfirming || keyboardConfirming;
 
-  // Mouse-confirming auto-resets after the timeout. Keyboard-confirming is
-  // owned by the parent and reset by its own timeout / Esc handler, so we
-  // don't touch it here — just clear our local copy.
+  // Only the mouse state times out here; the parent resets keyboardConfirming itself.
   useEffect(() => {
     if (!mouseConfirming) return;
     const id = window.setTimeout(() => setMouseConfirming(false), DELETE_CONFIRM_TIMEOUT_MS);
@@ -1057,12 +996,10 @@ const DeleteLineButton = ({
   );
 };
 
-// Curvature input — exact percent over the C#-side pull factor [0, 0.8].
-// 0% = straight chord, 50% = default arc (0.4), 100% = maximum roundness.
-// A plain text field (range sliders don't function in CS2's cohtml): digits
-// only, commit on Enter or blur, clamped to [0, 100]. While the user types,
-// the draft string owns the field; otherwise it mirrors the C# value. The
-// reset button shows only while the value is off the 50% default.
+// Curvature in percent of the C# pull factor range 0..0.8 (50% is the default 0.4 arc).
+// A text field, since range sliders don't work in cohtml: digits only, committed on Enter
+// or blur and clamped to 0..100. While the user types, the draft owns the field; otherwise
+// it shows the C# value.
 const CURV_DEFAULT = 50;
 
 const CurvatureInput = ({ line }: { line: LineVM }) => {
@@ -1078,9 +1015,8 @@ const CurvatureInput = ({ line }: { line: LineVM }) => {
     setDraft(null);
   };
 
-  // −/+ stepper: click ±1, Shift ±10, Ctrl ±5. An uncommitted draft is the
-  // base when it parses — stepping from what the user SEES beats silently
-  // stepping from the stale committed value.
+  // −/+: ±1, Shift ±10, Ctrl ±5. Steps from an uncommitted draft when there is one, since
+  // that is what the user sees.
   const step = (dir: 1 | -1, e: ReactMouseEvent<HTMLButtonElement>) => {
     const mag = e.shiftKey ? 10 : e.ctrlKey ? 5 : 1;
     const parsed = draft !== null ? parseInt(draft, 10) : NaN;
@@ -1125,8 +1061,7 @@ const CurvatureInput = ({ line }: { line: LineVM }) => {
   );
 };
 
-// Custom cohtml-safe Dropdown (see components/Dropdown.tsx). Options re-build
-// on each render so they pick up locale changes (cheap — 5 entries).
+// Options are rebuilt on each render so they follow locale changes.
 const StyleSelector = ({ line }: { line: LineVM }) => {
   const t = useT();
   const pinned = usePinnedStyles();
@@ -1149,8 +1084,7 @@ const SegmentRowComponent = ({ seg }: { seg: SegmentVM }) => {
       $hidden={!seg.visible}
       onClick={() => cmdToggleSegment(seg.lineIndex, seg.segmentIndex)}
     >
-      {/* Name left, length right — the old "seg 0 · 1.5m" single run read as
-          an unparseable jumble. 1-based for humans. */}
+      {/* 1-based for humans; commands keep the raw index. */}
       <SegmentInfo>{t("segment.label", { n: seg.segmentIndex + 1 })}</SegmentInfo>
       <SegmentLen>{t("segment.length", { m: seg.lengthM.toFixed(1) })}</SegmentLen>
       <SegmentIndicator>

@@ -16,21 +16,14 @@ using SubLane = Game.Net.SubLane;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Stage 5b successor of <see cref="MarkingPairEmissionSystem"/>. Diffs the
-    /// (<see cref="MarkingLine"/>, <see cref="MarkingSegment"/>) buffers on a node against
-    /// already-spawned sublanes (tagged with <see cref="TRLSegmentLink"/>) and reconciles:
+    /// Keeps one vanilla SecondaryLane sublane (tagged <see cref="TRLSegmentLink"/>) per visible
+    /// <see cref="MarkingSegment"/> and draw pass: creates the missing ones and deletes those whose
+    /// segment is gone or hidden. Each segment's curve is the full line from
+    /// <see cref="MarkingCurveBuilder"/> cut to the segment's range, so it matches the topology
+    /// math exactly.
     ///
-    ///   - visible segment in buffer, no matching sublane     → create sublane
-    ///   - segment gone or hidden, sublane still has TRLSegmentLink → delete sublane
-    ///   - visible segment exists + sublane exists            → no-op
-    ///
-    /// Also one-shot cleans up legacy <see cref="TRLPairLink"/> sublanes left over from the
-    /// pre-5b emission system — those entities reference MarkingPair which the migration
-    /// removes, so they have nothing to anchor to and must go.
-    ///
-    /// Per-segment Bezier comes from <see cref="MarkingCurveBuilder"/> for the full line,
-    /// then cut to the segment's parameter range with <see cref="MathUtils.Cut(Bezier4x3, float2)"/>.
-    /// This guarantees the rendered geometry matches the topology-recompute math exactly.
+    /// Sublanes tagged <see cref="TRLPairLink"/> come from old saves; their MarkingPair source is
+    /// removed by the migration, so they are deleted.
     /// </summary>
     [UpdateAfter(typeof(MarkingTopologySystem))]
     public partial class MarkingSegmentEmissionSystem : GameSystemBase
@@ -41,8 +34,8 @@ namespace TownRoadLane
         private EntityQuery _ourSubLanes;
         private EntityQuery _legacyPairSubLanes;
         private readonly System.Text.StringBuilder _churnDetail = new System.Text.StringBuilder();
-        // One warn per (node, line) that blew the PathNode slot capacity — this fires every
-        // tick for a persistent over-limit line, so unthrottled logging would flood.
+        // One warning per (node, line) over the PathNode slot capacity: the check fails every
+        // tick for such a line, so unthrottled logging would flood.
         private readonly HashSet<(Entity, int)> _slotOverflowWarned = new HashSet<(Entity, int)>();
         private PrefabSystem _prefabSystem;
         private EdgeLineCloneSystem _edgeLineSys;
@@ -76,9 +69,7 @@ namespace TownRoadLane
         {
             var ecb = new EntityCommandBuffer(Allocator.Temp);
 
-            // 0. One-shot cleanup of pre-5b sublanes. Their MarkingPair source is gone after
-            //    migration, so they'll never be re-anchored — just delete and let
-            //    MarkingSegmentEmissionSystem re-spawn from the new segment buffer.
+            // Old-save sublanes; the migrated segments are emitted below like any other.
             if (_legacyPairSubLanes.CalculateEntityCount() > 0)
             {
                 var legacy = _legacyPairSubLanes.ToEntityArray(Allocator.Temp);
@@ -87,8 +78,7 @@ namespace TownRoadLane
                 legacy.Dispose();
             }
 
-            // 1. Build the "wanted" set: (node, lineIndex, segmentIndex, passIndex) for every
-            // visible segment. Some styles need multiple draw passes — see MarkingStyle.DrawPasses.
+            // Wanted set: (node, lineIndex, segmentIndex, passIndex) for every visible segment.
             var wanted = new HashSet<(Entity, int, int, int)>();
             var nodes = _nodesWithLines.ToEntityArray(Allocator.Temp);
             for (int n = 0; n < nodes.Length; n++)
@@ -106,8 +96,6 @@ namespace TownRoadLane
                     if (seg.lineIndex < 0 || seg.lineIndex >= lines.Length) continue;
                     int segIdx = perLineCounter.TryGetValue(seg.lineIndex, out var c) ? c : 0;
                     perLineCounter[seg.lineIndex] = segIdx + 1;
-                    // Style now lives ON the segment (Stage 5d) — let each piece of a line
-                    // pick its own visual independent of the line-level default.
                     var style = (MarkingStyle)seg.style;
                     int passes = style.DrawPasses();
                     for (int p = 0; p < passes; p++)
@@ -116,7 +104,7 @@ namespace TownRoadLane
             }
             nodes.Dispose();
 
-            // 2. Diff existing sublanes against wanted set.
+            // Delete unwanted and duplicate sublanes.
             var existing = _ourSubLanes.ToEntityArray(Allocator.Temp);
             var seen = new HashSet<(Entity, int, int, int)>();
             int deleted = 0;
@@ -136,13 +124,11 @@ namespace TownRoadLane
             }
             existing.Dispose();
 
-            // 3. Spawn remaining wanted.
+            // Spawn the rest.
             int created = 0;
             if (wanted.Count > 0)
             {
-                // Resolve every style we might need this tick. Cached per (style, theme) so we
-                // don't re-query NetLaneArchetypeData per segment. Solid always required as the
-                // fallback when a line's style isn't loaded yet.
+                // Solid is required: it is the fallback for any style whose clone is not ready.
                 bool isNA = IsNATheme();
                 var prefabByStyle = new Dictionary<MarkingStyle, (Entity prefab, EntityArchetype arch)>();
                 if (!TryResolveStylePrefab(MarkingStyle.Solid, isNA, out var solidPair))
@@ -186,10 +172,7 @@ namespace TownRoadLane
                             if (seg.lineIndex < 0 || seg.lineIndex >= lineCount) continue;
                             if (!bezValid[seg.lineIndex]) continue;
 
-                            // Per-segment prefab lookup. Style is owned by the segment itself
-                            // (Stage 5d) — different pieces of one line may render differently.
-                            // Lazy-resolve into the cache: FIRST segment of each style pays for
-                            // the archetype lookup, every later one is a dictionary hit.
+                            // Style belongs to the segment, so pieces of one line can differ.
                             var style = (MarkingStyle)seg.style;
                             if (!prefabByStyle.TryGetValue(style, out var pair))
                             {
@@ -198,8 +181,7 @@ namespace TownRoadLane
                                 prefabByStyle[style] = pair;
                             }
 
-                            // Spawn one sublane per draw pass. Multi-pass styles overlap copies
-                            // on the same geometry to boost alpha — see MarkingStyle.DrawPasses.
+                            // Multi-pass styles stack copies on the same curve to boost alpha.
                             int passes = style.DrawPasses();
                             for (int p = 0; p < passes; p++)
                             {
@@ -238,18 +220,12 @@ namespace TownRoadLane
         private Entity SpawnSegmentSublane(EntityCommandBuffer ecb, Entity node, int lineIndex, int segmentIndex,
             int passIndex, Bezier4x3 fullBezier, float tStart, float tEnd, Entity prefab, EntityArchetype archetype)
         {
-            // Cut the full-line Bezier to the segment's parameter range. MathUtils.Cut takes
-            // float2(start, end) — vanilla uses this exact API for navigation curve trimming.
             Bezier4x3 segBez = MathUtils.Cut(fullBezier, new float2(tStart, tEnd));
 
-            // PathNode slots: base = 32768 + lineIndex*512 + segmentIndex*16 + passIndex*4.
-            // Each segment reserves 16 slots → up to 4 passes of 4 PathNode slots each. 512 slots
-            // per line → up to 32 segments per line before colliding with the next line.
-            // Vanilla primary lanes occupy 0..N-1; 32768+ keeps us clear.
-            // Hard capacity limits: segmentIndex ≥ 32 would collide with the next line's slot
-            // range, and lineIndex ≥ 64 wraps the ushort back into vanilla's 0..N slots — a
-            // slot collision there crashes the pathfinder (RESEARCH_sublane_lifecycle.md). Skip
-            // the sublane instead of spawning a corrupt one; the line simply doesn't render.
+            // PathNode slots start at 32768, clear of the vanilla lanes' 0..N-1: 512 per line,
+            // 16 per segment, 4 per pass. Past 32 segments a line runs into the next line's range,
+            // and past 64 lines the ushort wraps into vanilla slots, where a collision crashes the
+            // pathfinder. Such a sublane is skipped, so that piece is simply not drawn.
             int slotBase = 32768 + lineIndex * 512 + segmentIndex * 16 + passIndex * 4;
             if (segmentIndex >= 32 || lineIndex >= 64 || slotBase + 2 > ushort.MaxValue)
             {
@@ -274,8 +250,8 @@ namespace TownRoadLane
             ecb.AddComponent(e, new TRLSegmentLink { node = node, lineIndex = lineIndex, segmentIndex = segmentIndex, passIndex = passIndex });
             ecb.AddComponent(e, default(Created));
             ecb.AddComponent(e, default(Updated));
-            // NOT marking owner Updated — same reason as the old PairEmissionSystem (cascade
-            // through LaneReferencesSystem caused runaway spawn loops; see commit cdc96a5).
+            // The owner node is deliberately not marked Updated: that cascades through
+            // LaneReferencesSystem into a runaway spawn loop.
 
             return e;
         }
@@ -294,9 +270,8 @@ namespace TownRoadLane
             return false;
         }
 
-        /// <summary>Look up the (prefab, archetype) pair for a given (style, theme). Returns false
-        /// when the clone isn't loaded yet or the prefab hasn't been baked through
-        /// NetLaneArchetypeData by PrefabSystem. Caller falls back to Solid in that case.</summary>
+        /// <summary>Returns false while the clone for (style, theme) is not registered or its
+        /// NetLaneArchetypeData is not baked yet.</summary>
         private bool TryResolveStylePrefab(MarkingStyle style, bool isNA, out (Entity prefab, EntityArchetype arch) pair)
         {
             pair = default;

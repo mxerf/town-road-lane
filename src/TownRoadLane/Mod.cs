@@ -11,10 +11,9 @@ using TownRoadLane.Diagnostics;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Entry point. Disables vanilla <see cref="SecondaryLaneSystem"/>, registers our drop-in copy
-    /// <see cref="CustomSecondaryLaneSystem"/> (Layer 2) plus the per-entity <c>MarkingOverride</c>
-    /// toggle (Layer 3). Layers 1 (clone systems) and 4 (node UI tool) are added in later phases —
-    /// see IMPLEMENTATION_PLAN.md.
+    /// Entry point. Replaces the vanilla <see cref="SecondaryLaneSystem"/> with
+    /// <see cref="CustomSecondaryLaneSystem"/> and registers the prefab clone systems, the node
+    /// marking tool and the systems that turn user-drawn lines and fills into game entities.
     /// </summary>
     public class Mod : IMod
     {
@@ -23,20 +22,18 @@ namespace TownRoadLane
         private static ILog CreateLog()
         {
             var logger = LogManager.GetLogger($"{nameof(TownRoadLane)}.{nameof(Mod)}").SetShowsErrorsInUI(false);
-            // By default UnityLogger reopens and closes the file on EVERY write. When an open
-            // fails (antivirus / cloud sync holding the file) Open() swallows the error, the
-            // writer stays null and the write throws NullReferenceException — outside its
-            // IOException catch, so it escapes into whichever of our systems was logging
-            // (the NREs players reported at RoadPrefabDumpSystem.cs:586 and
-            // MarkingAreaEmissionSystem.cs:436 in 2.4.2). One open per session instead.
+            // By default UnityLogger reopens and closes the file on every write. When an open
+            // fails (antivirus or cloud sync holding the file), Open() swallows the error, the
+            // writer stays null and the write throws a NullReferenceException outside its
+            // IOException catch, so it escapes into whichever system was logging. Keeping the
+            // stream open means one open per session.
             logger.keepStreamOpen = true;
             return logger;
         }
 
         public static TownRoadLaneSetting Settings { get; private set; }
-        // Singleton handle to the live mod instance — needed by TownRoadLaneUISystem so it can
-        // resolve its own ExecutableAsset path to read the React bundle. ModManager indexes
-        // assets by mod instance; using a fresh new Mod() would lose that mapping.
+        // TownRoadLaneUISystem needs the live instance to resolve the mod's ExecutableAsset path:
+        // ModManager indexes assets by mod instance, so a new Mod() would not be found.
         public static Mod Instance { get; private set; }
 
         public void OnLoad(UpdateSystem updateSystem)
@@ -47,131 +44,93 @@ namespace TownRoadLane
             if (GameManager.instance.modManager.TryGetExecutableAsset(this, out var asset))
                 log.Info($"Current mod asset at {asset.path}");
 
-            // The defaults instance must be created BEFORE the live one: every ModSetting ctor
-            // registers itself in the static ModSetting.instances[id] map, so whichever is
-            // constructed last is what the game resolves by id. Constructing the defaults inline
-            // in the LoadSettings call used to leave the throwaway object as the registered one.
+            // The defaults instance must be created before the live one: every ModSetting ctor
+            // registers itself in the static ModSetting.instances[id] map, and the game resolves
+            // the id to whichever instance was constructed last.
             var settingDefaults = new TownRoadLaneSetting(this);
             Settings = new TownRoadLaneSetting(this);
-            // RegisterKeyBindings must run BEFORE GetAction() resolves anything. Without this call
-            // the ProxyAction for ToggleMarkingTool never fires (silent — no warn). Traffic's
-            // Mod.cs:56-57 does the same: RegisterKeyBindings before RegisterInOptionsUI.
+            // Must run before GetAction() resolves anything, otherwise the ToggleMarkingTool
+            // ProxyAction silently never fires. Traffic registers key bindings in the same order.
             Settings.RegisterKeyBindings();
             Settings.RegisterInOptionsUI();
             GameManager.instance.localizationManager.AddSource("en-US", new LocaleEN(Settings));
             GameManager.instance.localizationManager.AddSource("ru-RU", new LocaleRU(Settings));
             AssetDatabase.global.LoadSettings(nameof(TownRoadLane), Settings, settingDefaults);
-            // Decode failures fall back to SetDefaults() silently (both toggles back to true) —
-            // log what actually survived the load so user reports show the real state.
+            // A decode failure silently falls back to SetDefaults(), so log what the load actually
+            // produced; user reports then show the real state.
             log.Info($"settings loaded: edge={Settings.EdgeLineEnabled}/{Settings.EdgeLineStyle}, parking={Settings.ParkingMarkingsEnabled}/{Settings.ParkingLineStyle}/{Settings.ParkingEndStyle}, pins='{Settings.PinnedLineStylesCsv}'/'{Settings.PinnedAreaStylesCsv}'");
 
-            // Vanilla-surface fill styles (grass, sand, pavement, tiles), registered on a live
-            // frame (the EAI recipe — see VanillaSurfaceLateClone). Style slots 15+.
+            // Vanilla-surface fill styles; see VanillaSurfaceLateClone for why they are registered
+            // after loading.
             VanillaSurfaceLateClone.Register(updateSystem.World);
 
 #if DEBUG
-            // Developer prefab surveys — Debug builds only (excluded from the Release DLL in the
-            // csproj), and even there off unless the hidden DiagnosticDumps setting is on (see
-            // Setting.cs): they write tens of thousands of lines per boot.
+            // Developer prefab surveys. Debug builds only, and even there off unless the hidden
+            // DiagnosticDumps setting is on: they write tens of thousands of lines per boot.
             if (Settings.DiagnosticDumps)
             {
                 // Read-only structural dump, useful when something changes between game patches.
                 updateSystem.UpdateAt<RoadPrefabDumpSystem>(SystemUpdatePhase.PrefabUpdate);
-                // Phase 6 prototype: one-shot probes for Shader.Find + vanilla SurfacePrefab inventory.
-                // Self-disables after its second pass.
+                // One-shot probes for Shader.Find and the vanilla SurfacePrefab inventory.
+                // Disables itself after its second pass.
                 updateSystem.UpdateAt<AreasPrototypeSystem>(SystemUpdatePhase.PrefabUpdate);
             }
             log.Info($"diagnostic dumps: {(Settings.DiagnosticDumps ? "ON" : "off")}");
-            // ParkingPairDumpSystem is kept in the tree for phase 4 endpoint-extraction debugging.
-            // Re-register when needed: updateSystem.UpdateAt<ParkingPairDumpSystem>(SystemUpdatePhase.GameSimulation);
+            // ParkingPairDumpSystem (parking endpoint debugging) is not registered by default;
+            // add it here in GameSimulation when needed.
 #endif
 
-            // Layer 1: clone vanilla marking prefabs (one-shot per session, self-disables after first run).
-            // Both must live in PrefabUpdate so PrefabSystem.UpdatePrefab fires NetInitializeSystem on the
-            // same frame and the SecondaryNetLane buffers are baked before road geometry processes them.
-            // See K2 / K4 in IMPLEMENTATION_PLAN.md.
+            // Marking prefab clones. Both run in PrefabUpdate so that PrefabSystem.UpdatePrefab
+            // triggers NetInitializeSystem in the same frame and the SecondaryNetLane buffers are
+            // baked before road geometry reads them.
             updateSystem.UpdateAt<EdgeLineCloneSystem>(SystemUpdatePhase.PrefabUpdate);
             updateSystem.UpdateAt<ParkingLineCloneSystem>(SystemUpdatePhase.PrefabUpdate);
 
-            // Disable vanilla markings generator. Cars still drive normally — LaneSystem (primary lanes)
-            // is untouched; only the secondary marking pass is replaced.
+            // Only the secondary lane pass (markings) is replaced; LaneSystem and traffic lanes are
+            // untouched.
             var vanilla = updateSystem.World.GetOrCreateSystemManaged<SecondaryLaneSystem>();
             vanilla.Enabled = false;
             log.Info($"vanilla SecondaryLaneSystem disabled (was Enabled={vanilla.Enabled})");
 
-            // Our replacement. Phase 0 is byte-for-byte equivalent to vanilla — success criterion is
-            // "city looks identical after enabling the mod". MUST run on Modification4B (not 4) — that's
-            // where AllowBarrier<ModificationBarrier4B> lives. Using Modification4 instead would put us
-            // outside the barrier's allowed window and SafeCommandBufferSystem.CreateCommandBuffer
-            // would throw "Trying to create EntityCommandBuffer when it's not allowed!".
-            // See decomp/Game/Game.Common/SystemOrder.cs:184.
+            // Must run in Modification4B, where vanilla SecondaryLaneSystem runs and
+            // AllowBarrier<ModificationBarrier4B> applies (Game.Common.SystemOrder). In Modification4,
+            // SafeCommandBufferSystem.CreateCommandBuffer throws "Trying to create
+            // EntityCommandBuffer when it's not allowed!".
             updateSystem.UpdateAt<CustomSecondaryLaneSystem>(SystemUpdatePhase.Modification4B);
             log.Info($"CustomSecondaryLaneSystem registered at Modification4B");
 
-            // No runtime "reapply" system: refreshing clone prefabs (UpdatePrefab) in a live
-            // world leaves existing sublanes with stale PrefabRefs and the next SecondaryLane
-            // rebuild crashes natively in a Burst job (three crashes on 2026-07-17, see
-            // Setting.cs). Settings apply on the next save load via the clone systems'
-            // regular PrefabUpdate pass.
+            // There is deliberately no system that reapplies settings at runtime: refreshing the
+            // clone prefabs (UpdatePrefab) in a live world leaves existing sublanes with stale
+            // PrefabRefs, and the next secondary lane rebuild crashes natively inside a Burst job.
+            // Settings apply on the next save load through the clone systems' PrefabUpdate pass.
 
-            // Phase 4 tool: per-node marking customisation. ToolBaseSystem self-registers with
-            // ToolSystem.tools in its OnCreate; we just need to instantiate it. Update phase per
-            // vanilla tool convention (ToolBaseSystem.cs base wires its own ToolUpdate path).
+            // ToolBaseSystem adds itself to ToolSystem.tools in OnCreate; registering is enough.
             updateSystem.UpdateAt<MarkingNodeToolSystem>(SystemUpdatePhase.ToolUpdate);
-            // Hotkey poller — flips activeTool when Ctrl+M fires. Cheap WasPerformedThisFrame check.
             updateSystem.UpdateAt<MarkingToolHotkeySystem>(SystemUpdatePhase.Modification1);
-            // Overlay renderer for connector dots, drag-line, and confirmed pairs. Gated on
-            // activeTool == MarkingNodeToolSystem; idle otherwise. Rendering phase is fine here
-            // (we read tool state, write to vanilla OverlayRenderSystem.Buffer).
+            // Idle unless the marking tool is active; writes to OverlayRenderSystem.Buffer.
             updateSystem.UpdateAt<MarkingOverlaySystem>(SystemUpdatePhase.Rendering);
 
-            // Phase 4 step 4 (B.1 revive): spawn vanilla SecondaryLane entities per user pair.
-            // The earlier custom-mesh path (MarkingMeshRenderSystem on Graphics.DrawMesh /
-            // GameObject+MeshRenderer) was exhaustively explored and proven incompatible with
-            // HDRP's DBufferMesh pass — vanilla decal shaders depend on DOTS InstanceProperties
-            // (colossal_CurveMatrix) only BRG can supply. See commits 35e504c..7d6a9f1 +
-            // research/RESEARCH_decal_*.md for the full dead-end exploration.
+            // User lines and fills are emitted as regular vanilla entities (SecondaryLane sublanes
+            // and Game.Areas.Area) so the game's own renderer draws them. A custom mesh path
+            // cannot work: the vanilla decal shaders need DOTS instance properties
+            // (colossal_CurveMatrix) that only the BatchRendererGroup pipeline supplies.
             //
-            // ECS path: spawn entity with edge-line clone prefab's archetype, vanilla BRG
-            // pipeline picks it up via Game.Net.SecondaryLane tag (auto-included by archetype),
-            // SecondaryLaneReferencesSystem registers it in node.SubLane at Modification5,
-            // vanilla CurvedDecalShader renders with full quality. Same path EAI/RealVision use.
-            // See research/RESEARCH_sublane_lifecycle.md for the full spec.
-            //
-            // Modification1 puts us BEFORE LaneSystem (4) / SecondaryLaneSystem (4B) /
-            // SecondaryLaneReferencesSystem (5) — same phase the old commits used; proven safe.
-            // Stage 5b migration: rewrite v2 MarkingPair buffers as v3 MarkingLine+MarkingSegment
-            // on first sight of a node. Idempotent + cheap (empty query 99% of frames). Must run
-            // before emission — [UpdateBefore] on the class handles ordering inside Modification1.
+            // Modification1 runs before LaneSystem (4), SecondaryLaneSystem (4B) and
+            // SecondaryLaneReferencesSystem (5), which adds the emitted sublanes to the node's
+            // SubLane buffer. Ordering inside Modification1 comes from [UpdateBefore]/[UpdateAfter]
+            // on the classes: migration, line topology, line emission; line topology, area
+            // topology, area emission.
             updateSystem.UpdateAt<MarkingPairMigrationSystem>(SystemUpdatePhase.Modification1);
-            // Stage 5b: pairwise Bezier intersection + segment buffer rewrite. Ordered between
-            // migration and emission via [UpdateAfter]/[UpdateBefore] on the class itself.
             updateSystem.UpdateAt<MarkingTopologySystem>(SystemUpdatePhase.Modification1);
-            // Stage 5b emission: spawn one sublane per visible MarkingSegment (replaces the
-            // Phase-4 MarkingPairEmissionSystem which keyed off MarkingPair). The old system is
-            // intentionally not registered any more — its TRLPairLink entities get GC'd by
-            // MarkingSegmentEmissionSystem on first tick after migration.
             updateSystem.UpdateAt<MarkingSegmentEmissionSystem>(SystemUpdatePhase.Modification1);
-            // Phase 6e: split areas at every line intersection. Must run AFTER MarkingTopologySystem
-            // (line buffer up-to-date) and BEFORE MarkingAreaEmissionSystem (piece buffer must be
-            // fresh when emission diffs). [UpdateAfter]/[UpdateBefore] on the class enforces this.
             updateSystem.UpdateAt<MarkingAreaTopologySystem>(SystemUpdatePhase.Modification1);
-            // Phase 6c: per-node MarkingArea → vanilla Game.Areas.Area emitter. Same Modification1
-            // phase as the line emitter (independent buffers; no ordering required between them).
             updateSystem.UpdateAt<MarkingAreaEmissionSystem>(SystemUpdatePhase.Modification1);
-            // Phase 8: re-triangulate our fills after vanilla Game.Areas.GeometrySystem
-            // (Modification2B, [UpdateAfter] on the class). Replaces its shrink-and-budget
-            // ear-clip — the source of silently invisible fills — with a full triangulation
-            // of the true ring.
+            // Runs after vanilla Game.Areas.GeometrySystem (Modification2B) and replaces its
+            // shrink-and-budget ear clipping, which can leave fills invisible, with a full
+            // triangulation of the real outline.
             updateSystem.UpdateAt<MarkingAreaTriangulationSystem>(SystemUpdatePhase.Modification2B);
 
-            // Stage 5d: React panel bridge. UISystemBase wants UIUpdate phase.
             updateSystem.UpdateAt<TownRoadLaneUISystem>(SystemUpdatePhase.UIUpdate);
-
-            // MarkingMeshRenderSystem (HDRP/Unlit + GameObject pipeline) kept as commented
-            // fallback in case ECS path reveals an unknown blocker. Source file stays in tree.
-            // updateSystem.UpdateAt<MarkingMeshRenderSystem>(SystemUpdatePhase.Rendering);
-            // updateSystem.UpdateAt<UserPairEmissionDumpSystem>(SystemUpdatePhase.GameSimulation);
         }
 
         public void OnDispose()

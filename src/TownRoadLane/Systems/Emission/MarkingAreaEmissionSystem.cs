@@ -13,29 +13,15 @@ using GameAreas = Game.Areas;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Per-node MarkingArea → vanilla Game.Areas.Area emitter. Mirrors
-    /// <see cref="MarkingSegmentEmissionSystem"/>: builds the "wanted" set of (host node,
-    /// area index) keys from MarkingArea buffers, then diffs against the set of already-spawned
-    /// area entities (tagged with <see cref="TRLAreaLink"/>). Adds whatever's missing, deletes
-    /// whatever's stale.
+    /// Keeps one vanilla Game.Areas.Area surface entity (tagged <see cref="TRLAreaLink"/>) per
+    /// visible piece of every <see cref="MarkingArea"/>, the same way
+    /// <see cref="MarkingSegmentEmissionSystem"/> handles lines: missing ones are spawned, stale
+    /// ones or ones whose style changed are deleted. The Owner is the host node, so deleting the
+    /// node deletes its fills.
     ///
-    /// Why the diff-by-tag pattern instead of "store the spawned Entity in a buffer on the host
-    /// node": ECB.CreateEntity returns a deferred placeholder Entity. The real Entity only
-    /// exists after Playback. Stashing the placeholder in a buffer means
-    /// EntityManager.Exists(...) returns false next tick → we re-spawn every frame → infinite
-    /// loop + FPS death. Tagging the spawned entity itself dodges the deferred-entity trap.
-    ///
-    /// Spawn template (validated by Area Bucket — see project-areas-feature memory):
-    ///   Entity area = ecb.CreateEntity(surfacePrefabAreaData.m_Archetype);
-    ///   ecb.SetComponent(area, new PrefabRef(surfacePrefab));
-    ///   ecb.AddComponent(area, new Owner(hostNode));        // cascades delete when node dies
-    ///   ecb.AddComponent(area, new Area(AreaFlags.Complete));
-    ///   ecb.AddComponent(area, new TRLAreaLink { node, areaIndex });
-    ///   var nodeBuf = ecb.AddBuffer&lt;Node&gt;(area);
-    ///   foreach (float3 v in sampledPolygon) nodeBuf.Add(new Node(v, float.MinValue));
-    ///
-    /// Vanilla Game.Areas.GeometrySystem auto-triangulates when AreaFlags.Complete is set and
-    /// Triangle buffer is empty — we don't fill it ourselves.
+    /// The spawned entities are found through their tag rather than stored on the node:
+    /// ECB.CreateEntity returns a placeholder that is only valid until Playback, so a stored
+    /// reference would never exist on the next tick and the fill would respawn every frame.
     /// </summary>
     public partial class MarkingAreaEmissionSystem : GameSystemBase
     {
@@ -46,16 +32,12 @@ namespace TownRoadLane
         private PrefabSystem _prefabSystem;
         private TerrainSystem _terrainSystem;
 
-        // Phase 6d: style → SurfacePrefab name catalogue. styleId 0 stays "Solid Concrete" so
-        // existing 6c areas keep rendering unchanged. G87 entries are best-effort — if the user
-        // doesn't have G87 installed those slots fall back to the solid concrete prefab.
+        // styleId to SurfacePrefab name. styleId is saved with each area, so slots are never
+        // renumbered: a retired slot keeps an empty name (never resolves, spawns concrete, hidden
+        // from the UI). G87 slots fall back to concrete when the pack is not installed.
         //
-        // Inventory verified by AreasPrototypeSystem dump 2026-05-19:
-        //   - "Concrete Surface 01" : vanilla, prio=-97 layer=Terrain
-        //   - "G87 UK Road Markings Misc G87 UK Junction Box Surface" : prio=4
-        //     layer=Terrain,Roads,Buildings,Other — renders OVER road markings
-        //   - G87 stripe surfaces use layer=Roads + prio=-10 → render on roads but UNDER markings
-        //   - G87 bike/bus lane surfaces use layer=Terrain[,Roads] + prio=-5
+        // Render order: the G87 junction box (priority 4, all layers) draws over road markings,
+        // G87 stripes (Roads layer, priority -10) draw on roads but under markings.
         private static readonly string[] kStyleSurfaceNames = new[]
         {
             "Concrete Surface 01",                                                                              // 0 Solid
@@ -65,14 +47,6 @@ namespace TownRoadLane
             "G87 Road Markings SC Misc G87 Stripes 1to1 30cm Yellow Surface",                                    // 4 Yellow Stripes dense
             "G87 UK Road Markings Misc G87 CS2 Green Bike Lane UM Surface",                                      // 5 Green bike
             "G87 UK Road Markings Misc G87 CS2 Red Bus Lane UM Surface",                                         // 6 Red bus
-            // Slots 7-13: RESERVED (dead vanilla-surface experiment, 2026-07-16). Vanilla
-            // grass/sand/pavement/tiles could not be made to render on intersections — every
-            // spawned fill fell back to the grey "Missing Area" prefab no matter what
-            // (decal layer/priority patches, road-capable template material with transplanted
-            // textures, post-load Created re-registration). Full autopsy in project memory
-            // (cs2-vanilla-surface-dead-end). styleId is serialized identity — the numbers
-            // stay burned; empty string = disabled slot (never resolves, spawns concrete,
-            // hidden from UI).
             "",                                                                                                  // 7 (reserved: Grass)
             "",                                                                                                  // 8 (reserved: Grass, dark)
             "",                                                                                                  // 9 (reserved: Sand)
@@ -81,13 +55,8 @@ namespace TownRoadLane
             "",                                                                                                  // 12 (reserved: Tiles 2)
             "",                                                                                                  // 13 (reserved: Tiles 3)
             "G87 Vanilla Asphalt Pavement G87 VA Surface URM Surface",                                           // 14 Asphalt patch (layer=Terrain,Roads)
-            // Vanilla-surface revival (2026-07-19): these prefabs are built at runtime by
-            // VanillaSurfaceLateClone on a LIVE frame — the timing the 2026-07-16 attempts
-            // missed (see the slot 7-13 comment above). Confirmed rendering on intersections.
+            // Registered at runtime by VanillaSurfaceLateClone.
             VanillaSurfaceLateClone.kCloneGrass,                                                                 // 15 Grass
-            // Slot 16 was the one-day material-variant comparison specimen ("TRL Grass
-            // Surface B", template material + transplanted textures). It rendered identically
-            // to 15 and was retired the same day — reserved, like 7-13.
             "",                                                                                                  // 16 (reserved: Grass variant B)
             VanillaSurfaceLateClone.kCloneGrassDark,                                                             // 17 Grass, dark
             VanillaSurfaceLateClone.kCloneSand,                                                                  // 18 Sand
@@ -99,13 +68,13 @@ namespace TownRoadLane
         public const int kStyleCount = 23;
         public const int kStyleSolidConcrete = 0;
 
-        /// <summary>False for reserved (disabled) catalogue slots — they never resolve, are
-        /// hidden from the UI, and the U-hotkey cycle skips them.</summary>
+        /// <summary>False for retired slots: they never resolve, are hidden from the UI and are
+        /// skipped by the U-hotkey cycle.</summary>
         public static bool IsStyleEnabled(int id)
             => id >= 0 && id < kStyleCount && !string.IsNullOrEmpty(kStyleSurfaceNames[id]);
 
-        /// <summary>Next enabled style after <paramref name="current"/>, wrapping — the
-        /// U-hotkey cycle. Falls back to concrete if somehow nothing is enabled.</summary>
+        /// <summary>Next enabled style after <paramref name="current"/>, wrapping around; used by
+        /// the U-hotkey cycle.</summary>
         public static int NextEnabledStyle(int current)
         {
             for (int step = 1; step <= kStyleCount; step++)
@@ -116,26 +85,26 @@ namespace TownRoadLane
             return kStyleSolidConcrete;
         }
 
-        // Resolved lazily — G87 surfaces show up ~10 s after game load. Entity.Null = retry next tick.
+        // Resolved lazily: G87 surfaces appear some seconds after load. Entity.Null means retry.
         private Entity[] _stylePrefabEntities = new Entity[kStyleCount];
 
-        // Unresolved-style diagnostic — see TryResolveAllStyles. Surface prefabs keep importing
-        // for minutes after load (+1-2 a second with pauses up to ~11 s, observed 2026-09 on
-        // 1.6.2), so the dump waits until the count has not changed for kSurfaceSettleSeconds.
-        // Real time, not ticks: the pause length doesn't scale with frame rate.
+        // Unresolved-style report, see TryResolveAllStyles. Surface prefabs keep importing for
+        // minutes after load, with pauses of several seconds, so the report waits until the count
+        // has not changed for kSurfaceSettleSeconds. Real time, because the pauses do not scale
+        // with frame rate.
         private int _lastSurfaceCount = -1;
         private float _surfaceCountChangedAt;
         private int _lastSurfaceDumpCount = -1;
         private const float kSurfaceSettleSeconds = 60f;
-        // Diagnostics (2.4.2): the three OnUpdate early-outs and the concrete fallback used to
-        // be completely silent — a user whose fills never appear had nothing in the log at all.
+        // Warnings for the OnUpdate early-out and the concrete fallback; without them a user
+        // whose fills never appear has nothing in the log.
         private int _blockedTicks;
         private const int kBlockedWarnTicks = 600; // matches kOrphanSweepMaxWaitTicks scale
         private readonly HashSet<int> _fallbackWarned = new HashSet<int>();
 
-        // Post-load orphan sweep (2.2.0 migration): pre-2.2.0 saves contain our spawned fills
-        // WITHOUT the TRLAreaLink tag (it wasn't serialized), one stacked copy per save/load
-        // cycle. Runs once per load, after styles resolve (or after the patience budget).
+        // Older saves contain our fills without the TRLAreaLink tag (it was not serialized), one
+        // stacked copy per save/load cycle. Swept once per load, after styles resolve or after
+        // the wait budget runs out.
         private bool _orphanSweepPending;
         private int _orphanSweepPatience;
         private const int kOrphanSweepMaxWaitTicks = 600; // ≈ tens of seconds of sim ticks
@@ -174,8 +143,8 @@ namespace TownRoadLane
                 !EntityManager.GetComponentData<AreaData>(solidEntity).m_Archetype.Valid ? "style 0 archetype invalid" : null;
             if (blocked != null)
             {
-                // Assets keep importing ~10 s after load, so a short block is normal — but a
-                // persistent one disables ALL fills, which used to happen in total silence.
+                // A short block right after load is normal (assets are still importing), but a
+                // persistent one disables every fill.
                 if (++_blockedTicks == kBlockedWarnTicks)
                     log.Warn($"[area-emission] BLOCKED for {kBlockedWarnTicks} ticks: {blocked} — no fills of any style will spawn");
                 return;
@@ -185,8 +154,8 @@ namespace TownRoadLane
 
             if (_orphanSweepPending)
             {
-                // Wait for the full style set (G87 resolves lazily ~10 s after load) so G87
-                // orphans are recognisable too — but not forever, G87 may be missing.
+                // Wait for the full style set so G87 orphans are recognised too, but not
+                // forever: G87 may not be installed.
                 bool allResolved = true;
                 for (int i = 0; i < kStyleCount; i++) if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) { allResolved = false; break; }
                 if (allResolved || --_orphanSweepPatience <= 0)
@@ -196,10 +165,8 @@ namespace TownRoadLane
                 }
             }
 
-            // 1. Build wanted set: (node, areaIndex, pieceIndex) for every visible piece of every
-            //    visible area. Pieces come from MarkingAreaTopologySystem; their vertex positions
-            //    are pre-computed in MarkingAreaPieceVertex so emission doesn't have to re-resolve
-            //    lane endpoints / corners per tick.
+            // Wanted set: (node, areaIndex, pieceIndex) for every visible piece of every visible
+            // area. Pieces and their vertices come precomputed from MarkingAreaTopologySystem.
             var wanted = new HashSet<(Entity, int, int)>();
             var wantedStyle = new Dictionary<(Entity, int, int), int>();
             using (var nodes = _nodesWithAreas.ToEntityArray(Allocator.Temp))
@@ -228,7 +195,7 @@ namespace TownRoadLane
 
             var ecb = new EntityCommandBuffer(Allocator.Temp);
 
-            // 2. Diff existing area entities against wanted.
+            // Delete stale, duplicate and restyled fills.
             int deleted = 0;
             using (var existing = _ourAreas.ToEntityArray(Allocator.Temp))
             {
@@ -245,7 +212,7 @@ namespace TownRoadLane
                         {
                             var curPrefab = EntityManager.GetComponentData<PrefabRef>(e).m_Prefab;
                             var wantPrefab = ResolveStylePrefabEntity(wantStyleId, solidEntity);
-                            if (curPrefab != wantPrefab) keep = false;  // style changed → respawn
+                            if (curPrefab != wantPrefab) keep = false;
                         }
                     }
                     if (!keep)
@@ -259,8 +226,7 @@ namespace TownRoadLane
                 }
             }
 
-            // 3. Spawn anything left in wanted. Vertex positions come straight from the
-            //    pre-computed MarkingAreaPieceVertex buffer — no per-tick endpoint resolution.
+            // Spawn the rest.
             int spawned = 0;
             if (wanted.Count > 0)
             {
@@ -275,8 +241,7 @@ namespace TownRoadLane
                     var pieceVerts = EntityManager.GetBuffer<MarkingAreaPieceVertex>(node, isReadOnly: true);
                     if (areaIdx < 0 || areaIdx >= areas.Length) continue;
 
-                    // Find the piece header in the buffer (pieces are not addressed by their
-                    // own index in the buffer — pieceIndex is the per-area dense counter).
+                    // pieceIndex counts pieces within one area; it is not a buffer index.
                     MarkingAreaPiece pd = default;
                     bool found = false;
                     for (int i = 0; i < pieces.Length; i++)
@@ -317,17 +282,16 @@ namespace TownRoadLane
             }
         }
 
-        /// <summary>One-shot post-load migration: delete untagged copies of OUR fills left by
-        /// pre-2.2.0 saves (TRLAreaLink wasn't serialized then — the game kept the vanilla
-        /// area entity but dropped the tag; every save/load stacked one more copy).
+        /// <summary>Deletes untagged copies of our fills left in older saves, where the game kept
+        /// the area entity but dropped the unserialized TRLAreaLink tag, adding one more copy
+        /// on every save/load.
         ///
-        /// An untagged vanilla area counts as ours when (a) its prefab is one of our style
-        /// surfaces AND (b) the bulk of its ring nodes lie on one of our piece rings (60% of
-        /// nodes within 0.7 m — covers the envelope→true-contour ring change at sharp tips).
-        /// A hand-placed player surface of the same prefab won't trace our contour.</summary>
+        /// An untagged area counts as ours when its prefab is one of our style surfaces and at
+        /// least 60% of its nodes lie within 0.7 m of our piece outlines (the tolerance covers
+        /// outline changes at sharp tips). A player-placed surface of the same prefab does not
+        /// follow our outlines.</summary>
         private void SweepOrphanFills()
         {
-            // All piece-ring points of all marked nodes, one flat list (tiny in practice).
             var ringPoints = new List<float3>(256);
             using (var nodes = _nodesWithAreas.ToEntityArray(Allocator.Temp))
             {
@@ -381,7 +345,7 @@ namespace TownRoadLane
                             if (dx * dx + dz * dz < kOnContourSq) { onContour++; break; }
                         }
                     }
-                    if (onContour * 10 < areaNodes.Length * 6) continue; // < 60% — not ours
+                    if (onContour * 10 < areaNodes.Length * 6) continue; // under 60%: not ours
                     ecb.AddComponent<Deleted>(e);
                     removed++;
                 }
@@ -411,8 +375,8 @@ namespace TownRoadLane
                     if (sp.name == kStyleSurfaceNames[s])
                     {
                         _stylePrefabEntities[s] = ents[i];
-                        // prio/layer decide whether the surface can render on top of road
-                        // geometry at all (layer without Roads → fill is drawn under the road).
+                        // Priority and layer decide whether the fill can draw on the road at
+                        // all: without the Roads layer it ends up under the road surface.
                         string renderInfo = sp.TryGet<RenderedArea>(out var ra) && ra != null
                             ? $" prio={ra.m_RendererPriority} layer={ra.m_DecalLayerMask}"
                             : " (no RenderedArea)";
@@ -421,14 +385,12 @@ namespace TownRoadLane
                 }
             }
 
-            // Diagnostic: G87 updates have renamed/restructured their surface prefabs before
-            // (v1.3 merged the UK set into the main package), which silently breaks the
-            // exact-name match above and drops every fill back to concrete. While any style is
-            // still unresolved, log the missing styles plus the runtime names of all G87 surface
-            // prefabs — the log then contains exactly what kStyleSurfaceNames needs to say.
-            // Only after the surface-prefab count has settled, once per settled count: 2.4.2
-            // dumped the full list on EVERY count change, and with minutes of asynchronous
-            // import that made ~10k lines per session (flagged by Skyve as "extreme logging").
+            // G87 updates have renamed their surface prefabs before, which silently breaks the
+            // exact-name match above and turns every fill into concrete. While a style is still
+            // unresolved, log the missing styles and the runtime names of all G87 surfaces, which
+            // is exactly what kStyleSurfaceNames needs. Only once per settled surface count:
+            // logging on every count change during the long asynchronous import floods the log
+            // and gets the mod flagged by Skyve.
             bool stillMissing = false;
             for (int i = 0; i < kStyleCount; i++)
                 if (IsStyleEnabled(i) && _stylePrefabEntities[i] == Entity.Null) { stillMissing = true; break; }
@@ -492,12 +454,12 @@ namespace TownRoadLane
             var nodeBuf = ecb.AddBuffer<GameAreas.Node>(e);
             for (int i = 0; i < positions.Count; i++)
             {
-                // Anchor positions carry the true road-surface height. On ground-level junctions
-                // we keep the vanilla terrain-follow convention (elevation = float.MinValue +
-                // snap to terrain) so terraforming under the fill keeps working. On elevated
-                // decks (bridges, ramps) that snap would drop the fill to the ground below the
-                // structure — keep the deck Y and store the height offset in m_Elevation:
-                // GroundHeightSystem only re-snaps nodes whose elevation == float.MinValue.
+                // Positions carry the real road surface height. At ground level the vanilla
+                // terrain-follow convention (elevation float.MinValue, snapped to terrain) keeps
+                // the fill on the ground when it is terraformed. On bridges and ramps that snap
+                // would drop the fill to the ground below, so the deck height is kept and the
+                // offset goes into m_Elevation: GroundHeightSystem only re-snaps nodes whose
+                // elevation is float.MinValue.
                 float ground = Game.Simulation.TerrainUtils.SampleHeight(ref terrainHeights, positions[i]);
                 float dy = positions[i].y - ground;
                 if (dy > 0.75f)

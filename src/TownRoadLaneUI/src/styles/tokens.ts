@@ -1,50 +1,40 @@
-// Design tokens — single source of truth for colors, spacing, typography, and
-// motion across the TownRoadLane UI. TS object so React components and styled
-// templates import the same values.
+// Design tokens shared by the React components and the styled templates.
 //
-// Stage 5e (native look): surface/text/accent tokens now resolve to the GAME's
-// CSS custom properties (var(--panelColorDark) etc., defined by CS2's root
-// stylesheet and swapped by the game per theme/accent setting). Referencing
-// game-defined vars from styled-components values is the proven pattern from
-// Traffic / RoadBuilder / TTE — the earlier "no var() indirection" rule was
-// about OUR OWN custom props declared in SCSS (those did resolve empty).
-// cohtml quirk: var(--x, fallback) fallbacks are IGNORED — every var used here
-// must exist in the game stylesheet (verified against Cities2_Data/Content/
-// Game/UI/index.css). Tokens kept as literals either have no stable game
-// counterpart (alpha overlays) or are fed into SVG presentation attributes
-// (Icon stroke=...), where var() does not resolve — those use the game's
-// palette values verbatim.
+// Text, accent and blur tokens point at the game's own CSS custom properties (defined in
+// Cities2_Data/Content/Game/UI/index.css), so they follow the player's theme and accent
+// setting. Game-defined vars work from styled-components values, as in Traffic, Road
+// Builder and TTE; custom props declared in our own SCSS resolve empty.
+// cohtml ignores var(--x, fallback) fallbacks, so every var used here must exist in the
+// game stylesheet. The remaining literals either have no stable game counterpart (alpha
+// overlays) or feed SVG presentation attributes (Icon stroke), where var() does not
+// resolve; those copy the game's palette values.
 
 export const tokens = {
-  // ── Colors ────────────────────────────────────────────────────────────
-  // Surfaces. Panel bg is a near-opaque literal in the game's navy family —
-  // NOT var(--panelColorDark): the game runs that at ~0.7 opacity, which reads
-  // fine on sparse info panels but washes out a dense tool panel over bright
-  // terrain (user feedback 2026-07-14; TTE fights the same issue by locally
-  // overriding --panelOpacityDark to 0.85+). Theme-following stays in accent
-  // and text tokens. Rows are tinted by alpha-overlaying white so they pick
-  // up the background hue automatically.
+  // Colors.
+  // The panel background is a near-opaque literal in the game's navy family rather than
+  // var(--panelColorDark): the game runs that at ~0.7 opacity, which washes out a dense
+  // tool panel over bright terrain (TTE works around the same thing by overriding
+  // --panelOpacityDark). Rows are tinted with white overlays so they pick up the
+  // background hue.
   colorPanelBg:        "rgba(20, 26, 36, 0.96)",
-  // Near-opaque dark surface for floating layers (dropdown menus, tooltips)
-  // that can overlap OTHER UI — glass + blur there smears the content behind
-  // into unreadable colour blotches, so they get a solid card instead.
+  // Solid surface for floating layers (dropdown menus, tooltips) that overlap other UI:
+  // glass with blur smears the content behind them into unreadable blotches.
   colorSurfaceSolid:   "rgba(24, 30, 40, 0.98)",
   colorRowBg:          "rgba(255, 255, 255, 0.035)",
   colorRowBgHover:     "rgba(255, 255, 255, 0.08)",
   colorRowBgActive:    "rgba(70, 140, 255, 0.22)",
 
-  // Button fills — subtle solid fill idle → brighter on hover. Filled (not
-  // ghost/outline) is what makes controls read as native CS2 buttons.
+  // Filled rather than outlined buttons, so they read as native CS2 controls.
   colorBtnBg:          "rgba(255, 255, 255, 0.07)",
   colorBtnBgHover:     "rgba(255, 255, 255, 0.14)",
   // Dark text for accent-filled controls (game --focusedTextColorDark).
   colorTextOnAccent:   "#141B22",
 
-  // Glassmorphism blur the game applies to its own panels — attach as
-  // `backdrop-filter` wherever colorPanelBg is the surface.
+  // The blur the game applies to its own panels; use as `backdrop-filter` wherever
+  // colorPanelBg is the surface.
   backdropBlur:        "var(--panelBlur)",
 
-  // Borders. Soft = idle separators. Mid = interactive elements. Strong = focus.
+  // Borders: soft for separators, mid for interactive elements, strong for focus.
   colorBorderSoft:     "rgba(255, 255, 255, 0.10)",
   colorBorderMid:      "rgba(255, 255, 255, 0.18)",
   colorBorderStrong:   "rgba(255, 255, 255, 0.35)",
@@ -56,14 +46,12 @@ export const tokens = {
   colorTextDim:        "rgba(240, 251, 255, 0.4)",
 
   // Accents. accentColorNormal follows the player's accent-color setting.
-  // cohtml rejects var() inside SHORTHAND declarations (background, border,
-  // border-color, border-radius — Player.log: "Custom CSS expressions are not
-  // supported in shorthand declaration") — colorAccent may only be used in
-  // true longhands: color, background-color. colorAccentSoft is used in
-  // border shorthands, so it's the literal value of the game's single-valued
-  // --accentColorLightHighlight (#9ee2fc80). Status colors are the game's
-  // literal values (single-valued in index.css, and they must stay literals —
-  // they feed Icon stroke attributes).
+  // cohtml rejects var() inside shorthand declarations (background, border, border-color,
+  // border-radius; Player.log says "Custom CSS expressions are not supported in shorthand
+  // declaration"), so colorAccent may only go into longhands such as color and
+  // background-color. colorAccentSoft is used in border shorthands, so it is the literal
+  // value of the game's --accentColorLightHighlight (#9ee2fc80). Status colors are
+  // literals because they feed Icon stroke attributes.
   colorAccent:         "var(--accentColorNormal)",
   colorAccentSoft:     "rgba(158, 226, 252, 0.5)",
   colorAccentDim:      "rgba(90, 170, 255, 0.18)",
@@ -72,12 +60,10 @@ export const tokens = {
   colorSuccess:        "#8bdb46",
   colorWarning:        "#ffa42d",
 
-  // ── Spacing ───────────────────────────────────────────────────────────
-  // cohtml's rem unit is the game-coordinate pixel, not 1/16 root font size.
-  // 1rem == 1px when the UI is at default scale; the game scales rem up/down
-  // based on display DPI + the user's UI scale setting. Using rem everywhere
-  // means our panel respects that setting automatically (px is fixed and ends
-  // up wrong on hi-DPI / 4K).
+  // Spacing.
+  // In cohtml 1rem is one game-coordinate pixel, not 1/16 of the root font size. The
+  // game scales rem with display DPI and the UI scale setting, so rem everywhere keeps
+  // the panel in step with that setting; px stays fixed and is wrong on 4K.
   space1:  "4rem",
   space2:  "8rem",
   space3:  "12rem",
@@ -85,29 +71,19 @@ export const tokens = {
   space5:  "20rem",
   space6:  "24rem",
 
-  // ── Border radii ──────────────────────────────────────────────────────
-  // All literal: border-radius is a shorthand, and cohtml rejects var() in
-  // shorthands (see the accent comment above), so following the game's
-  // --panelRadius would take four corner longhands for marginal gain.
+  // Border radii. Literals, because border-radius is a shorthand and cohtml rejects var()
+  // there; following --panelRadius would take four corner longhands.
   radiusSm: "3rem",
   radiusMd: "4rem",
   radiusLg: "6rem",
   radiusXl: "8rem",
 
-  // ── Typography ────────────────────────────────────────────────────────
-  // DO NOT set font-family on any of our styled-components. cohtml does not
-  // have Arial / sans-serif / monospace / Roboto bundled — the ONLY available
-  // font is the one CS2 itself loads (the game's SDF font, which contains
-  // Cyrillic / CJK / etc.). Any concrete family override — even the generic
-  // "monospace" — falls through to empty squares.
-  //
-  // Leaving font-family unset means cohtml inherits the CS2 root font
-  // automatically. For aligned-digit columns (segment lengths, counts) use
-  // `font-variant-numeric: tabular-nums` on the styled component instead of
-  // switching to monospace.
-  //
-  // If a future polish pass really needs a custom face, the path is to bundle
-  // a .ttf via webpack + @font-face — but for now inheriting wins.
+  // Typography.
+  // Never set font-family. cohtml has no Arial, sans-serif, monospace or Roboto; the
+  // only font is the game's own SDF font (which covers Cyrillic, CJK and so on), and any
+  // family override, even the generic "monospace", renders as empty squares. For aligned
+  // digit columns use `font-variant-numeric: tabular-nums` instead of monospace. A custom
+  // face would have to be bundled as a .ttf through webpack and @font-face.
   fontSizeXs:  "10rem",
   fontSizeSm:  "11rem",
   fontSizeMd:  "12rem",
@@ -119,27 +95,22 @@ export const tokens = {
   lineHeightTight: "1.2",
   lineHeightBase:  "1.4",
 
-  // ── Motion ────────────────────────────────────────────────────────────
-  // Two speeds: fast for micro-interactions (hover, focus), normal for state
-  // changes (accordion expand, panel mount). cohtml supports basic CSS
-  // transitions but not all easing curves — sticking to ease/ease-out.
+  // Motion. Fast for hover and focus, normal for state changes. cohtml does not support
+  // every easing curve, so only ease and ease-out are used.
   transitionFast:   "0.1s ease",
   transitionNormal: "0.18s ease-out",
 
-  // ── Elevation ─────────────────────────────────────────────────────────
+  // Elevation.
   shadowSm: "0 2rem 8rem rgba(0, 0, 0, 0.5)",
   shadowMd: "0 4rem 20rem rgba(0, 0, 0, 0.5)",
   shadowLg: "0 8rem 32rem rgba(0, 0, 0, 0.6)",
 
-  // ── Layout constants ──────────────────────────────────────────────────
-  // Panel uses a fixed max-height in viewport units; calc() doesn't work in
-  // cohtml so we use a hard pixel value sized to leave the bottom toolbar
-  // visible. 800rem ≈ enough for most screens; the panel scrolls internally
-  // past that.
+  // Layout. calc() does not work in cohtml, so the panel's max height is a fixed value
+  // that leaves the bottom toolbar visible on most screens; the panel scrolls past it.
   panelWidth:     "300rem",
   panelMaxHeight: "800rem",
 
-  // ── Icon sizing ───────────────────────────────────────────────────────
+  // Icon sizes.
   iconSizeXs: "10rem",
   iconSizeSm: "12rem",
   iconSizeMd: "14rem",

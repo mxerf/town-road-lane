@@ -12,22 +12,14 @@ using UnityEngine;
 namespace TownRoadLane
 {
     /// <summary>
-    /// Builds the vanilla-surface fill styles (grass, sand, pavement, tiles — catalogue slots
-    /// 15+). Registers SurfacePrefab clones of vanilla decorative surfaces on a LIVE frame —
-    /// the way ExtraAssetsImporter registers every G87 surface (MainThreadDispatcher updater
-    /// fires once the game is out of Booting/Loading,
-    /// then PrefabSystem.AddPrefab on the main thread). Our 2026-07-16 attempts created clones
-    /// during save loading, where the one-frame Created window of the area batch system
-    /// (query {All: RenderedAreaData, Any: Created|Deleted}) elapses before rendering ticks —
-    /// every fill fell back to the grey 'Missing Area' prefab. See cs2-vanilla-surface-dead-end
-    /// project memory for the full autopsy and the EAI code walk that produced this recipe.
+    /// Builds the vanilla-surface fill styles (grass, sand, pavement, tiles; style slots 15+) by
+    /// registering copies of vanilla decorative SurfacePrefabs. Each copy gets its own instance of
+    /// the vanilla material, the vanilla renderer priority and the Roads decal layer added.
     ///
-    /// Confirmed working in-game 2026-07-19. Every clone is a faithful copy: the vanilla
-    /// material duplicated as-is, vanilla renderer priority, decal mask |= Roads. (A second
-    /// material variant — the AreasConfigurationPrefab template with transplanted textures —
-    /// was verified to render identically and retired for being the more convoluted path;
-    /// see cs2-vanilla-surface-dead-end memory.) Style catalogue slots 15+ point at these
-    /// names — reachable via the U-cycle and the area style dropdowns.
+    /// Registration has to happen on a regular frame after loading, the same way
+    /// ExtraAssetsImporter registers G87 surfaces. Clones created while a save is loading render
+    /// as the grey 'Missing Area' prefab: the area batch system only picks up prefabs in their
+    /// Created frame, and that frame passes before rendering starts.
     /// </summary>
     public static class VanillaSurfaceLateClone
     {
@@ -43,8 +35,7 @@ namespace TownRoadLane
 
         private const string kSourceGrass = "Grass Surface 01";
 
-        // source vanilla SurfacePrefab name → our clone name (variant A).
-        // Vanilla inventory (29 prefabs) verified by the AreasPrototypeSystem dump 2026-07-19.
+        // Vanilla SurfacePrefab name, clone name.
         private static readonly string[,] kVariantAClones =
         {
             { kSourceGrass,         kCloneGrass },
@@ -58,8 +49,8 @@ namespace TownRoadLane
 
         private static World _world;
         private static bool _done;
-        // Gate diagnostics (2.4.2): a gate that never passes used to leave zero log lines —
-        // no clones, every clone-backed fill style silently falling back to concrete.
+        // Without a warning, a gate that never opens leaves no trace in the log: the clone-backed
+        // fill styles just fall back to concrete.
         private static int _gateFrames;
         private static bool _gateWarned;
         private const int kGateWarnFrames = 3600; // ≈ 1 min at 60 fps
@@ -70,10 +61,9 @@ namespace TownRoadLane
             MainThreadDispatcher.RegisterUpdater(TryInitialize);
         }
 
-        // Runs every frame on the main thread until it returns true. Mirrors ExtraLib's
-        // MainSystem.Initialize gate, plus GameMode.Game so the launcher's "Continue" path
-        // (which skips the main menu — the known way to break EAI/G87 imports) still gets the
-        // clones: an in-game frame is equally inside the live render loop.
+        // Runs every frame on the main thread until it returns true. Same gate as ExtraLib's
+        // MainSystem.Initialize, plus GameMode.Game: the launcher's "Continue" button skips the
+        // main menu, and an in-game frame works just as well for registration.
         private static bool TryInitialize()
         {
             if (_done) return true;
@@ -109,7 +99,6 @@ namespace TownRoadLane
             var prefabSystem = _world.GetOrCreateSystemManaged<PrefabSystem>();
             log.Info($"[late-clone] creating vanilla surface clones (gameMode={GameManager.instance.gameMode})");
 
-            // ---- Variant A set: faithful clones, own copy of each vanilla material ----
             for (int i = 0; i < kVariantAClones.GetLength(0); i++)
             {
                 string sourceName = kVariantAClones[i, 0];
@@ -147,10 +136,10 @@ namespace TownRoadLane
             return true;
         }
 
-        /// <summary>Fresh SurfacePrefab with the source's own serialized fields (m_Color etc.)
-        /// and an independent RenderedArea whose fields are copied one-to-one. DeclaredOnly
-        /// everywhere so PrefabBase/ComponentBase plumbing (components list, prefab backrefs)
-        /// is never shared with the vanilla original.</summary>
+        /// <summary>New SurfacePrefab with the source's serialized fields and its own RenderedArea.
+        /// Only fields declared on these types are copied, so the PrefabBase/ComponentBase
+        /// internals (component list, prefab back-references) are never shared with the
+        /// vanilla original.</summary>
         private static SurfacePrefab MakeClone(SurfacePrefab src, RenderedArea srcRa, string name)
         {
             var clone = ScriptableObject.CreateInstance<SurfacePrefab>();
@@ -169,8 +158,8 @@ namespace TownRoadLane
                 f.SetValue(dst, f.GetValue(src));
         }
 
-        /// <summary>Keep the material's own decal-layer float in step with the component field —
-        /// EAI's importers treat the two as one value; unclear which one the batch system trusts.</summary>
+        /// <summary>Keeps the material's decal-layer property equal to the component field.
+        /// ExtraAssetsImporter always sets both, so this does too.</summary>
         private static void SyncMaterialLayerMask(RenderedArea ra)
         {
             if (ra.m_Material != null && ra.m_Material.HasProperty("colossal_DecalLayerMask"))

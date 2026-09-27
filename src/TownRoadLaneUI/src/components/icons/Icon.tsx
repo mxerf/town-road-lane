@@ -1,15 +1,11 @@
-// Base SVG icon wrapper. cohtml does not reliably propagate `color` from a
-// parent element down into SVG children (currentColor resolves to black
-// regardless of CSS `color`), so we pass an explicit `color` prop and use it
-// directly on stroke/fill. Default is white at 90% alpha — readable on every
-// dark surface in the panel. Callers wanting a tint pass `color="..."`.
+// Base SVG icon. The colour is an explicit prop because cohtml resolves currentColor inside
+// SVG to black regardless of the parent's CSS `color`.
 
 import { SVGProps } from "react";
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "ref" | "color"> {
   size?: number | string;
-  /** Explicit colour for stroke/fill. Defaults to a near-white tint suitable
-   * for dark panel surfaces. Pass any CSS colour string. */
+  /** Stroke colour, any CSS colour string. Defaults to near-white for the dark panel. */
   color?: string;
   title?: string;
 }

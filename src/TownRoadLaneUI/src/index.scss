@@ -1,16 +1,8 @@
-// Reset only — every visual rule for TownRoadLane now lives in styled-components
-// (see src/mods/panel.styles.ts). cohtml has subtle CSS bugs (nested var(),
-// gap, calc) that broke our previous SCSS-based stylesheet. styled-components
-// keeps the rules collocated with the components that use them and dodges
-// every one of those bugs by inlining values at template-literal time.
-//
-// This file exists so webpack's MiniCssExtractPlugin still emits a CSS file,
-// which CSSPresencePlugin checks for and which the game loads alongside the
-// .mjs bundle. Removing it entirely would also be fine but requires deleting
-// the plugin and changing the load pipeline.
+// All styling lives in styled-components (src/mods/panel.styles.ts), which avoids cohtml's
+// CSS quirks with nested var(), gap and calc. This file only keeps a CSS asset in the build
+// for CSSPresencePlugin and the game's loader.
 
 .trl-anchor {
-  // Placeholder selector — never used in markup. Just keeps the CSS file
-  // non-empty so the loader emits an asset.
+  // Unused placeholder so the emitted CSS file is not empty.
   display: none;
 }

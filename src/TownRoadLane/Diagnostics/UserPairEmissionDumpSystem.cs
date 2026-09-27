@@ -11,14 +11,13 @@ using SubLane = Game.Net.SubLane;
 namespace TownRoadLane.Diagnostics
 {
     /// <summary>
-    /// Phase 4 step 2 diagnostic: every 60 frames, count how many sublane entities reference
-    /// our EdgeLineClone prefab and log per-entity details for the first few. Answers the
-    /// "I committed pairs but see no markings" question by separating these failure modes:
-    ///   - count == 0 → EmitUserPairs never created entities (prefab Entity stale, gate path skipped, etc.).
-    ///   - count > 0, no Owner/Curve → archetype is wrong.
-    ///   - count > 0, has SecondaryLane + Owner + Curve → entities exist but vanilla rendering
-    ///     still ignores them. Means the missing piece is downstream (Deleted being added,
-    ///     missing CullingInfo, wrong archetype slot, etc.).
+    /// Every 60 frames, counts the secondary-lane entities that use the EU/NA edge-line clone
+    /// prefabs and logs the components of the first few. Tells apart the cases where committed
+    /// markings do not show up:
+    ///   - count is 0: no lane entities were emitted;
+    ///   - Owner or Curve missing: the archetype is wrong;
+    ///   - everything present: the entities exist and the problem is further down the
+    ///     rendering path (Deleted added, culling data missing).
     /// </summary>
     public partial class UserPairEmissionDumpSystem : GameSystemBase
     {
@@ -32,7 +31,6 @@ namespace TownRoadLane.Diagnostics
         {
             base.OnCreate();
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
-            // Sublane entities have PrefabRef and Game.Net.SecondaryLane component if they're marking lanes.
             _allSubLanesQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[] { ComponentType.ReadOnly<PrefabRef>(), ComponentType.ReadOnly<Game.Net.SecondaryLane>() },
@@ -44,7 +42,6 @@ namespace TownRoadLane.Diagnostics
         {
             if ((++_ticks % 60) != 0) return;
 
-            // Resolve our clone prefab entities by name.
             Entity euClone = Entity.Null, naClone = Entity.Null;
             var lanePrefabQuery = GetEntityQuery(ComponentType.ReadOnly<PrefabData>(), ComponentType.ReadOnly<NetLaneData>());
             var ents = lanePrefabQuery.ToEntityArray(Allocator.Temp);
@@ -56,7 +53,6 @@ namespace TownRoadLane.Diagnostics
             }
             ents.Dispose();
 
-            // Walk every secondary-lane sublane in the world, count those whose PrefabRef points at our clone.
             var all = _allSubLanesQuery.ToEntityArray(Allocator.Temp);
             int eu = 0, na = 0, dumpedSample = 0;
             for (int i = 0; i < all.Length; i++)

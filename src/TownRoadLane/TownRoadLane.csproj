@@ -9,27 +9,24 @@
 
 	<!--Imports must be after PropertyGroup block-->
 	<!-- Windows: the game's modding toolchain (references, Burst post-processing, deploy).
-	     Elsewhere: LocalRefs.props — reference-only compile against a local copy of the
-	     game assemblies (_managed/) for typecheck/IDE; no Burst, no deploy. -->
+	     Elsewhere: LocalRefs.props compiles against a local copy of the game assemblies
+	     (_managed/) for type checking only, without Burst or deploy. -->
 	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.props" Condition="'$(OS)' == 'Windows_NT'" />
 	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.targets" Condition="'$(OS)' == 'Windows_NT'" />
 	<Import Project="LocalRefs.props" Condition="'$(OS)' != 'Windows_NT'" />
 
-	<!-- Override the template's <LangVersion>9.0</LangVersion> from Mod.props (which is imported above
-	     and would otherwise win). Decompiled vanilla code uses C# 10 (file-scoped namespace) and
-	     C# 12 (primary constructors on structs). Runtime is still net48 / Mono — only the syntax
-	     surface is modern. -->
+	<!-- Overrides LangVersion 9.0 from Mod.props: the decompiled vanilla code uses C# 10
+	     file-scoped namespaces and C# 12 primary constructors on structs. The runtime is still
+	     net48 / Mono; only the syntax is newer. -->
 	<PropertyGroup>
 		<LangVersion>latest</LangVersion>
-		<!-- The portable .pdb ships to PDX next to the .dll, so absolute source paths from the
-		     build machine end up in every user's stack traces. PathMap keeps file:line intact
-		     but replaces the personal path with a neutral prefix. SourceLink (auto-embedded by
-		     the SDK) would still leak the raw local repo path in its JSON map key — off. -->
+		<!-- The .pdb ships next to the .dll, so build-machine paths would show up in users'
+		     stack traces. PathMap keeps file:line but replaces the local path with a neutral
+		     prefix. SourceLink is off because its JSON map would still contain the local path. -->
 		<PathMap>$(MSBuildProjectDirectory)=TownRoadLane</PathMap>
 		<EnableSourceLink>false</EnableSourceLink>
-		<!-- The SDK would append the build tree's git HEAD to the informational version. The
-		     Windows build tree is synced from the Mac by file copy, so its HEAD is unrelated
-		     to what is being built — a misleading hash. Plain ModVersion instead. -->
+		<!-- No git hash in the informational version: the Windows build tree is a file copy,
+		     so its HEAD does not match the sources being built. -->
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 	</PropertyGroup>
 
@@ -76,16 +73,14 @@
 		<Reference Include="Unity.Mathematics">
 			<Private>false</Private>
 		</Reference>
-		<!-- HDRP runtime — needed for HDMaterial.ValidateMaterial. Without that call, a
-		     freshly constructed Material from new Material(Shader.Find("HDRP/Unlit")) has
-		     unpopulated keywords/render-queue/stencil state and Graphics.DrawMesh silently
-		     renders nothing (all passes culled). Vanilla CS2 ships this assembly. -->
+		<!-- For HDMaterial.ValidateMaterial. A material created from Shader.Find("HDRP/Unlit")
+		     has no keywords, render queue or stencil state until validated, and Graphics.DrawMesh
+		     silently draws nothing. The game ships this assembly. -->
 		<Reference Include="Unity.RenderPipelines.HighDefinition.Runtime">
 			<Private>false</Private>
 		</Reference>
-		<!-- Stage 5d: React panel bridge needs cohtml.Net (View.ExecuteScript) and the
-		     UISystemBase / GetterValueBinding plumbing from Game's UI assembly. The latter
-		     comes in via the Game reference; the former needs an explicit assembly link. -->
+		<!-- The UI bridge needs cohtml.Net (View.ExecuteScript); the binding classes come with
+		     the Game reference. -->
 		<Reference Include="cohtml.Net">
 			<Private>false</Private>
 		</Reference>
@@ -117,44 +112,30 @@
 		<Compile Remove="Diagnostics\UserPairEmissionDumpSystem.cs" />
 	</ItemGroup>
 
-	<!-- NOTE on the startup NullReferenceException in UIModuleAsset.PostCreate: decompiling
-	     Colossal.IO.AssetDatabase showed the game parses the UI module manifest from the
-	     BANNER COMMENT inside the .mjs itself (Id/Author/Version/Dependencies lines) — NOT
-	     from mod.json. PostCreate then calls AddTags(m_UIModuleDependencies) unconditionally,
-	     which is null when the banner lacks a "Dependencies:" line. Fixed in the UI's
-	     webpack.config.js banner. The UI project's mod.json is inert for this either way; it
-	     stays in source for webpack (MOD.id output naming) and ships for PDX-tooling parity
-	     with TTE. -->
-
-	<!-- Single version source: ModVersion in PublishConfiguration.xml (the number PDX shows).
-	     The assembly version is stamped from it here and the UI module banner reads it in
-	     webpack.config.js — 2.4.3 shipped as assembly 1.0.0.0 with a UI module claiming 2.0.1. -->
+	<!-- ModVersion in PublishConfiguration.xml is the single version source: it sets the
+	     assembly version here, and webpack.config.js puts it in the UI module banner. -->
 	<Target Name="VersionFromPublishConfiguration" BeforeTargets="GetAssemblyVersion">
 		<XmlPeek XmlInputPath="$(PublishConfigurationPath)" Query="/Publish/ModVersion/@Value">
 			<Output TaskParameter="Result" PropertyName="Version" />
 		</XmlPeek>
 	</Target>
 
-	<!-- Stage 5d: build the React UI bundle and copy it next to the .dll. Pattern mirrors
-	     ZessonsDE/TrafficToolEssentials (_refs/TrafficToolEssentials/TrafficToolEssentials.csproj
-	     BuildFrontend target). Runs BEFORE Mod.targets' AfterBuild deploy step, so by the time
-	     deploy fires the .mjs + .css are sitting in $(OutDir) and get mirrored to Mods/.
-	     Skipped if node_modules is missing (`npm install` from the user side once is enough). -->
+	<!-- Builds the UI bundle and copies it into $(OutDir) before Mod.targets' AfterBuild deploy
+	     step, which mirrors OutDir into the mod folder. Skipped until `npm install` has been run
+	     in the UI project. Modelled on the BuildFrontend target of TrafficToolEssentials. -->
 	<Target Name="BuildFrontend" BeforeTargets="AfterBuild" Condition="'$(OS)' == 'Windows_NT' And Exists('..\TownRoadLaneUI\node_modules')">
 		<Message Text="[BuildFrontend] Running webpack in ..\TownRoadLaneUI\" Importance="high" />
 		<Exec Command="npm run build" WorkingDirectory="..\TownRoadLaneUI\" ContinueOnError="false" />
 		<Copy SourceFiles="..\TownRoadLaneUI\dist\TownRoadLane.mjs" DestinationFolder="$(OutDir)" />
 		<Copy SourceFiles="..\TownRoadLaneUI\dist\TownRoadLane.css" DestinationFolder="$(OutDir)" Condition="Exists('..\TownRoadLaneUI\dist\TownRoadLane.css')" />
-		<!-- Static UI assets (toolbar icon etc.) emitted by webpack's asset/resource rule into
-		     dist/images/. Referenced at runtime as coui://ui-mods/images/<name> — the game hosts
-		     the deployed mod folder under that root, and Mod.targets' DeployWIP mirrors OutDir
-		     recursively, so preserving the images/ subfolder here is all that's needed. -->
+		<!-- Static UI assets from dist/images/. The game serves the deployed mod folder as
+		     coui://ui-mods/, so keeping the images/ subfolder is enough. -->
 		<ItemGroup>
 			<TRLUIImageFiles Include="..\TownRoadLaneUI\dist\images\**\*.*" />
 		</ItemGroup>
 		<Copy SourceFiles="@(TRLUIImageFiles)" DestinationFiles="@(TRLUIImageFiles->'$(OutDir)images\%(RecursiveDir)%(Filename)%(Extension)')" Condition="'@(TRLUIImageFiles)' != ''" />
-		<!-- mod.json ships alongside the bundle for PDX-tooling parity (see the manifest NOTE
-		     above — it plays no role in UIModuleAsset registration). -->
+		<!-- The game reads the UI module manifest from the .mjs banner, not from mod.json;
+		     mod.json ships only to match the usual UI mod layout. -->
 		<Copy SourceFiles="..\TownRoadLaneUI\mod.json" DestinationFolder="$(OutDir)" />
 		<Message Text="[BuildFrontend] Copied UI bundle + manifest into $(OutDir)" Importance="high" />
 	</Target>

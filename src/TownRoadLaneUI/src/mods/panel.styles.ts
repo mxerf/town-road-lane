@@ -1,38 +1,30 @@
-// Styled-components for the TownRoadLane UI surface.
+// Styled components for the panel and popovers.
 //
-// cohtml-safe checklist applied across every rule below:
-//   - No `gap` — use margin-right / margin-bottom instead. cohtml's flex
-//     impl doesn't always honour `gap`, especially nested.
-//   - No `calc()` — pre-compute values in JS / hard-code.
-//   - No `position: fixed` for popovers (TTE workaround) — but we DO use it
-//     on .trl-popover via createPortal to document.body, which worked in
-//     prior testing. Watch this if popovers regress.
-//   - var(--foo) only for GAME-defined variables (via tokens.ts) — those are
-//     set on CS2's root and resolve fine (Traffic/RoadBuilder/TTE pattern).
-//     Never declare our own custom props (resolved empty in past testing),
-//     and never rely on var() fallback values (cohtml ignores them).
-//   - var() ONLY in true longhands (color, background-color). Shorthands
-//     (background, border, border-color, border-radius) silently drop the
-//     whole declaration: "Custom CSS expressions are not supported in
-//     shorthand declaration" in Player.log.
-//   - No `position: sticky` — "Unable to parse declaration" in Player.log;
-//     it never worked, the panel scrolls as one block.
-//   - SVG children inherit `color` via `fill: none; stroke: currentColor;`
-//     in IconBase — make sure parent has explicit `color` set if you want
-//     a custom tint. Default color cascades from the panel root.
+// cohtml constraints that apply to every rule below:
+//   - No `gap`: cohtml's flexbox does not always honour it, especially when nested. Use
+//     margins.
+//   - No `calc()`.
+//   - Popovers use `position: fixed` and are portalled to document.body. TTE avoids fixed
+//     positioning, so this is the first thing to check if popovers break.
+//   - var(--foo) only for variables the game defines (through tokens.ts), as Traffic, Road
+//     Builder and TTE do. Custom props we declare ourselves resolve empty, and var()
+//     fallback values are ignored.
+//   - var() only in longhands (color, background-color). In shorthands (background, border,
+//     border-color, border-radius) the whole declaration is dropped, with "Custom CSS
+//     expressions are not supported in shorthand declaration" in Player.log.
+//   - No `position: sticky`: Player.log reports "Unable to parse declaration".
+//   - Icons draw with `stroke: currentColor` (IconBase), so a custom tint needs an explicit
+//     `color` on the parent; otherwise the colour comes from the panel root.
 
 import { styled } from "../styles/styled";
 import { tokens as T } from "../styles/tokens";
 
-// ── Main panel (GameTopRight) ──────────────────────────────────────────
-// (The old custom ToolbarBtn is gone — the toolbar toggle now uses the
-// vanilla cs2/ui FloatingButton, see toolbar-toggle-button.tsx.)
+// Main panel (GameTopRight).
 
 export const Panel = styled.div`
   position: absolute;
-  // 56rem clears the game's own top-right button cluster (advisor + settings,
-  // ~48rem tall) — they live outside the GameTopRight slot and our panel was
-  // overlapping them at top: 8rem.
+  // 56rem clears the game's top-right buttons (advisor, settings), which sit outside the
+  // GameTopRight slot.
   top: 56rem;
   right: ${T.space2};
   width: ${T.panelWidth};
@@ -50,10 +42,8 @@ export const Panel = styled.div`
   box-shadow: ${T.shadowMd};
 `;
 
-// Panel chrome — header, status and the drawing cluster, visually separated
-// from the scrolling lists below. NOT sticky: cohtml can't parse
-// position:sticky at all (Player.log "Unable to parse declaration"), so the
-// panel has always scrolled as one block; this just keeps the divider.
+// Header, status and drawing controls, divided from the lists below. Despite the name it
+// is not sticky (cohtml can't parse position: sticky); the whole panel scrolls as one.
 export const PanelStickyChrome = styled.div`
   padding-bottom: ${T.space2};
   margin-bottom: ${T.space2};
@@ -66,9 +56,7 @@ export const PanelTitle = styled.h3`
   margin: 0 0 ${T.space1} 0;
 `;
 
-// Header row: app title on the left, close button on the right. The title is
-// the mod name (stable), the node id lives in PanelMeta below — users think
-// "markings panel", not "node panel".
+// Title on the left, close button on the right.
 export const PanelHeaderRow = styled.div`
   display: flex;
   align-items: center;
@@ -101,7 +89,7 @@ export const CloseBtn = styled.button`
   }
 `;
 
-// ── Mode switch (Lines / Area segmented control) ───────────────────────
+// Mode switch (Lines / Area).
 
 export const ModeRow = styled.div`
   display: flex;
@@ -116,9 +104,7 @@ export const ModeRow = styled.div`
   }
 `;
 
-// Segmented control, vanilla-toggle style: the active mode is an ACCENT FILL
-// with dark text (how the game marks selected toggles), the inactive one a
-// subtle filled chip — no ghost outlines.
+// The active mode gets an accent fill with dark text, as the game marks selected toggles.
 export const ModeBtn = styled.button<{ $active?: boolean }>`
   display: flex;
   align-items: center;
@@ -146,11 +132,8 @@ export const ModeBtn = styled.button<{ $active?: boolean }>`
   }
 `;
 
-// ── Area draft box (visible while AreaSelecting) ───────────────────────
-
-// Accent-tinted card so the "you are in a special mode" state is impossible
-// to miss. Lists click hints because the polygon gesture has three distinct
-// actions (add / undo / close) that are invisible otherwise.
+// Area draft box, shown while AreaSelecting. Accent-tinted so the mode is hard to miss; it
+// lists the click hints for adding, undoing and closing.
 export const DraftBox = styled.div`
   background: ${T.colorAccentDim};
   border: 1rem solid ${T.colorAccentSoft};
@@ -165,10 +148,8 @@ export const DraftHint = styled.div`
   margin-bottom: 2rem;
 `;
 
-// ── Labeled field row (label left, control right) ──────────────────────
-
-// Shared shape for the "next line style" / "next area fill" pickers in the
-// sticky chrome. The dropdown gets the remaining width.
+// Label on the left, control on the right taking the remaining width. Used by the next line
+// style and next area fill pickers.
 export const FieldRow = styled.div`
   display: flex;
   align-items: center;
@@ -186,8 +167,7 @@ export const FieldLabel = styled.span`
   flex-shrink: 0;
 `;
 
-// ── Section title (Lines / Areas list headers) ─────────────────────────
-
+// Section titles (Lines / Areas).
 export const SectionTitle = styled.div`
   font-size: ${T.fontSizeXs};
   font-weight: ${T.fontWeightBold};
@@ -197,10 +177,8 @@ export const SectionTitle = styled.div`
   margin: ${T.space3} 0 ${T.space1};
 `;
 
-// Live tool-status line under the header: accent dot + one instruction that
-// tracks MarkingNodeToolSystem.State. This is the panel's "what do I do now"
-// voice — the recomposition's replacement for the old debug-flavoured meta
-// row (node id + counters).
+// Status line under the header: an accent dot and the next step for the current
+// MarkingNodeToolSystem.State.
 export const StatusRow = styled.div`
   display: flex;
   align-items: center;
@@ -221,7 +199,7 @@ export const StatusDot = styled.span`
   margin-right: ${T.space2};
 `;
 
-// Label-left / control-right row for stateful node settings (vanilla toggle).
+// Label and toggle row for node settings (hide vanilla markings).
 export const ToggleRow = styled.div`
   display: flex;
   align-items: center;
@@ -232,8 +210,7 @@ export const ToggleRow = styled.div`
   }
 `;
 
-// Square icon toggle — the stateful cousin of PopoverBtn ($active = the
-// override is engaged, accent-tinted).
+// Square icon toggle; $active is accent-tinted.
 export const IconToggleBtn = styled.button<{ $active?: boolean }>`
   width: 26rem;
   height: 26rem;
@@ -255,8 +232,7 @@ export const IconToggleBtn = styled.button<{ $active?: boolean }>`
   }
 `;
 
-// Clickable header for the collapsed hotkeys reference — SectionTitle's
-// visual voice plus a chevron and a pointer cursor.
+// Header of the collapsible hotkeys list: SectionTitle look plus a chevron.
 export const FoldoutHeader = styled.div`
   display: flex;
   align-items: center;
@@ -278,8 +254,8 @@ export const FoldoutHeader = styled.div`
   }
 `;
 
-// Quiet entity-id line at the very bottom of the node block — power-user /
-// bug-report material, deliberately the least prominent text on the panel.
+// Entity id at the bottom of the node block, for bug reports. Deliberately the least
+// prominent text on the panel.
 export const NodeIdText = styled.div`
   margin-top: ${T.space2};
   font-size: ${T.fontSizeXs};
@@ -301,12 +277,8 @@ export const PanelList = styled.div`
   flex-direction: column;
 `;
 
-// ── Line accordion row ─────────────────────────────────────────────────
-
-// Game-hover state ($gameHovered) lights up the row when the cursor is over
-// the line in the world — same visual weight as the panel-hover state, so the
-// bridge feels symmetric. Expanded still wins visually (a stronger accent
-// border) so it stays distinct from a casual hover.
+// Line accordion row. $gameHovered (cursor over the line in the world) looks the same as a
+// panel hover; the expanded state wins with its accent border.
 export const LineRowOuter = styled.div<{ $expanded?: boolean; $gameHovered?: boolean }>`
   background: ${(p) =>
     p.$expanded ? T.colorRowBgActive : p.$gameHovered ? T.colorRowBgHover : T.colorRowBg};
@@ -352,9 +324,8 @@ export const LineTitle = styled.span`
   font-weight: ${T.fontWeightMedium};
 `;
 
-// Header slot for the mini style preview (LineStylePreview / AreaStylePreview)
-// — replaces the old uppercase text tag. The svg gets display:block so its
-// inline-baseline gap doesn't skew vertical centering.
+// Slot for the style preview (LineStylePreview / AreaStylePreview). display: block on the
+// svg keeps the inline baseline gap from skewing vertical centering.
 export const SwatchWrap = styled.span`
   display: flex;
   align-items: center;
@@ -364,8 +335,7 @@ export const SwatchWrap = styled.span`
   }
 `;
 
-// Tiny "G87" affix after a line-style swatch — the preview geometry alone
-// can't distinguish vanilla from G87 variants (same solid/dashed pattern).
+// "G87" mark after a line swatch: G87 and vanilla variants have the same preview.
 export const G87Mark = styled.span`
   margin-left: 3rem;
   font-size: 9rem;
@@ -384,12 +354,9 @@ export const LineSegCount = styled.span`
   font-variant-numeric: tabular-nums;
 `;
 
-// LineBody is always mounted to allow max-height transition (you can't animate
-// from "absent" to "present"). $open toggles the collapsed state. max-height
-// is set to a generous overshoot — content rarely exceeds ~1500rem (50+
-// segments) and overshoot doesn't visually matter when the body is open.
-// border-top + padding are only drawn when open to avoid a 1rem strip showing
-// through when collapsed.
+// Always mounted so max-height can transition. The open max-height is a generous
+// overshoot (content rarely exceeds ~1500rem, 50+ segments). Border and padding are drawn
+// only when open, so no 1rem strip shows through when collapsed.
 export const LineBody = styled.div<{ $open?: boolean }>`
   overflow: hidden;
   max-height: ${(p) => (p.$open ? "3000rem" : "0")};
@@ -408,7 +375,7 @@ export const StyleRow = styled.div`
   }
 `;
 
-// ── Curvature stepper (inside expanded line, below the style dropdown) ─
+// Curvature stepper, below the style dropdown in an expanded line.
 
 export const CurvRow = styled.div`
   display: flex;
@@ -422,10 +389,9 @@ export const CurvLabel = styled.span`
   color: ${T.colorTextMuted};
 `;
 
-// Plain numeric text field — <input type=range> turned out non-functional in
-// CS2's cohtml build (thumb never moved), so: type the exact percent, commit
-// on Enter/blur. type="text" + JS digit filter, not type="number" (spinner
-// affordances are similarly untrustworthy here).
+// Text field for the percent, committed on Enter or blur. <input type=range> doesn't work in
+// cohtml (the thumb never moves), and type="number" spinners are unreliable too, so it is
+// type="text" with a digit filter in JS.
 export const CurvInput = styled.input`
   width: 44rem;
   flex-shrink: 0;
@@ -440,7 +406,6 @@ export const CurvInput = styled.input`
   pointer-events: auto;
 `;
 
-// The "%" unit after the input.
 export const CurvUnit = styled.span`
   flex-shrink: 0;
   margin-left: 2rem;
@@ -448,7 +413,7 @@ export const CurvUnit = styled.span`
   font-size: ${T.fontSizeSm};
 `;
 
-// −/+ stepper buttons flanking the input: click ±1, Shift ±10, Ctrl ±5.
+// −/+ buttons around the input: ±1, Shift ±10, Ctrl ±5.
 export const CurvStepBtn = styled.button`
   width: 20rem;
   height: 22rem;
@@ -475,8 +440,7 @@ export const CurvStepBtn = styled.button`
   }
 `;
 
-// Reset-to-default affordance next to the slider; rendered only while the
-// value differs from the 50% default.
+// Shown only while the value differs from the 50% default.
 export const CurvResetBtn = styled.button`
   width: 22rem;
   height: 22rem;
@@ -502,11 +466,10 @@ export const CurvResetBtn = styled.button`
 `;
 
 
-// ── Segment popover (floats in world space via portal) ─────────────────
+// World-space popovers, portalled to document.body.
 
-// NOTE: transform is ALSO written inline by positionRegistry (translate +
-// camera-distance scale) — the declaration here only covers the frame before
-// the first sync. Keep both in lockstep.
+// positionRegistry also writes the transform inline (translate plus distance scale); this
+// declaration only covers the frame before the first sync. Keep the translate in both.
 export const PopoverRoot = styled.div`
   position: fixed;
   transform: translate(-50%, -120%);
@@ -523,9 +486,8 @@ export const PopoverRoot = styled.div`
   z-index: 999998;
 `;
 
-// Collapsed popover face: a small state dot. White = segment/area visible,
-// red = hidden (matches the red ghost the overlay draws for hidden segments).
-// Hovering the root swaps the dot for the full button row.
+// Collapsed popover: a dot, white when visible and red when hidden (like the red ghost the
+// overlay draws for hidden segments). Hovering the popover swaps it for the button row.
 export const PopoverMarker = styled.span<{ $hidden?: boolean }>`
   display: block;
   width: 12rem;
@@ -535,10 +497,7 @@ export const PopoverMarker = styled.span<{ $hidden?: boolean }>`
   border: 1rem solid rgba(10, 14, 20, 0.85);
 `;
 
-// Bigger hit target (24 → 30rem) + clearer hover (background + border swap +
-// accent colour on the icon). The icon size in the JSX call site bumps too
-// (12 → 14rem). Padding lives on PopoverRoot, not the btn, so the buttons sit
-// flush against each other for a tighter look.
+// Padding lives on PopoverRoot, not the buttons, so the buttons sit close together.
 export const PopoverBtn = styled.button<{ $active?: boolean }>`
   width: 30rem;
   height: 30rem;
@@ -566,20 +525,16 @@ export const PopoverBtn = styled.button<{ $active?: boolean }>`
   }
 `;
 
-// Fixed-width slot for the style Dropdown inside a popover button row. The
-// Dropdown itself is width:100% (sized by its parent everywhere else), and a
-// flex row would otherwise let it collapse to content or blow the row wide.
+// Fixed-width slot for a Dropdown in the popover row. Dropdown is width: 100%, and in a flex
+// row it would otherwise collapse to its content or stretch the row.
 export const PopoverDropdownWrap = styled.div`
   width: 170rem;
   margin-right: 3rem;
 `;
 
-// ── Segment row inside expanded line ───────────────────────────────────
-
-// Hidden state (C5): in addition to dimming, paint a red left border + tint so
-// the "this segment is suppressed" signal is unambiguous — opacity alone is
-// easy to miss in a long list. Using border-left instead of full border keeps
-// the row alignment with visible siblings.
+// Segment row in an expanded line. Hidden segments get a red left border and tint as well as
+// dimming, which alone is easy to miss in a long list. Only the left border, so hidden and
+// visible rows stay aligned.
 export const SegmentRow = styled.div<{ $hidden?: boolean }>`
   display: flex;
   justify-content: space-between;
@@ -603,8 +558,7 @@ export const SegmentInfo = styled.span`
   flex: 1;
 `;
 
-// Right-aligned segment length, visually separated from the name — "Сегмент 1
-// · 1.5м" in one run of text read as an unparseable jumble.
+// Segment length, right-aligned and separate from the name so the two don't run together.
 export const SegmentLen = styled.span`
   flex-shrink: 0;
   margin-right: ${T.space2};
@@ -621,12 +575,10 @@ export const SegmentIndicator = styled.span`
   color: ${T.colorTextMuted};
 `;
 
-// ── Buttons (generic) ──────────────────────────────────────────────────
+// Buttons.
 
-// Two-button row used by the inline delete-confirm pattern (B1). Cancel + the
-// confirm button share width 50/50 with a small gap. Keeps users from losing a
-// line to a single misclick — they have to confirm in the same gesture, but no
-// modal dialog (cohtml's overlay positioning is fiddly).
+// Cancel and confirm for inline delete confirmation. Inline rather than a modal dialog
+// because overlay positioning in cohtml is fiddly.
 export const ConfirmRow = styled.div`
   display: flex;
   margin-top: ${T.space2};
@@ -640,7 +592,7 @@ export const ConfirmRow = styled.div`
   }
 `;
 
-// ── Hotkey hints footer ────────────────────────────────────────────────
+// Hotkey hints.
 
 export const HintsBox = styled.div`
   margin-top: ${T.space3};
@@ -656,10 +608,8 @@ export const HintRow = styled.div`
   color: ${T.colorTextMuted};
 `;
 
-// kbd-style chip for the key name. Fixed min-width keeps the description
-// column aligned across rows. flex (not inline-block — unparseable in cohtml)
-// with centered content; the parent HintRow is a flex row so this behaves as
-// a fixed-min-width item.
+// Key chip. min-width keeps the descriptions aligned across rows. display: flex because
+// cohtml can't parse inline-block.
 export const HintKey = styled.span`
   display: flex;
   align-items: center;
@@ -681,9 +631,7 @@ export const Btn = styled.button<{ $danger?: boolean; $full?: boolean }>`
   // Filled, not ghost — outline-only buttons read as wireframes next to the
   // game's own (filled) buttons.
   background: ${T.colorBtnBg};
-  // Explicit colour, NOT "inherit" — cohtml can't parse color:inherit (see
-  // Player.log "Unable to parse declaration"), so the button fell back to the
-  // UA-default BLACK text and blended into the dark panel.
+  // Explicit colour: cohtml cannot parse color inherit and falls back to black text.
   color: ${(p) => (p.$danger ? T.colorDanger : T.colorTextPrimary)};
   border: 1rem solid ${T.colorBorderSoft};
   border-radius: ${T.radiusSm};
