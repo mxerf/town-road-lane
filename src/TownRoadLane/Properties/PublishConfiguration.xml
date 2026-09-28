@@ -116,7 +116,7 @@ Fixed:
 - Deleting a line from the panel left the confirmation armed, so the next line in the list could be deleted with a single click.
 - The tool overlay now waits for the game's overlay renderer before drawing.
 
-Under the hood: the source code on GitHub has been reorganized and cleaned up, with automatic code checks on every change. Saves and settings are untouched; existing cities load as before.
+Under the hood: the source code on GitHub has been reorganized and cleaned up, with automatic code checks on every change. Existing cities load as before, with all their markings, fills and settings.
 	</ChangeLog>
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
 	<ExternalLink Type="github" Url="https://github.com/mxerf/town-road-lane" />
