@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Colossal.Core;
 using Colossal.IO.AssetDatabase;
 using Game.Input;
@@ -65,6 +66,8 @@ namespace TownRoadLane
         private bool _saveDirty;
         private int _quietFrames;
         private bool _saverRegistered;
+        private bool _saveInFlight;
+        private Task _saveTask;
 
         public override void Apply()
         {
@@ -87,17 +90,62 @@ namespace TownRoadLane
             return false;
         }
 
-        private async void SaveNow()
+        // One save at a time. A second Apply during the write marks dirty again and the
+        // quiet window starts over, so the file gets the final in-memory state.
+        private void SaveNow()
         {
+            if (_saveInFlight)
+            {
+                _saveDirty = true;
+                _quietFrames = 0;
+                return;
+            }
+            _saveInFlight = true;
+            _saveTask = PersistAsync();
+        }
+
+        // async Task, not async void: the failure is stored on this method and the tail
+        // is posted to the main thread. The await may resume off it.
+        private async Task PersistAsync()
+        {
+            Exception error = null;
             try
             {
+                // Type name, the same key ApplyAndSave passes to SaveSpecificSetting.
+                // LoadSettings uses "TownRoadLane": that is the section inside the
+                // TownRoadLane.coc file named by FileLocation, not this lookup key.
                 await AssetDatabase.global.SaveSpecificSetting(GetType().Name);
-                Mod.log.Debug($"settings: coalesced save landed (edge={EdgeLineEnabled}/{EdgeLineStyle}, parking={ParkingMarkingsEnabled}/{ParkingLineStyle}/{ParkingEndStyle})");
             }
             catch (Exception e)
             {
+                error = e;
+            }
+            var captured = error;
+            try
+            {
+                MainThreadDispatcher.RegisterUpdater(() => FinishSave(captured));
+            }
+            catch (Exception e)
+            {
+                _saveInFlight = false;
+                _saveTask = null;
                 Mod.log.Warn($"settings: coalesced save failed: {e.Message}");
             }
+        }
+
+        private bool FinishSave(Exception error)
+        {
+            _saveInFlight = false;
+            if (error == null && _saveTask != null && _saveTask.IsFaulted)
+                error = _saveTask.Exception?.GetBaseException();
+            _saveTask = null;
+            if (error != null)
+                Mod.log.Warn($"settings: coalesced save failed: {error.Message}");
+            else if (Mod.log.isDebugEnabled)
+                Mod.log.Debug($"settings: coalesced save landed (edge={EdgeLineEnabled}/{EdgeLineStyle}, parking={ParkingMarkingsEnabled}/{ParkingLineStyle}/{ParkingEndStyle})");
+            if (_saveDirty)
+                _quietFrames = 0;
+            return true;
         }
 
         // Edge line: curb-side line on city roads with 3 m lanes.
