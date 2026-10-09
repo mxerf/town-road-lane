@@ -48,6 +48,7 @@ namespace TownRoadLane.Components
             reader.Read(out visible);
             // Version 1 has no style field: those segments were drawn Solid (0).
             if (version >= 2) reader.Read(out style); else style = 0;
+            ComponentVersion.Note(version, 1, kVersion, nameof(MarkingSegment));
         }
 
         /// <summary>Buffer index of the <paramref name="indexInLine"/>-th segment of a line, hidden

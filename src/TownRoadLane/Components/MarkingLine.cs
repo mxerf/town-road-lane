@@ -51,8 +51,10 @@ namespace TownRoadLane.Components
             reader.Read(out targetGapIndex);
             reader.Read(out style);
             // Version 3 lines have no curvature field and used this constant.
+            // Version 3 is the oldest layout that shipped.
             if (version >= 4) reader.Read(out curvature);
             else curvature = MarkingCurveBuilder.kPullFactor;
+            ComponentVersion.Note(version, 3, kVersion, nameof(MarkingLine));
         }
     }
 }

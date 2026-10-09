@@ -34,11 +34,12 @@ namespace TownRoadLane.Components
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
         {
-            reader.Read(out int _); // version
+            reader.Read(out int version);
             reader.Read(out styleId);
             reader.Read(out visible);
             reader.Read(out firstVertex);
             reader.Read(out vertexCount);
+            ComponentVersion.Note(version, 1, kVersion, nameof(MarkingArea));
         }
     }
 
@@ -129,6 +130,7 @@ namespace TownRoadLane.Components
                 refGap = 0;
                 refPos = float3.zero;
             }
+            ComponentVersion.Note(version, 1, kVersion, nameof(MarkingAreaVertex));
         }
     }
 
@@ -171,10 +173,11 @@ namespace TownRoadLane.Components
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
         {
-            reader.Read(out int _);
+            reader.Read(out int version);
             reader.Read(out node);
             reader.Read(out areaIndex);
             reader.Read(out pieceIndex);
+            ComponentVersion.Note(version, 1, kVersion, nameof(TRLAreaLink));
         }
     }
 }
