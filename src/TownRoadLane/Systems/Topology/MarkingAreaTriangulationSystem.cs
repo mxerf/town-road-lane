@@ -116,9 +116,12 @@ namespace TownRoadLane.Systems.Topology
                 int done = 0, failed = 0;
                 for (int i = 0; i < entities.Length; i++)
                 {
+                    // An Updated tag can stick across frames when something rewrites the fill
+                    // every tick. Retry the ring, but do not warn again for a known failure.
+                    bool knownFailure = _healFailed.Contains(entities[i]);
                     try
                     {
-                        if (RewriteTriangles(entities[i], ref heightData))
+                        if (RewriteTriangles(entities[i], ref heightData, !knownFailure))
                         {
                             done++;
                             _healFailed.Remove(entities[i]);
@@ -130,11 +133,11 @@ namespace TownRoadLane.Systems.Topology
                     {
                         // Keep going with the other fills; this one keeps its vanilla triangles.
                         failed++;
-                        _healFailed.Add(entities[i]);
-                        log.Warn($"area-triangulation ent#{entities[i].Index}: {e.GetType().Name}: {e.Message} — keeping vanilla triangles");
+                        if (_healFailed.Add(entities[i]))
+                            log.Warn($"area-triangulation ent#{entities[i].Index}: {e.GetType().Name}: {e.Message} — keeping vanilla triangles");
                     }
                 }
-                if (done > 0 || failed > 0)
+                if ((done > 0 || failed > 0) && log.isDebugEnabled)
                     log.Debug($"MarkingAreaTriangulationSystem: rewrote {done} fill(s){(failed > 0 ? $", {failed} left vanilla" : "")}");
             }
 
@@ -192,7 +195,7 @@ namespace TownRoadLane.Systems.Topology
                 Entity e = toHeal[i];
                 try
                 {
-                    if (RewriteTriangles(e, ref heightData))
+                    if (RewriteTriangles(e, ref heightData, true))
                     {
                         healed++;
                         _ownedFingerprint[e] = Fingerprint(EntityManager.GetBuffer<Triangle>(e, isReadOnly: true));
@@ -235,7 +238,7 @@ namespace TownRoadLane.Systems.Topology
         /// <summary>Replaces the entity's triangles with a triangulation of its exact node ring.
         /// Returns false, leaving the vanilla data as is, when the ring can't be
         /// triangulated.</summary>
-        private bool RewriteTriangles(Entity entity, ref TerrainHeightData heightData)
+        private bool RewriteTriangles(Entity entity, ref TerrainHeightData heightData, bool logFailure)
         {
             var nodes = EntityManager.GetBuffer<Game.Areas.Node>(entity, isReadOnly: true);
             int n = nodes.Length;
@@ -252,9 +255,9 @@ namespace TownRoadLane.Systems.Topology
             bool ok = EarClip(positions, ccw, tris);
             if (!ok)
             {
-                // Self-intersecting ring, e.g. a straight edge crossing a curved one. The caller
-                // records the failure, so this warns once per ring change.
-                log.Warn($"area-triangulation ent#{entity.Index}: ear-clip failed on {n}-node ring — keeping vanilla triangles");
+                // Self-intersecting ring, e.g. a straight edge crossing a curved one.
+                if (logFailure)
+                    log.Warn($"area-triangulation ent#{entity.Index}: ear-clip failed on {n}-node ring — keeping vanilla triangles");
                 positions.Dispose();
                 tris.Dispose();
                 return false;
