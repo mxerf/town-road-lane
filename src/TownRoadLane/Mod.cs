@@ -117,8 +117,10 @@ namespace TownRoadLane
             // Settings apply on the next save load through the clone systems' PrefabUpdate pass.
 
             // ToolBaseSystem adds itself to ToolSystem.tools in OnCreate; registering is enough.
+            // The hotkey reads WasPerformedThisFrame and switches activeTool, so it runs in
+            // ToolUpdate ahead of the tool. Modification1 is the world-edit phase.
+            updateSystem.UpdateAt<MarkingToolHotkeySystem>(SystemUpdatePhase.ToolUpdate);
             updateSystem.UpdateAt<MarkingNodeToolSystem>(SystemUpdatePhase.ToolUpdate);
-            updateSystem.UpdateAt<MarkingToolHotkeySystem>(SystemUpdatePhase.Modification1);
             // Idle unless the marking tool is active; writes to OverlayRenderSystem.Buffer.
             updateSystem.UpdateAt<MarkingOverlaySystem>(SystemUpdatePhase.Rendering);
 
@@ -129,18 +131,18 @@ namespace TownRoadLane
             //
             // Modification1 runs before LaneSystem (4), SecondaryLaneSystem (4B) and
             // SecondaryLaneReferencesSystem (5), which adds the emitted sublanes to the node's
-            // SubLane buffer. Ordering inside Modification1 comes from [UpdateBefore]/[UpdateAfter]
-            // on the classes: migration, line topology, line emission; line topology, area
-            // topology, area emission.
+            // SubLane buffer. Game.UpdateSystem does not read Unity [UpdateBefore]/[UpdateAfter]
+            // attributes. Order inside a phase is this registration: migration, line topology,
+            // line emission, area topology, area emission.
             updateSystem.UpdateAt<MarkingPairMigrationSystem>(SystemUpdatePhase.Modification1);
-            updateSystem.UpdateAt<MarkingTopologySystem>(SystemUpdatePhase.Modification1);
-            updateSystem.UpdateAt<MarkingSegmentEmissionSystem>(SystemUpdatePhase.Modification1);
-            updateSystem.UpdateAt<MarkingAreaTopologySystem>(SystemUpdatePhase.Modification1);
-            updateSystem.UpdateAt<MarkingAreaEmissionSystem>(SystemUpdatePhase.Modification1);
-            // Runs after vanilla Game.Areas.GeometrySystem (Modification2B) and replaces its
-            // shrink-and-budget ear clipping, which can leave fills invisible, with a full
-            // triangulation of the real outline.
-            updateSystem.UpdateAt<MarkingAreaTriangulationSystem>(SystemUpdatePhase.Modification2B);
+            updateSystem.UpdateAfter<MarkingTopologySystem, MarkingPairMigrationSystem>(SystemUpdatePhase.Modification1);
+            updateSystem.UpdateAfter<MarkingSegmentEmissionSystem, MarkingTopologySystem>(SystemUpdatePhase.Modification1);
+            updateSystem.UpdateAfter<MarkingAreaTopologySystem, MarkingSegmentEmissionSystem>(SystemUpdatePhase.Modification1);
+            updateSystem.UpdateAfter<MarkingAreaEmissionSystem, MarkingAreaTopologySystem>(SystemUpdatePhase.Modification1);
+            // Vanilla Game.Areas.GeometrySystem is registered in Modification2B (SystemOrder).
+            // UpdateAfter places this system immediately after it, so the replacement triangles
+            // exist before later systems in the phase read the vanilla shrink-and-budget result.
+            updateSystem.UpdateAfter<MarkingAreaTriangulationSystem, Game.Areas.GeometrySystem>(SystemUpdatePhase.Modification2B);
 
             updateSystem.UpdateAt<TownRoadLaneUISystem>(SystemUpdatePhase.UIUpdate);
         }

@@ -15,9 +15,8 @@ namespace TownRoadLane.Systems.Emission
     /// <see cref="MarkingSegment"/> <c>[0,1]</c> covering it, and the old buffer is removed.
     /// Nodes that already have MarkingLine are never touched, and the query is empty on almost
     /// every frame. Runs before MarkingSegmentEmissionSystem, otherwise the first emission pass
-    /// on a freshly loaded save sees no lines.
+    /// on a freshly loaded save sees no lines. Order is the UpdateSystem registration in Mod.OnLoad.
     /// </summary>
-    [UpdateBefore(typeof(MarkingSegmentEmissionSystem))]
     public partial class MarkingPairMigrationSystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;

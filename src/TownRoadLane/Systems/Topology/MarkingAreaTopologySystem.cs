@@ -28,9 +28,8 @@ namespace TownRoadLane.Systems.Topology
     /// <see cref="MarkingAreaEmissionSystem"/>, which spawns fills from the pieces. Like the line
     /// topology, the per-node scan only runs when an input buffer or a state changed, a node has
     /// no state yet, or a node is waiting for its roads.
+    /// Order against line topology and area emission is the UpdateSystem registration in Mod.OnLoad.
     /// </summary>
-    [UpdateAfter(typeof(MarkingTopologySystem))]
-    [UpdateBefore(typeof(MarkingAreaEmissionSystem))]
     public partial class MarkingAreaTopologySystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;
