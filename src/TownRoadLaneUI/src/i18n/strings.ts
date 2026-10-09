@@ -265,9 +265,139 @@ const ruRU: LocaleDict = {
   "style.unknown":            "?",
 };
 
+const ptBR: LocaleDict = {
+  // Toolbar
+  "toolbar.toggle.label":     "Town Road Lane",
+  "toolbar.toggle.tooltip":   "Alternar a ferramenta de marcação do Town Road Lane (Ctrl+M)",
+
+  // Panel chrome
+  "panel.appTitle":           "Marcações viárias",
+  "panel.title":              "Nó #{n}",
+  "panel.close.tooltip":      "Fechar a ferramenta de marcação",
+  "panel.hint.selectNode":    "Clique num cruzamento no mapa para editar as marcações.",
+  "panel.error.title":        "Erro do painel",
+  "panel.error.retry":        "Tentar de novo",
+
+  // Tool status (MarkingNodeToolSystem.State)
+  "status.line.first":        "Clique no primeiro ponto da linha",
+  "status.line.second":       "Clique no segundo ponto para concluir a linha",
+  "status.area":              "Modo de área — pontos colocados: {n}",
+
+  // Section headers
+  "section.drawing":          "Desenho",
+  "section.node":             "Cruzamento",
+
+  // Node block
+  "node.vanilla.label":       "Marcações do jogo",
+
+  // Mode switch
+  "mode.lines":               "Linhas",
+  "mode.area":                "Área",
+  "mode.lines.tooltip":       "Desenhar linhas de marcação entre os pontos",
+  "mode.area.tooltip":        "Preencher um polígono entre os pontos-âncora (ilhas de canalização, hachuras)",
+
+  // Area draft (AreaSelecting)
+  "area.draft.hint.add":      "Botão esquerdo — adicionar um ponto",
+  "area.draft.hint.undo":     "Botão direito — remover o último ponto",
+  "area.draft.hint.close":    "Clique de novo no primeiro ponto para fechar (precisa de 3 ou mais)",
+  "area.draft.cancel":        "Cancelar área",
+
+  // Next-object style pickers
+  "next.lineStyle":           "Estilo da nova linha",
+  "next.lineStyle.tooltip":   "Estilo da PRÓXIMA linha que você desenhar (a tecla Y percorre a lista)",
+  "next.areaStyle":           "Preenchimento da nova área",
+  "next.areaStyle.tooltip":   "Preenchimento da PRÓXIMA área fechada (a tecla U percorre a lista). O asfalto precisa do mod separado \"G87 Vanilla Asphalt Pavement\" (G87 VA); preenchimentos ausentes caem para concreto. A estrela fixa os favoritos no topo.",
+
+  // Sections
+  "section.lines":            "Linhas",
+  "section.areas":            "Áreas",
+
+  // Area rows
+  "area.title":               "Área #{n}",
+  "area.pieces":              "{visible}/{total}",
+  "area.meta.vertices":       "{n} pts",
+  "area.hide.tooltip":        "Ocultar área",
+  "area.show.tooltip":        "Mostrar área",
+  "area.delete":              "Excluir área",
+  "area.style":               "Estilo do preenchimento",
+
+  // Area fill styles (indexes match the C# kStyleSurfaceNames)
+  "areaStyle.0":              "Concreto",
+  "areaStyle.1":              "Caixa de cruzamento",
+  "areaStyle.2":              "Hachura branca",
+  "areaStyle.3":              "Hachura branca, esparsa",
+  "areaStyle.4":              "Hachura amarela",
+  "areaStyle.5":              "Ciclovia verde",
+  "areaStyle.6":              "Faixa de ônibus vermelha",
+  "areaStyle.14":             "Asfalto (G87 VA)",
+  "areaStyle.15":             "Grama",
+  "areaStyle.17":             "Grama escura",
+  "areaStyle.18":             "Areia",
+  "areaStyle.19":             "Pavimento",
+  "areaStyle.20":             "Ladrilho 1",
+  "areaStyle.21":             "Ladrilho 2",
+  "areaStyle.22":             "Ladrilho 3",
+
+  // Full node reset
+  "node.reset":               "Redefinir todas as marcações",
+  "node.reset.tooltip":       "Apaga todas as linhas e áreas deste nó e devolve as marcações do jogo.",
+
+  // Hotkey hints footer
+  "hotkeys.title":            "Atalhos",
+  "hotkeys.toggle":           "alternar ferramenta",
+  "hotkeys.cycleLine":        "próximo estilo de linha",
+  "hotkeys.cycleArea":        "próximo preenchimento",
+  "hotkeys.areaMode":         "modo de área",
+  "hotkeys.rmb":              "Direito",
+  "hotkeys.rmb.desc":         "desfazer ponto / cancelar",
+  "hotkeys.esc":              "Esc",
+  "hotkeys.esc.desc":         "voltar um passo",
+
+  // Vanilla markings toggle
+  "vanilla.hide":             "Ocultar marcações do jogo",
+  "vanilla.show":             "Mostrar marcações do jogo",
+  "vanilla.tooltip":          "Suprime as marcações do próprio jogo neste cruzamento. Nós com linhas desenhadas já as ocultam; este interruptor funciona mesmo sem linhas.",
+
+  // Line row
+  "line.title":               "Linha #{n}",
+  "line.segCount":            "{visible}/{total}",
+  "line.delete":              "Excluir linha",
+  "line.delete.confirm":      "Excluir a linha #{n}? Isso não pode ser desfeito.",
+  "line.delete.cancel":       "Cancelar",
+  "line.delete.confirm.btn":  "Excluir",
+  "line.curvature":           "Curvatura",
+  "line.curvature.tooltip":   "Curva da linha: 0% = reta, 50% = arco padrão, 100% = arredondamento máximo",
+  "line.curvature.reset":     "Voltar ao padrão de 50%",
+  "line.curvature.step":      "Passo 1 · Shift: 10 · Ctrl: 5",
+
+  // Segment row
+  "segment.label":            "Segmento {n}",
+  "segment.length":           "{m} m",
+  "segment.hide.tooltip":     "Ocultar segmento",
+  "segment.show.tooltip":     "Mostrar segmento",
+
+  // Styles
+  "style.solid":              "Contínua",
+  "style.dashed":             "Tracejada",
+  "style.g87Solid":           "G87 contínua",
+  "style.g87Dashed":          "G87 tracejada",
+  "style.doubleSolid":        "Contínua dupla",
+  "style.dashedDense":        "Tracejada, curta",
+  "style.dashedLong":         "Tracejada, longa",
+  "style.g87Yellow":          "G87 amarela",
+  "style.g87YellowDashed":    "G87 amarela tracejada",
+  "style.curb":               "Meio-fio",
+  "style.yellowSolid":        "Amarela contínua",
+  "style.yellowDashed":       "Amarela tracejada",
+  "style.yellowDoubleSolid":  "Amarela contínua dupla",
+  "style.yellowSolidDashed":  "Amarela contínua + tracejada",
+  "style.unknown":            "?",
+};
+
 export const STRINGS = {
   "en-US": enUS,
   "ru-RU": ruRU,
+  "pt-BR": ptBR,
 } as const;
 
 export type Locale = keyof typeof STRINGS;

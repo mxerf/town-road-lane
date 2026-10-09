@@ -17,7 +17,7 @@ Click any intersection and draw your own markings:
 - **Area fills** over any polygon you outline — points snap to lane endpoints, kerb corners and line crossings, edges follow line curvature. Junction box (yellow box / waffle), white or yellow hatching, green bike lane, red bus lane, concrete, grass, sand, pavement, tiles, asphalt patch (needs the separate "G87 Vanilla Asphalt Pavement" mod).
 - **Hide vanilla markings** per intersection to start from a clean slate.
 - **Pin favourite styles** — star any entry in a style dropdown to keep it at the top of every list.
-- Full in-game panel (English + Russian) and hotkeys: **Ctrl+M** toggle tool, **Y** cycle line style, **A** area mode, **U** cycle area fill.
+- Full in-game panel (English, Russian and Brazilian Portuguese) and hotkeys: **Ctrl+M** toggle tool, **Y** cycle line style, **A** area mode, **U** cycle area fill.
 
 ## Automatic markings
 Ordinary city roads with 3 m lanes get proper edge lane markings — the same way highways do — so parking, sidewalks and stops react correctly. Parking lane markings included. In North American-theme cities, one-way and divided roads (highways included) also get the US-style yellow line along the left, median-side edge — optional, on by default; European themes are unaffected.
@@ -50,7 +50,7 @@ The G87 marking packs and the [G87] Vanilla Curb pack ship as dependencies and i
 - **Заливки областей** по обведённому полигону — точки цепляются к концам полос, углам бордюров и пересечениям линий, рёбра повторяют кривизну линий. Вафельная разметка, белая и жёлтая штриховка, зелёная велополоса, красная автобусная полоса, бетон, трава, песок, тротуарная плитка, плитка, асфальтовая заплатка (нужен отдельный мод «G87 Vanilla Asphalt Pavement»).
 - **Скрытие ванильной разметки** на отдельном перекрёстке, чтобы начать с чистого листа.
 - **Пины любимых стилей** — звёздочка в любом дропдауне стилей закрепляет стиль наверху всех списков.
-- Полноценная панель в игре (английский + русский) и горячие клавиши: **Ctrl+M** — инструмент, **Y** — стиль линии, **A** — режим области, **U** — заливка области.
+- Полноценная панель в игре (английский, русский и бразильский португальский) и горячие клавиши: **Ctrl+M** — инструмент, **Y** — стиль линии, **A** — режим области, **U** — заливка области.
 
 ## Автоматическая разметка
 Обычные городские дороги с полосами 3 м получают краевую разметку — как на шоссе, — поэтому парковка, тротуары и остановки работают корректно. Разметка парковочных полос включена. В городах с североамериканской темой односторонние и разделённые дороги (включая шоссе) дополнительно получают жёлтую линию вдоль левого края, со стороны медианы, — по американской конвенции; опция включена по умолчанию, европейские темы не затрагиваются.
