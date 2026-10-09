@@ -55,6 +55,10 @@ namespace TownRoadLane.Systems.Emission
         // after that only lines whose roads exist but aren't ready yet.
         private float _retryAnyUntil;
         private const float kPostLoadRetrySeconds = 30f;
+        // The unresolved-solid branch sets _passPending, so it runs again next frame. Warn once
+        // per streak, after the prefab has had time to appear, instead of once a frame.
+        private int _solidUnresolvedTicks;
+        private const int kSolidWarnTicks = 600;
         private readonly System.Text.StringBuilder _churnDetail = new System.Text.StringBuilder();
         // One warning per (node, line) over the PathNode slot capacity: the check fails every
         // tick for such a line, so unthrottled logging would flood.
@@ -100,6 +104,7 @@ namespace TownRoadLane.Systems.Emission
         {
             base.OnGameLoaded(serializationContext);
             _passPending = true;
+            _solidUnresolvedTicks = 0;
             _retryAnyUntil = UnityEngine.Time.realtimeSinceStartup + kPostLoadRetrySeconds;
         }
 
@@ -147,11 +152,13 @@ namespace TownRoadLane.Systems.Emission
                 bool isNA = IsNATheme();
                 if (!TryResolveStylePrefab(MarkingStyle.Solid, isNA, out var solidPair))
                 {
-                    log.Warn("segment-emission: solid prefab not resolved yet — deferring entire tick");
                     _passPending = true;
+                    if (++_solidUnresolvedTicks == kSolidWarnTicks)
+                        log.Warn($"segment-emission: solid prefab still unresolved after {kSolidWarnTicks} ticks — the pass keeps retrying quietly until it loads");
                 }
                 else
                 {
+                    _solidUnresolvedTicks = 0;
                     var prefabByStyle = new Dictionary<MarkingStyle, (Entity prefab, EntityArchetype arch)>
                     {
                         [MarkingStyle.Solid] = solidPair,
@@ -186,17 +193,17 @@ namespace TownRoadLane.Systems.Emission
                         created++;
                         // Churn diagnostics: a small steady trickle of re-creations means
                         // something keeps deleting these exact sublanes.
-                        if (created <= 12)
+                        if (created <= 12 && log.isDebugEnabled)
                             _churnDetail.Append(created > 1 ? ", " : "").Append($"node#{node.Index} L{lineIndex} S{segIdx} P{pass} {style}");
                     }
                     if (waitingForCurve > 0) _passPending = true;
-                    if (waitingForCurve != _lastWaitingForCurve)
+                    if (waitingForCurve != _lastWaitingForCurve && log.isDebugEnabled)
                         log.Debug($"segment-emission: {waitingForCurve} sublane(s) waiting for a buildable curve");
                     _lastWaitingForCurve = waitingForCurve;
                 }
             }
 
-            if (created > 0 || deleted > 0)
+            if ((created > 0 || deleted > 0) && log.isDebugEnabled)
             {
                 log.Debug($"segment-emission: +{created} created, -{deleted} deleted (wanted={wanted.Count - created} unmet, existing={_ourSubLanes.CalculateEntityCount()})");
                 if (_churnDetail.Length > 0 && created <= 12)

@@ -45,6 +45,14 @@ namespace TownRoadLane.Systems.Topology
         // Ticks each node has been waiting for its edges to become ready (see RecomputeIfChanged).
         private readonly Dictionary<Entity, int> _deferredTicks = new Dictionary<Entity, int>();
         private const int kDeferredWarnTicks = 600;
+        // Ring failures are logged once per (node, area, reason) until that area builds a piece.
+        // A hash match already skips the rebuild; this covers a node whose inputs keep changing
+        // while the ring stays unresolvable.
+        private readonly HashSet<(Entity node, int area, int reason)> _areaWarned =
+            new HashSet<(Entity, int, int)>();
+        private const int kWarnRingThrew = 0;
+        private const int kWarnRingMissing = 1;
+        private const int kWarnRingTiny = 2;
 
         protected override void OnCreate()
         {
@@ -104,6 +112,7 @@ namespace TownRoadLane.Systems.Topology
             // Entity indices are reused between saves, so counters left from the previous save
             // would belong to unrelated nodes.
             _deferredTicks.Clear();
+            _areaWarned.Clear();
         }
 
         protected override void OnUpdate()
@@ -125,7 +134,8 @@ namespace TownRoadLane.Systems.Topology
                     if (!alive.Contains(node)) gone.Add(node);
                 for (int i = 0; i < gone.Count; i++) _deferredTicks.Remove(gone[i]);
             }
-            if (rewritten > 0) log.Debug($"MarkingAreaTopologySystem: recomputed pieces on {rewritten} node(s)");
+            if (rewritten > 0 && log.isDebugEnabled)
+                log.Debug($"MarkingAreaTopologySystem: recomputed pieces on {rewritten} node(s)");
         }
 
         private bool RecomputeIfChanged(Entity node)
@@ -330,7 +340,8 @@ namespace TownRoadLane.Systems.Topology
                     }
                     catch (System.Exception e)
                     {
-                        log.Warn($"area-topology node#{node.Index} area#{a}: ring builder threw ({e.GetType().Name}: {e.Message}), keeping cached pieces");
+                        if (_areaWarned.Add((node, a, kWarnRingThrew)))
+                            log.Warn($"area-topology node#{node.Index} area#{a}: ring builder threw ({e.GetType().Name}: {e.Message}), keeping cached pieces");
                     }
                 }
                 if (outerRing == null || outerRing.Count < 3)
@@ -339,7 +350,7 @@ namespace TownRoadLane.Systems.Topology
                     // Keep the old pieces as they are: the cached geometry is the best available,
                     // and the per-piece visibility survives.
                     var carried = oldPiecesByArea[a];
-                    if (carried.Count == 0)
+                    if (carried.Count == 0 && _areaWarned.Add((node, a, kWarnRingMissing)))
                         log.Warn($"area-topology node#{node.Index} area#{a}: outer ring unresolvable and no cached pieces — this area will have no fill");
                     for (int p = 0; p < carried.Count; p++)
                     {
@@ -355,11 +366,17 @@ namespace TownRoadLane.Systems.Topology
                     continue;
                 }
 
-                if (math.abs(SignedAreaXZ(outerRing)) < kMinPieceAreaM2)
+                float areaM2 = math.abs(SignedAreaXZ(outerRing));
+                if (areaM2 < kMinPieceAreaM2)
                 {
-                    log.Warn($"area-topology node#{node.Index} area#{a}: ring area {math.abs(SignedAreaXZ(outerRing)):F2} m² below {kMinPieceAreaM2} m² minimum — piece dropped");
+                    if (_areaWarned.Add((node, a, kWarnRingTiny)))
+                        log.Warn($"area-topology node#{node.Index} area#{a}: ring area {areaM2:F2} m² below {kMinPieceAreaM2} m² minimum — piece dropped");
                     continue;
                 }
+
+                _areaWarned.Remove((node, a, kWarnRingThrew));
+                _areaWarned.Remove((node, a, kWarnRingMissing));
+                _areaWarned.Remove((node, a, kWarnRingTiny));
 
                 float3 c = PolygonUtils.CentroidXZ(outerRing);
                 bool visible = LookupInheritedVisibility(oldPiecesByArea[a], c, defaultVisible: true);
@@ -412,7 +429,8 @@ namespace TownRoadLane.Systems.Topology
             areasSnap.Dispose();
             areaVertsSnap.Dispose();
 
-            log.Debug($"area-topology node#{node.Index}: {areaCount} area(s) → {newPieces.Count} piece(s)");
+            if (log.isDebugEnabled)
+                log.Debug($"area-topology node#{node.Index}: {areaCount} area(s) → {newPieces.Count} piece(s)");
             return true;
         }
 

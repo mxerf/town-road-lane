@@ -236,7 +236,8 @@ namespace TownRoadLane.Systems.Emission
                 }
             }
 
-            log.Debug($"[area-emission] pass ({reason}): wanted={wanted.Count} existing={_ourAreas.CalculateEntityCount()}");
+            if (log.isDebugEnabled)
+                log.Debug($"[area-emission] pass ({reason}): wanted={wanted.Count} existing={_ourAreas.CalculateEntityCount()}");
             var ecb = new EntityCommandBuffer(Allocator.Temp);
 
             // Delete stale, duplicate and restyled fills.
@@ -319,7 +320,7 @@ namespace TownRoadLane.Systems.Emission
             ecb.Dispose();
             _fillCountAfterPass = _ourAreas.CalculateEntityCount();
 
-            if (spawned > 0 || deleted > 0)
+            if ((spawned > 0 || deleted > 0) && log.isDebugEnabled)
             {
                 int resolved = 0;
                 for (int i = 0; i < kStyleCount; i++) if (_stylePrefabEntities[i] != Entity.Null) resolved++;
@@ -449,12 +450,15 @@ namespace TownRoadLane.Systems.Emission
                     _stylePrefabEntities[s] = ents[i];
                     // Fills already spawned as concrete switch to the real style on the next pass.
                     _passPending = true;
-                    // Priority and layer decide whether the fill can draw on the road at all:
-                    // without the Roads layer it ends up under the road surface.
-                    string renderInfo = sp.TryGet<RenderedArea>(out var ra) && ra != null
-                        ? $" prio={ra.m_RendererPriority} layer={ra.m_DecalLayerMask}"
-                        : " (no RenderedArea)";
-                    log.Debug($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}{renderInfo}");
+                    if (log.isDebugEnabled)
+                    {
+                        // Priority and layer decide whether the fill can draw on the road at all:
+                        // without the Roads layer it ends up under the road surface.
+                        string renderInfo = sp.TryGet<RenderedArea>(out var ra) && ra != null
+                            ? $" prio={ra.m_RendererPriority} layer={ra.m_DecalLayerMask}"
+                            : " (no RenderedArea)";
+                        log.Debug($"[area-emission] resolved style {s} = '{sp.name}' entity #{ents[i].Index}{renderInfo}");
+                    }
                 }
             }
         }

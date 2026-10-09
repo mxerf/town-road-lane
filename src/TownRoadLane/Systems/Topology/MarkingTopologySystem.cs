@@ -113,7 +113,8 @@ namespace TownRoadLane.Systems.Topology
                     case RebuildResult.Deferred: _retryPending = true; break;
                 }
             }
-            if (rewritten > 0) log.Debug($"MarkingTopologySystem: recomputed segments on {rewritten} node(s)");
+            if (rewritten > 0 && log.isDebugEnabled)
+                log.Debug($"MarkingTopologySystem: recomputed segments on {rewritten} node(s)");
         }
 
         private enum RebuildResult { Unchanged, Rebuilt, Deferred }
@@ -301,7 +302,8 @@ namespace TownRoadLane.Systems.Topology
             beziers.Dispose();
             bezierValid.Dispose();
 
-            log.Debug($"topology node#{node.Index}: {lineCount} line(s) → {newSegments.Count} segment(s)");
+            if (log.isDebugEnabled)
+                log.Debug($"topology node#{node.Index}: {lineCount} line(s) → {newSegments.Count} segment(s)");
             return RebuildResult.Rebuilt;
         }
 
