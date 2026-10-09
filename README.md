@@ -21,7 +21,7 @@ Click any intersection and draw your own markings:
 - **Area fills** over any polygon you outline — junction box (yellow box), white/yellow hatching, green bike lane, red bus lane, concrete, grass, sand, pavement, tiles, asphalt patch.
 - **Hide vanilla markings** per intersection to start from a clean slate.
 - **Pin favourite styles** — star any entry in a style dropdown to keep it at the top of every list.
-- In-game panel (English + Russian) and hotkeys: `Ctrl+M` toggle tool, `Y` cycle line style, `A` area mode, `U` cycle area fill.
+- In-game panel (English, Russian and Brazilian Portuguese) and hotkeys: `Ctrl+M` toggle tool, `Y` cycle line style, `A` area mode, `U` cycle area fill.
 
 ![Area mode: outlining a traffic island between anchor dots](src/TownRoadLane/Properties/Screenshots/TRL_a3fa8fbf.jpg)
 

@@ -61,6 +61,7 @@ namespace TownRoadLane
             Settings.RegisterInOptionsUI();
             GameManager.instance.localizationManager.AddSource("en-US", new LocaleEN(Settings));
             GameManager.instance.localizationManager.AddSource("ru-RU", new LocaleRU(Settings));
+            GameManager.instance.localizationManager.AddSource("pt-BR", new LocalePTBR(Settings));
             AssetDatabase.global.LoadSettings(nameof(TownRoadLane), Settings, settingDefaults);
             // A decode failure silently falls back to SetDefaults(), so log what the load actually
             // produced; user reports then show the real state.
