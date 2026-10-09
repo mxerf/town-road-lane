@@ -45,13 +45,14 @@ namespace TownRoadLane.Components
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
         {
-            reader.Read(out int _);
+            reader.Read(out int version);
             reader.Read(out areaIndex);
             reader.Read(out pieceIndex);
             reader.Read(out visible);
             reader.Read(out firstVertex);
             reader.Read(out vertexCount);
             reader.Read(out centroid);
+            ComponentVersion.Note(version, 1, kVersion, nameof(MarkingAreaPiece));
         }
     }
 
@@ -75,8 +76,9 @@ namespace TownRoadLane.Components
 
         public void Deserialize<TReader>(TReader reader) where TReader : IReader
         {
-            reader.Read(out int _);
+            reader.Read(out int version);
             reader.Read(out position);
+            ComponentVersion.Note(version, 1, kVersion, nameof(MarkingAreaPieceVertex));
         }
     }
 
