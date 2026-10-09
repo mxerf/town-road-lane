@@ -28,9 +28,8 @@ namespace TownRoadLane.Systems.Topology
     /// style) against <see cref="MarkingTopologyState"/>. The per-node scan only runs on frames
     /// where a line buffer or a state changed, a node has no state yet (after a load, or when
     /// another mod clears it to force a rebuild), or a node is waiting for its roads.
+    /// Order against migration and emission is the UpdateSystem registration in Mod.OnLoad.
     /// </summary>
-    [UpdateAfter(typeof(MarkingPairMigrationSystem))]
-    [UpdateBefore(typeof(MarkingSegmentEmissionSystem))]
     public partial class MarkingTopologySystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;

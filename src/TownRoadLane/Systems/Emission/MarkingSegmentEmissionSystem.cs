@@ -36,8 +36,8 @@ namespace TownRoadLane.Systems.Emission
     /// edges have no geometry for a few frames, so no line curve can be built yet; nothing in
     /// the marking buffers changes when it arrives, so the pass retries on its own while any
     /// such edge exists. A line whose road is gone for good does not keep it retrying.
+    /// It runs after MarkingTopologySystem via the UpdateSystem registration in Mod.OnLoad.
     /// </summary>
-    [UpdateAfter(typeof(MarkingTopologySystem))]
     public partial class MarkingSegmentEmissionSystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;

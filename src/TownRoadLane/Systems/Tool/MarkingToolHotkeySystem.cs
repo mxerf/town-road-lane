@@ -9,6 +9,7 @@ namespace TownRoadLane.Systems.Tool
     /// <summary>
     /// Polls the tool hotkey (Ctrl+M by default, rebindable in the mod settings) and the settings
     /// button, and toggles <see cref="MarkingNodeToolSystem"/> as the active tool.
+    /// Registered in ToolUpdate, ahead of the tool, so a press is applied in the tool phase.
     /// </summary>
     public partial class MarkingToolHotkeySystem : GameSystemBase
     {

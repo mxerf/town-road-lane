@@ -38,8 +38,9 @@ namespace TownRoadLane.Systems.Topology
     ///  - Area.m_Flags (clears NoTriangles) and the Game.Areas.Geometry component.
     ///
     /// If the ear-clip fails (self-intersecting ring) the vanilla triangles are left as they are.
+    /// It is registered with UpdateAfter GeometrySystem in Modification2B (Mod.OnLoad). The Unity
+    /// attribute is not what places it there.
     /// </summary>
-    [UpdateAfter(typeof(Game.Areas.GeometrySystem))]
     public partial class MarkingAreaTriangulationSystem : GameSystemBase
     {
         private static readonly ILog log = Mod.log;
@@ -99,6 +100,10 @@ namespace TownRoadLane.Systems.Topology
 
         protected override void OnUpdate()
         {
+            // GeometrySystem schedules TriangulateAreasJob and returns it on Dependency.
+            // This system reads Triangle on the main thread immediately afterwards.
+            World.GetExistingSystemManaged<Game.Areas.GeometrySystem>()?.Dependency.Complete();
+
             EntityQuery query;
             if (_loaded)
             {
